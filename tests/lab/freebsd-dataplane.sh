@@ -15,11 +15,25 @@ remote=sdremote$$
 interfaces=''
 jails=''
 clean() {
+    result=$?
     set +e
+    if [ "$result" -ne 0 ]; then
+        for node in $jails; do
+            echo "Failure diagnostics for $node"
+            jexec "$node" ifconfig -a inet
+            jexec "$node" netstat -rn -f inet
+            jexec "$node" arp -an
+            jexec "$node" sockstat -4
+            jexec "$node" pfctl -vvsr
+            jexec "$node" pfctl -a lab-steer -vvsr
+            jexec "$node" pfctl -ss -vv
+        done
+    fi
     for node in $jails; do jail -r "$node" >/dev/null 2>&1; done
     # FreeBSD returns surviving interfaces to the parent VNET on jail removal.
     for nic in $interfaces; do ifconfig "$nic" destroy >/dev/null 2>&1; done
     rm -rf "$work"
+    return "$result"
 }
 trap clean EXIT
 trap 'exit 1' HUP INT TERM
@@ -60,12 +74,19 @@ jexec "$firewall" sysctl net.inet.ip.forwarding=1
 # returns the observed source IP so each direction and NAT are asserted.
 printf 'echo stream tcp4 nowait root %s tcp-peer\n' "$work/tcp-peer" >"$work/inetd.conf"
 jexec "$remote" inetd -p "$work/inetd.pid" "$work/inetd.conf"
+if ! printf 'listener-test\n' | jexec "$remote" nc -n -N -w 3 192.0.2.162 7 | grep -Eq '^[0-9.]+ listener-test$'; then
+    echo 'The test TCP listener failed a local round trip' >&2
+    exit 1
+fi
+printf 'pass all no state\n' >"$work/remote.pf"
+jexec "$remote" pfctl -f "$work/remote.pf"
 jexec "$remote" pfctl -e
 jexec "$firewall" pfctl -e
 
 # Load this parent ruleset exactly once. All subsequent steering changes use
 # only the named anchor. Native NAT and the independent fallback remain intact.
 cat >"$work/main.pf" <<EOF
+set state-policy if-bound
 nat on $wan_a inet from 192.0.2.0/25 to any -> ($wan_a)
 nat on $wan_b inet from 192.0.2.0/25 to any -> ($wan_b)
 block all
@@ -105,7 +126,10 @@ request() {
     printf '%s\n' "$2" | jexec "$client" nc -n -N -w 3 "$1" 7
 }
 expect_roundtrip() {
-    response=$(request "$1" "$3")
+    response=$(request "$1" "$3") || {
+        echo "TCP transaction $3 could not connect to $1" >&2
+        return 1
+    }
     if [ "$response" != "$2 $3" ]; then
         echo "TCP transaction $3 expected peer $2, received: $response" >&2
         return 1
@@ -117,6 +141,7 @@ counter() {
     awk -v label="$1" '$1 == label && $3 > 0 {print; seen=1} END {exit !seen}'
 }
 
+expect_roundtrip 192.0.2.163 198.51.100.1 default-route-control
 steer a
 expect_roundtrip 192.0.2.162 198.51.100.1 initial-A
 jexec "$firewall" pfctl -a lab-steer -s labels | counter path-a
