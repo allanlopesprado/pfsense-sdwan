@@ -85,7 +85,7 @@ def exercise(work, stack):
         def granted():
             if not lease.exists():
                 return None
-            for issued in re.findall(r"ia-prefix\s+([a-f0-9:/]+)\s*\{", lease.read_text(), re.I):
+            for issued in re.findall(r"iaprefix\s+([a-f0-9:/]+)\s*\{", lease.read_text(), re.I):
                 parsed = ip_network(issued)
                 if parsed == prefix:
                     return parsed
