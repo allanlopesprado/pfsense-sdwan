@@ -45,12 +45,13 @@ if (count($registered) !== 1 || ($registered[0]["name"] ?? "") !== $service_name
 
 try {
     $config = sdwan_get_config();
-    $snapshot = sdwan_read_snapshot();
+    $snapshot = function_exists("sdwan_current_snapshot") ?
+        sdwan_current_snapshot($config, sdwan_gateways()) : sdwan_read_snapshot();
     if (($snapshot["config_revision"] ?? null) !== sdwan_config_revision($config)) {
         throw new RuntimeException();
     }
 } catch (Throwable $error) {
-    fwrite(STDERR, "No current SD-WAN sample matching the saved configuration.\n");
+    fwrite(STDERR, "No current SD-WAN sample matching the saved configuration and monitored gateways.\n");
     exit(1);
 }
 printf("Package, Services menu and service registered. Latest sample: %d seconds, %d members, %d policies.\n",
