@@ -10,6 +10,7 @@ $current = $requested !== '' ? $requested : ($sdwan['policies'][0]['name'] ?? ''
 $policy = $policies[$current] ?? null;
 $result = $snapshot['policies'][$current] ?? null;
 $slas = array_column($sdwan['slas'], null, 'name');
+$members = array_column($sdwan['members'], null, 'name');
 $pgtitle = [gettext('Services'), gettext('SD-WAN'), gettext('Diagnostics')];
 include('head.inc');
 sdwan_ui_tabs('diagnostics');
@@ -34,19 +35,38 @@ if (!$policies) {
 }
 if ($policy !== null):
 	$sla = $slas[$policy['sla']];
+	$selected = $result['selected'] ?? null;
+	$use_cost = $policy['strategy'] === 'cost';
+	$metrics = [
+		'rtt_ms' => [' ms', (float)$sla['latency_ms']],
+		'rttsd_ms' => [' ms', null],
+		'loss_pct' => ['%', (float)$sla['loss_pct']],
+	];
 ?>
 <div class="panel panel-default">
 	<div class="panel-heading"><h2 class="panel-title"><?=gettext('Results')?></h2></div>
 	<div class="panel-body">
-		<dl class="dl-horizontal">
-			<dt><?=gettext('Performance SLA')?></dt><dd><?=sdwan_ui_escape($sla['name'])?></dd>
-			<dt><?=gettext('Maximum RTT')?></dt><dd><?=sdwan_ui_escape($sla['latency_ms'])?> ms</dd>
-			<dt><?=gettext('Maximum loss')?></dt><dd><?=sdwan_ui_escape($sla['loss_pct'])?>%</dd>
-			<dt><?=gettext('Recommended member')?></dt><dd><?=sdwan_ui_escape($result['selected'] ?? '—')?></dd>
+		<div class="row">
+			<div class="col-sm-5">
+				<p><strong><?=gettext('Recommended member')?></strong><br>
+				<?php if ($selected !== null): ?>
+					<?=sdwan_ui_escape($selected)?><br><small><?=sdwan_ui_escape($result['reason'])?></small>
+				<?php else: ?>
+					<?= $result === null ? gettext('Awaiting evaluation') : gettext('No eligible member') ?>
+				<?php endif; ?></p>
+			</div>
+			<div class="col-sm-5">
+				<p><strong><?=gettext('Performance SLA')?></strong><br>
+				<?=sdwan_ui_escape($sla['name'])?><br>
+				<small><?=sdwan_ui_escape(sprintf(gettext('Maximum RTT: %1$s ms · Maximum loss: %2$s%%'), $sla['latency_ms'], $sla['loss_pct']))?></small></p>
+			</div>
 			<?php if ($result !== null): ?>
-			<dt><?=gettext('Selection reason')?></dt><dd><?=sdwan_ui_escape($result['reason'])?></dd>
+			<div class="col-sm-2">
+				<p><strong><?=gettext('Eligible members')?></strong><br>
+				<?=sdwan_ui_escape(sprintf(gettext('%1$d of %2$d'), count(array_keys($result['candidates'], 'Eligible', true)), count($policy['members'])))?></p>
+			</div>
 			<?php endif; ?>
-		</dl>
+		</div>
 		<?php if ($result === null) {
 			$notice = match (sdwan_ui_service_state()) {
 				'stopped' => gettext('The SD-WAN service is stopped.'),
@@ -55,22 +75,66 @@ if ($policy !== null):
 			};
 			print_info_box($notice, 'warning', false);
 		} ?>
-	<div class="table-responsive"><table class="table table-striped table-hover table-condensed sortable-theme-bootstrap" data-sortable>
-		<thead><tr><th scope="col"><?=gettext('Member')?></th><th scope="col"><?=gettext('Gateway state')?></th>
-		<th scope="col"><?=gettext('RTT')?></th><th scope="col"><?=gettext('Loss')?></th><th scope="col"><?=gettext('Evaluation')?></th></tr></thead><tbody>
-		<?php foreach ($policy['members'] as $member):
-			$reading = $snapshot['members'][$member] ?? [];
-			[$cell_class, $state_text] = sdwan_ui_gateway_state($reading['status'] ?? null);
-		?>
-			<tr><th scope="row"><?=sdwan_ui_escape($member)?></th>
-				<td class="<?=$cell_class?>"><?=sdwan_ui_escape($state_text)?></td>
-				<td><?=sdwan_ui_metric($reading['rtt_ms'] ?? null, ' ms')?></td>
-				<td><?=sdwan_ui_metric($reading['loss_pct'] ?? null, '%')?></td>
-				<td><?=sdwan_ui_escape($result['candidates'][$member] ?? gettext('Awaiting evaluation'))?></td></tr>
-		<?php endforeach; ?>
-		</tbody>
-	</table></div>
 	</div>
+	<?php if ($result !== null): ?>
+	<div class="table-responsive" tabindex="0" role="region" aria-label="<?=gettext('Member evaluation')?>">
+		<table class="table table-striped table-hover table-condensed sortable-theme-bootstrap" data-sortable>
+			<thead><tr>
+				<th scope="col"><?=gettext('Member / Gateway')?></th>
+				<th scope="col"><?=gettext('Decision')?></th>
+				<th scope="col"><?=gettext('Gateway status')?></th>
+				<th scope="col" class="text-right"><?=gettext('RTT')?></th>
+				<th scope="col" class="text-right" title="<?=gettext('RTT standard deviation')?>"><?=gettext('RTTsd')?></th>
+				<th scope="col" class="text-right"><?=gettext('Loss')?></th>
+				<?php if ($use_cost): ?><th scope="col" class="text-right"><?=gettext('Cost')?></th><?php endif; ?>
+			</tr></thead>
+			<tbody>
+			<?php foreach ($policy['members'] as $member):
+				$gateway = $members[$member]['gateway'] ?? null;
+				$reading = $snapshot['members'][$member] ?? [];
+				$status = $reading['status'] ?? null;
+				[$cell_class, $state_text] = sdwan_ui_gateway_state($status);
+				$candidate = $result['candidates'][$member] ?? null;
+				$recommended = $selected === $member;
+			?>
+				<tr>
+					<th scope="row"><?=sdwan_ui_escape($member)?>
+						<?php if ($gateway !== null && $gateway !== $member): ?><br><small><?=sdwan_ui_escape($gateway)?></small><?php endif; ?>
+					</th>
+					<td<?=$recommended ? ' class="bg-success"' : ''?>>
+						<?php if ($recommended): ?>
+							<strong><i class="fa-solid fa-check" aria-hidden="true"></i> <?=gettext('Recommended')?></strong>
+						<?php elseif ($candidate === 'Eligible'): ?>
+							<?=gettext('Eligible')?>
+						<?php elseif ($candidate !== null): ?>
+							<strong><?=gettext('Not eligible')?></strong><br><small><?=sdwan_ui_escape($candidate)?></small>
+						<?php else: ?>
+							<?=gettext('Awaiting evaluation')?>
+						<?php endif; ?>
+					</td>
+					<td class="<?=$cell_class?>"><?=sdwan_ui_escape($state_text)?></td>
+					<?php foreach ($metrics as $key => [$unit, $limit]):
+						$value = $reading[$key] ?? null;
+						$over_limit = $limit !== null && $value !== null && $value > $limit &&
+						    in_array($status, ['online', 'degraded'], true);
+					?>
+					<td class="text-right text-nowrap<?=$over_limit ? ' bg-warning' : ''?>" data-value="<?=sdwan_ui_escape($value)?>">
+						<?php if ($over_limit): ?>
+							<i class="fa-solid fa-triangle-exclamation" title="<?=gettext('Above the SLA limit')?>" aria-hidden="true"></i>
+							<span class="sr-only"><?=gettext('Above the SLA limit')?></span>
+						<?php endif; ?>
+						<?=sdwan_ui_metric($value, $unit)?>
+					</td>
+					<?php endforeach; ?>
+					<?php if ($use_cost): ?>
+					<td class="text-right"><?=sdwan_ui_escape($members[$member]['cost'] ?? '—')?></td>
+					<?php endif; ?>
+				</tr>
+			<?php endforeach; ?>
+			</tbody>
+		</table>
+	</div>
+	<?php endif; ?>
 </div>
 <?php endif;
 sdwan_ui_actions([

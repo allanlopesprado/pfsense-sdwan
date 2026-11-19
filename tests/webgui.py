@@ -91,7 +91,8 @@ def screenshots(directory, www, pages):
             worker.start()
             try:
                 for name, theme, size in [("status", "pfSense", "1440,900"), ("status", "pfSense-dark", "390,844"),
-                                          ("diagnostics", "pfSense", "1440,900"), ("members", "pfSense", "1440,900"),
+                                          ("diagnostics", "pfSense", "1440,900"), ("diagnostics", "pfSense-dark", "390,844"),
+                                          ("members", "pfSense", "1440,900"),
                                           ("members-edit", "pfSense-dark", "1440,900"), ("updates", "pfSense", "1440,900"),
                                           ("updates", "pfSense-dark", "390,844"), ("forwarding", "pfSense", "1440,900")]:
                     preview = name + "-" + theme
@@ -309,7 +310,7 @@ def run(php, classes, screenshot_dir=None):
         read_only = request("status", snapshot=snapshot, privileges={"/status_services.php": False})
         assert "/status_services.php" not in Choices(read_only).links and 'service-sdwan"' not in read_only and "Running" in read_only
         past = request("diagnostics", snapshot=snapshot, service_state="stopped")
-        assert "The SD-WAN service is stopped." in past and "2.00%" not in past
+        assert "The SD-WAN service is stopped." in past and 'aria-label="Member evaluation"' not in past
         print("ok - native service state distinguishes running, stopped, unregistered and read-only access")
         assert 'data-sortable' in fresh and "RTTsd" in fresh and 'class="action-buttons"' in fresh
         event_form = next((form for form in Choices(fresh).forms if form[0].get("action") == "/status_logs.php"), None)
@@ -325,7 +326,31 @@ def run(php, classes, screenshot_dir=None):
         delegated = request("status", privileges={"/firewall_rules.php": False}, snapshot=snapshot)
         assert "/sdwan/forwarding.php" not in Choices(delegated).links and 'form="sdwan-system-logs"' in delegated
         diagnostics = request("diagnostics", get={"policy": "VOICE"}, snapshot=snapshot)
+        decisions = re.findall(r'<tr>\s*<th scope="row">(.*?)</tr>', diagnostics, re.S)
         assert "Maximum RTT" in diagnostics and "Maximum loss" in diagnostics and "1.00 ms" in diagnostics
+        assert "2 of 2" in diagnostics and "Lowest configured cost within SLA" in diagnostics
+        assert len(decisions) == 2 and "backup" in decisions[0] and "GONE" in decisions[0]
+        assert "Recommended</strong>" in decisions[0] and "Eligible" in decisions[1], decisions
+        assert "RTTsd" in diagnostics and ">Cost</th>" in diagnostics
+
+        latency = {**config, "policies": [{**config["policies"][0], "strategy": "latency"}]}
+        failed = {**policy, "selected": None, "reason": "No eligible member",
+                  "eligible_count": 0, "path_status": "no_eligible",
+                  "candidates": {"backup": "RTT exceeds the SLA", "01": "Gateway is down"}}
+        unsuitable = {**snapshot, "members": {"backup": {**sample, "rtt_ms": 1.25, "loss_pct": 0.1},
+                                             "01": {**sample, "status": "down", "loss_pct": 100}},
+                      "policies": {"VOICE": failed}}
+        report = request("diagnostics", config=latency, snapshot=unsuitable)
+        decisions = re.findall(r'<tr>\s*<th scope="row">(.*?)</tr>', report, re.S)
+        assert "No eligible member" in report and "0 of 2" in report and ">Cost</th>" not in report
+        assert len(decisions) == 2 and "RTT exceeds the SLA" in decisions[0] and "Gateway is down" in decisions[1]
+        assert decisions[0].count('text-nowrap bg-warning') == 2 and 'text-nowrap bg-warning' not in decisions[1]
+        assert 'text-nowrap bg-warning' not in diagnostics, "Measurements equal to SLA limits must pass"
+        for args, notice in [({"snapshot": {**snapshot, "generated_at": 1}}, "No current sample for this policy"),
+                             ({"snapshot": snapshot, "service_state": "unregistered"}, "not registered")]:
+            report = request("diagnostics", **args)
+            assert notice in report and 'aria-label="Member evaluation"' not in report and "2 of 2" not in report
+        print("ok - diagnostics reports the policy decision, both SLA breaches, gateway state and sample availability")
         diagnostic_form = Choices(diagnostics)
         assert diagnostic_form.gets == 1 and diagnostic_form.posts == 1 and len(diagnostic_form.tokens) == 1
         assert all("__csrf_magic" not in values for form, values in diagnostic_form.forms if form.get("method") == "get")
@@ -381,7 +406,7 @@ def run(php, classes, screenshot_dir=None):
                     "policies": [{"name": "Office", "sla": "Voice", "members": ["Fiber", "LTE"], "strategy": "cost"}]}
             demo_snapshot = {"members": {"Fiber": {**sample, "rtt_ms": 15.2, "rttsd_ms": 1.1, "loss_pct": 0},
                                         "LTE": {**sample, "status": "degraded", "rtt_ms": 76.1, "rttsd_ms": 5.8}},
-                             "policies": {"Office": {**policy, "candidates": {"Fiber": "Eligible", "LTE": "RTT above SLA"},
+                             "policies": {"Office": {**policy, "candidates": {"Fiber": "Eligible", "LTE": "RTT exceeds the SLA"},
                                  "selected": "Fiber", "path_status": "degraded", "eligible_count": 1, "shared_underlay": False}}}
             pages = {page: request(page, config=demo, snapshot=demo_snapshot)
                      for page in ("status", "diagnostics", "members", "updates")}

@@ -4,6 +4,7 @@ Versões em ordem numérica, da mais recente para a mais antiga. Os pacotes de l
 
 | Versão | Principais mudanças | Notas |
 | --- | --- | --- |
+| 0.4.14 | Diagnóstico por gateway com recomendação, motivo, limites de SLA e medições destacadas. | [Notas](docs/releases/v0.4.14.md) |
 | 0.4.13 | Controles nativos de serviço na barra do SD-WAN e estado do observador em Status. | [Notas](docs/releases/v0.4.13.md) |
 | 0.4.12 | Serviço registrado como `sdwan` e atalhos nativos em Status → Services. | [Notas](docs/releases/v0.4.12.md) |
 | 0.4.11 | Correção do foco inicial do botão System Logs. | [Notas](docs/releases/v0.4.11.md) |
