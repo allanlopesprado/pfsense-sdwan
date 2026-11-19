@@ -138,6 +138,7 @@ def run(php, core, output, replay, family, links, vti=False):
         preview = json.loads(compile_rule("preview"))
         assert not preview["errors"], preview
         binding = preview["binding"]
+        binding["group"] = [binding["group"]]  # pfSense config.xml always lists <group>.
         for key in ("trackers", "gateways"):
             binding[key] = {"item": binding[key]}
         config["gateways/sdwan_bindings"] = {"item": [binding]}

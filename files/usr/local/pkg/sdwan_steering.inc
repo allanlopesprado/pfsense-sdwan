@@ -72,8 +72,16 @@ function sdwan_steering_rows(): array {
 	return $rows['item'];
 }
 
+/* pfSense treats <group> as a repeatable tag throughout config.xml. */
+function sdwan_steering_group($value): ?string {
+	if (is_array($value) && array_keys($value) === [0]) {
+		$value = $value[0];
+	}
+	return is_string($value) ? $value : null;
+}
+
 function sdwan_steering_decode(array $row): ?array {
-	$group = $row['group'] ?? null;
+	$group = sdwan_steering_group($row['group'] ?? null);
 	$policy = $row['policy'] ?? null;
 	$gateways = $row['gateways']['item'] ?? null;
 	$trackers = $row['trackers']['item'] ?? null;
@@ -169,7 +177,8 @@ function sdwan_steering_edit(string $group, ?string $policy, string $expected_re
 		}
 		$rows = sdwan_steering_rows();
 		if ($policy === null) {
-			$updated = array_values(array_filter($rows, static fn($row) => ($row['group'] ?? null) !== $group));
+			$updated = array_values(array_filter($rows, static fn($row) =>
+			    sdwan_steering_group($row['group'] ?? null) !== $group));
 			if ($updated === $rows) {
 				return ['This group has no saved binding.'];
 			}

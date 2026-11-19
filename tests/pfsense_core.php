@@ -83,6 +83,24 @@ foreach ([sdwan_empty_config(), $single] as $fixture) {
 }
 echo "ok - upstream backup/restore parser preserves single-item policy lists alongside IPsec and NAT\n";
 
+require_once $local . '/pkg/sdwan_steering.inc';
+$binding = [
+	'group' => 'SDWAN_LAN',
+	'policy' => 'calls',
+	'gateways' => ['item' => ['WAN', 'WAN2']],
+	'trackers' => ['item' => ['1795124068']],
+	'rules_revision' => str_repeat('a', 64),
+	'policy_revision' => str_repeat('b', 64),
+];
+$binding_xml = dump_xml_config(['gateways' => ['sdwan_bindings' => ['item' => [$binding]]]], 'pfsense');
+file_put_contents($temp . '/config.xml', $binding_xml);
+$stored_binding = parse_xml_config($temp . '/config.xml', 'pfsense')['gateways']['sdwan_bindings']['item'][0];
+verify($stored_binding['group'] === ['SDWAN_LAN'], 'Native XML reads group as a singleton list');
+verify(sdwan_steering_decode($stored_binding) === sdwan_steering_decode($binding), 'Saved binding decodes after native XML parsing');
+$stored_binding['group'][] = 'OTHER';
+verify(sdwan_steering_decode($stored_binding) === null, 'Ambiguous XML group is denied');
+echo "ok - native XML restores a forwarding binding without accepting ambiguous group names\n";
+
 require_once $local . '/pkg/sdwan_engine.inc';
 $system['interfaces'] = ['wan' => ['enable' => '', 'if' => 'em0']];
 $system['gateways']['gateway_item'] = [['name' => 'GW', 'interface' => 'wan', 'gateway' => '192.0.2.1']];
