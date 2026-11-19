@@ -43,4 +43,7 @@ jobs:
           release: "15.0"
           usesh: true
           prepare: env ASSUME_ALWAYS_YES=yes pkg bootstrap
-          run: sh tests/freebsd-install.sh
+          run: |
+            set -eu
+            sh tests/freebsd-install.sh
+            sh tests/lab/freebsd-dataplane.sh
