@@ -25,7 +25,6 @@ clean() {
             jexec "$node" arp -an
             jexec "$node" sockstat -4
             jexec "$node" pfctl -vvsr
-            jexec "$node" pfctl -a lab-steer -vvsr
             jexec "$node" pfctl -ss -vv
         done
     fi
@@ -83,44 +82,57 @@ jexec "$remote" pfctl -f "$work/remote.pf"
 jexec "$remote" pfctl -e
 jexec "$firewall" pfctl -e
 
-# Load this parent ruleset exactly once. All subsequent steering changes use
-# only the named anchor. Native NAT and the independent fallback remain intact.
-cat >"$work/main.pf" <<EOF
+# Like filter_configure(), load the complete ruleset at each change. Preserve
+# the native rule's position ahead of the broader independent route.
+cat >"$work/before.pf" <<EOF
 set state-policy if-bound
 nat on $wan_a inet from 192.0.2.0/25 to any -> ($wan_a)
 nat on $wan_b inet from 192.0.2.0/25 to any -> ($wan_b)
 block all
-anchor "lab-steer" quick
+EOF
+cat >"$work/after.pf" <<EOF
 # A later permissive native rule would allow either test destination via the
 # kernel default route. The package's no-path guard must precede it.
 pass in quick on $lan inet proto tcp from 192.0.2.11 to 192.0.2.128/25 port 7 label "baseline"
 pass out inet all
 EOF
-jexec "$firewall" pfctl -nf "$work/main.pf"
-jexec "$firewall" pfctl -f "$work/main.pf"
+load_rules() {
+    cat "$work/before.pf" "$work/selected.pf" "$work/after.pf" >"$work/main.pf"
+    jexec "$firewall" pfctl -nf "$work/main.pf"
+    jexec "$firewall" pfctl -f "$work/main.pf"
+}
+: >"$work/selected.pf"
+load_rules
 baseline() {
     jexec "$firewall" pfctl -sn
-    jexec "$firewall" pfctl -sr
+    jexec "$firewall" pfctl -sr | awk '!/label "(path-a|path-b|no-member)"/'
     jexec "$firewall" route -n get default | awk '/gateway:|interface:/ {print}'
 }
 baseline >"$work/baseline"
 
 steer() {
     case "$1" in
-        a) outbound=$wan_a; next_hop=198.51.100.2 ;;
-        b) outbound=$wan_b; next_hop=203.0.113.2 ;;
-        none) outbound='' ;;
+        a) outbound=$wan_a; next_hop=198.51.100.2; rule=path-a ;;
+        b) outbound=$wan_b; next_hop=203.0.113.2; rule=path-b ;;
+        none) outbound=''; rule=no-member ;;
         *) return 1 ;;
     esac
-    if [ -n "$outbound" ]; then
+    : >"$work/selected.pf"
+    if [ -n "${SDWAN_RENDERED_RULES:-}" ]; then
+        # The integration job provides the real pfSense filter compiler output.
+        # FreeBSD 15 supports ridentifier, so preserve the entire rule including
+        # its tracker, labels, flags and order. Substitute only device names.
+        test -s "$SDWAN_RENDERED_RULES/$rule.pf"
+        sed -e 's/\$LABLAN/'"$lan"'/g' -e "s/labwana/$wan_a/g" -e "s/labwanb/$wan_b/g" \
+            "$SDWAN_RENDERED_RULES/$rule.pf" >>"$work/selected.pf"
+    elif [ -n "$outbound" ]; then
         printf 'pass in quick on %s route-to (%s %s) inet proto tcp from 192.0.2.11 to 192.0.2.162 port 7 keep state label "path-%s"\n' \
-            "$lan" "$outbound" "$next_hop" "$1" >"$work/selected.pf"
+            "$lan" "$outbound" "$next_hop" "$1" >>"$work/selected.pf"
     else
         printf 'block drop in quick on %s inet proto tcp from 192.0.2.11 to 192.0.2.162 port 7 label "no-member"\n' \
-            "$lan" >"$work/selected.pf"
+            "$lan" >>"$work/selected.pf"
     fi
-    jexec "$firewall" pfctl -a lab-steer -nf "$work/selected.pf"
-    jexec "$firewall" pfctl -a lab-steer -f "$work/selected.pf"
+    load_rules
 }
 request() {
     printf '%s\n' "$2" | jexec "$client" nc -n -N -w 3 "$1" 7
@@ -141,10 +153,15 @@ counter() {
     awk -v label="$1" '$1 == label && $3 > 0 {print; seen=1} END {exit !seen}'
 }
 
+if [ -n "${SDWAN_RENDERED_RULES:-}" ]; then
+    echo 'Testing upstream pfSense filter compiler output in the FreeBSD VNET lab'
+else
+    echo 'Testing the reference PF rules in the FreeBSD VNET lab'
+fi
 expect_roundtrip 192.0.2.163 198.51.100.1 default-route-control
 steer a
 expect_roundtrip 192.0.2.162 198.51.100.1 initial-A
-jexec "$firewall" pfctl -a lab-steer -s labels | counter path-a
+jexec "$firewall" pfctl -s labels | counter path-a
 expect_roundtrip 192.0.2.163 198.51.100.1 baseline-A
 
 # Hold one TCP session open on A. After switching the rule to B, a second
@@ -183,7 +200,7 @@ test ! -s "$work/failed"
 jexec "$remote" pfctl -s labels | counter outage
 steer b
 expect_roundtrip 192.0.2.162 203.0.113.1 alternate-B
-jexec "$firewall" pfctl -a lab-steer -s labels | counter path-b
+jexec "$firewall" pfctl -s labels | counter path-b
 expect_roundtrip 192.0.2.163 198.51.100.1 unaffected-A
 
 printf 'pass all no state\n' >"$work/remote.pf"
@@ -197,11 +214,12 @@ if request 192.0.2.162 no-member >"$work/blocked"; then
     exit 1
 fi
 test ! -s "$work/blocked"
-jexec "$firewall" pfctl -a lab-steer -s labels | counter no-member
+jexec "$firewall" pfctl -s labels | counter no-member
 expect_roundtrip 192.0.2.163 198.51.100.1 guard-is-scoped
 steer a
 expect_roundtrip 192.0.2.162 198.51.100.1 recovered-A
-jexec "$firewall" pfctl -a lab-steer -s labels | counter path-a
+jexec "$firewall" pfctl -s labels | counter path-a
+expect_roundtrip 192.0.2.163 198.51.100.1 final-baseline-A
 jexec "$firewall" pfctl -s labels | counter baseline
 baseline >"$work/final"
 cmp "$work/baseline" "$work/final"
