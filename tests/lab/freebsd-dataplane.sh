@@ -90,7 +90,7 @@ jexec "$firewall" pfctl -e
 # the native rule's position ahead of the broader independent route.
 cat >"$work/before.pf" <<EOF
 set state-policy if-bound
-table <snort2c> persist
+table <snort2c>
 nat on $wan_a inet from 192.0.2.0/25 to any -> ($wan_a)
 nat on $wan_b inet from 192.0.2.0/25 to any -> ($wan_b)
 nat on $wan_c inet from 192.0.2.0/25 to any -> ($wan_c)

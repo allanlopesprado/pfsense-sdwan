@@ -117,6 +117,25 @@ def exercise(work, stack):
         'http.uri; content:"/observe"; startswith; endswith; sid:9900001; rev:1;)\n'
         f'drop http any any -> {APP} 80 (msg:"SD-WAN lab block"; flow:established,to_server; '
         'http.uri; content:"/denied"; startswith; endswith; sid:9900002; rev:1;)\n')
+    suricata = ("suricata", "-c", "/etc/suricata/suricata.yaml", "-S", str(rules), "-k", "none",
+                "--init-errors-fatal", "--set", "unix-command.enabled=no")
+    passive = work / "passive"
+    passive.mkdir()
+    detector = start(stack, passive, router, "suricata", *suricata, "-l", str(passive),
+                     "--pcap=lablan", "--set", "stream.inline=no")
+    for active in ("a", "b"):
+        if active == "b":
+            run(["ip", "-n", router, "link", "set", "wana", "down"])
+            select("b")
+        before = alert_counts(passive)[9900001, "allowed"]
+        wait_for(f"passive IDS alert and successful HTTP reply on WAN {active}",
+                 lambda: detector.poll() is None and request(client, "observe") and
+                 alert_counts(passive)[9900001, "allowed"] > before, 15)
+        print(f"ok - WAN {active}: passive PCAP IDS alerted and the application replied", flush=True)
+    stop_process(detector, signal.SIGTERM)
+    run(["ip", "-n", router, "link", "set", "wana", "up"])
+    select("a")
+
     run(inside(router, "nft", "-f", "-"), data=f"""table inet sdwan_inspection {{
         counter wan_a {{ }}
         counter wan_b {{ }}
@@ -128,9 +147,8 @@ def exercise(work, stack):
         }}
     }}
 """)
-    engine = start(stack, work, router, "suricata", "suricata", "-c", "/etc/suricata/suricata.yaml",
-                   "-S", str(rules), "-l", str(work), "-q", "7", "-k", "none",
-                   "--set", "stream.inline=yes", "--set", "unix-command.enabled=no")
+    engine = start(stack, work, router, "suricata", *suricata, "-l", str(work), "-q", "7",
+                   "--set", "stream.inline=yes")
     wait_for("Suricata forwarding the control request",
              lambda: engine.poll() is None and request(client, "allowed"), 18)
 
@@ -170,7 +188,7 @@ if __name__ == "__main__":
             with ExitStack() as stack:
                 exercise(work, stack)
         except Exception:
-            for name in ("suricata.log", "http.log"):
+            for name in ("passive/suricata.log", "suricata.log", "http.log"):
                 log = work / name
                 if log.exists():
                     print(name, log.read_text()[-3500:], flush=True)
