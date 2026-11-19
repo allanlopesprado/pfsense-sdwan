@@ -23,7 +23,7 @@ sdwan_log_event($ok ? 'stop' : 'error', [], 'status');
 require_once('config.inc');
 if (config_get_path('gateways/sdwan_bindings/item', [])) {
 	require_once('filter.inc');
-	if (function_exists('filter_sdwan_binding_api') && filter_sdwan_binding_api() === 1) {
+	if (function_exists('filter_sdwan_binding_api') && in_array(filter_sdwan_binding_api(), [1, 2], true)) {
 		// Queue the native reload outside the package database transaction.
 		filter_configure();
 	}

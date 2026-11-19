@@ -209,6 +209,70 @@ grep -Fqx '198.51.100.1 held-after' "$work/held"
 echo 'ok - an established session retains A while a new session uses B'
 steer a
 
+if [ -n "${SDWAN_RENDERED_RULES:-}" ]; then
+    # Keep an SD-WAN session and an unrelated native session on A. After the
+    # filter changes to B, recover only the sessions whose state carries the
+    # SD-WAN rule identifier and the retired route-to hop.
+    hold_request() {
+        scope=$1
+        (
+            printf '%s-before\n' "$scope"
+            for tick in $(jot 24); do
+                [ ! -f "$work/reconnect-release" ] || break
+                sleep 1
+            done
+            printf '%s-after\n' "$scope"
+        ) | jexec "$client" nc -n -N -w 28 "$2" 7
+    }
+    hold_request scoped 192.0.2.162 >"$work/scoped" &
+    scoped_pid=$!
+    hold_request control 192.0.2.163 >"$work/control-reconnect" &
+    control_pid=$!
+    for tick in $(jot 5); do
+        if grep -Fqx '198.51.100.1 scoped-before' "$work/scoped" &&
+           grep -Fqx '198.51.100.1 control-before' "$work/control-reconnect"; then break; fi
+        sleep 1
+    done
+    grep -Fqx '198.51.100.1 scoped-before' "$work/scoped"
+    grep -Fqx '198.51.100.1 control-before' "$work/control-reconnect"
+    jexec "$firewall" pfctl -vvss >"$work/states-reconnect"
+    if ! grep -Eq 'ridentifier[[:space:]]+41001([[:space:]]|$)' "$work/states-reconnect"; then
+        # FreeBSD 15's pfctl exposes state rule ordinals only. For the
+        # disposable test, resolve the ordinal in this same generation
+        # before changing the rules. The deployed parser uses ridentifier
+        # directly on pfSense and never guesses from rule order.
+        ordinal=$(jexec "$firewall" pfctl -vvsr | awk '/ridentifier 41001$/{sub(/^@/,"",$1); print $1}')
+        test -n "$ordinal"
+        awk -v ordinal="$ordinal" '{
+            print
+            if ($0 ~ ("(^|[[:space:]])rule " ordinal "([[:space:],]|$)")) print "    ridentifier 41001"
+        }' "$work/states-reconnect" >"$work/states-identifiers"
+        mv "$work/states-identifiers" "$work/states-reconnect"
+    fi
+    steer b
+    php -r '
+        require $argv[1];
+        foreach (sdwan_steering_state_ids(file($argv[2]), ["41001"], $argv[3], "198.51.100.2") as $id) {
+            echo $id, PHP_EOL;
+        }
+    ' "$(dirname "$0")/../../files/usr/local/pkg/sdwan_steering.inc" "$work/states-reconnect" "$wan_a" >"$work/state-ids"
+    test -s "$work/state-ids"
+    while IFS= read -r id; do
+        jexec "$firewall" pfctl -k id -k "$id" 2>&1 | grep -Ei 'killed [01] states?'
+    done <"$work/state-ids"
+    touch "$work/reconnect-release"
+    wait "$scoped_pid" || true
+    wait "$control_pid"
+    if grep -Fq 'scoped-after' "$work/scoped"; then
+        echo 'The retired SD-WAN state carried another transaction' >&2
+        exit 1
+    fi
+    grep -Fqx '198.51.100.1 control-after' "$work/control-reconnect"
+    expect_roundtrip 192.0.2.162 203.0.113.1 scoped-session-reconnected
+    steer a
+    echo 'ok - state recovery reconnected only the retired SD-WAN path and preserved an unrelated established session'
+fi
+
 # Drop remotely on only A. The independent destination remains usable on A.
 printf 'block drop in quick on %s inet proto tcp from 198.51.100.1 to 192.0.2.162 port 7 label "outage"\npass all no state\n' \
     "$remote_a" >"$work/remote.pf"
@@ -283,6 +347,25 @@ if [ -n "${SDWAN_RENDERED_RULES:-}" ]; then
     expect_roundtrip 192.0.2.163 198.51.100.1 three-wan-control
     steer a triple-
     expect_roundtrip 192.0.2.162 198.51.100.1 three-wan-recovered
+    weighted_rule() {
+        sed -e 's/\$LABLAN/'"$lan"'/g' -e "s/labwana/$wan_a/g" -e "s/labwanb/$wan_b/g" \
+            "$SDWAN_RENDERED_RULES/weighted-$1.pf" >"$work/selected.pf"
+        load_rules
+    }
+    weighted_rule pool
+    : >"$work/weighted-replies"
+    for seq in $(jot 18); do request 192.0.2.162 "weighted-$seq" >>"$work/weighted-replies"; done
+    awk '$1=="198.51.100.1"{a++} $1=="203.0.113.1"{b++} END{exit !(NR==18 && a==6 && b==12)}' "$work/weighted-replies"
+    weighted_rule backup
+    expect_roundtrip 192.0.2.162 203.0.113.1 only-eligible-weighted
+    weighted_rule blocked
+    if request 192.0.2.162 weighted-no-member >"$work/weighted-blocked"; then
+        echo 'An empty weighted pool allowed a new connection' >&2
+        exit 1
+    fi
+    expect_roundtrip 192.0.2.163 198.51.100.1 weighted-control
+    steer a triple-
+    echo 'ok - weighted TCP sessions used both paths in a 1:2 ratio and followed SLA loss'
     # The independent incoming services must answer on the arriving WAN,
     # despite the kernel default on A and a different steering decision.
     jexec "$client" inetd -p "$work/client-inetd.pid" "$work/inetd.conf"

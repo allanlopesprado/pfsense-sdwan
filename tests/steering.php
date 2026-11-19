@@ -61,6 +61,7 @@ verify(str_contains(sdwan_steering_preview($config, 'p', 'G')['errors'][0] ?? ''
 $current = $disk;
 verify(sdwan_steering_bind('p', 'G', $preview['revision']) !== [] && !$writes && !$pending, 'stock CE cannot activate forwarding');
 $abi = 1;
+$preview = sdwan_steering_preview($config, 'p', 'G');
 verify(sdwan_steering_bind('p', 'G', str_repeat('0', 64)) !== [] && !$writes, 'optimistic revision rejects an outdated binding');
 $fail = true;
 verify(sdwan_steering_bind('p', 'G', $preview['revision']) !== [] && !$pending && $current === $disk, 'failed persistence rolls back without a reload request');
@@ -165,11 +166,35 @@ verify(sdwan_steering_pf_status($edited_binding, $runtime, $inventory, [str_repl
     sdwan_steering_pf_status($edited_binding, $runtime, $inventory, [$loaded[0] . '0']) === 'pending' &&
     sdwan_steering_pf_status($edited_binding, [], $inventory, $loaded) === 'pending',
     'wrong next hop, wrong tracker and stale samples are never shown as applied');
+$pooled = ['revision' => sdwan_config_revision($edited_binding), 'gateway' => 'A', 'pool' => ['A', 'B']];
+$inventory['B'] = ['device' => 'igb1', 'address' => '192.0.2.2', 'weight' => 2];
+$weighted = 'pass in quick on igb2 route-to { ' . str_repeat('(igb0 192.0.2.1), ', 2) .
+    str_repeat('(igb1 192.0.2.2), ', 3) . '(igb1 192.0.2.2) } round-robin inet all ridentifier 301';
+verify(sdwan_steering_pf_status($edited_binding, $pooled, $inventory, [$weighted]) === 'applied' &&
+    sdwan_steering_pf_status($edited_binding, $pooled, $inventory, [str_replace('(igb0 192.0.2.1), ', '', $weighted)]) === 'pending',
+    'loaded PF verification checks each balancing route and native weight');
 $runtime['gateway'] = null;
 verify(sdwan_steering_pf_status($edited_binding, $runtime, $inventory, ['block drop in quick on igb2 inet all ridentifier 301']) === 'blocked' &&
     sdwan_steering_pf_status($edited_binding, $runtime, $inventory, $loaded) === 'pending' &&
     sdwan_steering_pf_status($edited_binding, $runtime, $inventory, null) === 'unavailable',
     'blocking is verified from PF and missing output is explicit');
+$states = [
+	'all tcp first -> second ESTABLISHED:ESTABLISHED',
+	'   age 00:00:04, anchor 1, rule 33',
+	'   id: 000000010000000a creatorid: 12345678',
+	'   route-to: 192.0.2.1@igb0',
+	'   ridentifier 301',
+	'all tcp third -> fourth ESTABLISHED:ESTABLISHED',
+	'   id: 000000010000000b creatorid: 12345678',
+	'   route-to: 192.0.2.1@igb0',
+	'   ridentifier 999',
+	'all tcp fifth -> sixth ESTABLISHED:ESTABLISHED',
+	'   id: 000000010000000c creatorid: 12345678',
+	'   route-to: 192.0.2.1@igb1',
+	'   ridentifier 301',
+];
+verify(sdwan_steering_state_ids($states, ['301'], 'igb0', '192.0.2.1') === ['000000010000000a/12345678'],
+    'state recovery matches the stable tracker, exact interface, next hop and unique state identity');
 $abi = 0;
 $current = $disk;
 verify(sdwan_steering_unbind('G', sdwan_steering_revision()) === [] && !sdwan_steering_bindings() &&

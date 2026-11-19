@@ -90,7 +90,12 @@ function sdwan_observe_once(): void {
 		$inventory = sdwan_gateways();
 		$members = array_column($config['members'], 'gateway');
 		$observations = sdwan_gateway_observations($members ?: array_keys($inventory), $inventory);
-		$snapshot = sdwan_evaluate($config, $observations, $started, $inventory);
+		$service_checks = [];
+		if (array_column($config['members'], 'probe_primary')) {
+			require_once('/usr/local/pkg/sdwan_probe.inc');
+			$service_checks = sdwan_probe_observe($config['members'], $inventory, $observations);
+		}
+		$snapshot = sdwan_evaluate($config, $observations, $started, $inventory, $service_checks);
 		$snapshot['config_revision'] = sdwan_config_revision($config);
 		$snapshot['gateway_inventory_revision'] = sdwan_gateway_inventory_revision($config, $inventory);
 		if (!$members) {

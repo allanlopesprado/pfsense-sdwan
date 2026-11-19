@@ -230,6 +230,7 @@ function sdwan_preflight_prefixes_overlap(?string $first, ?string $second): bool
 function sdwan_preflight_native_rules(array $native, string $group, string $family, array $uplinks, bool $vti): array {
 	$trackers = [];
 	$scope = [];
+	$rule_pairs = [];
 	$counts = [];
 	foreach ($native['rules'] as $rule) {
 		$tracker = $rule['tracker'] ?? null;
@@ -291,6 +292,7 @@ function sdwan_preflight_native_rules(array $native, string $group, string $fami
 			return sdwan_preflight_error("Place a permanent native block or reject directly after rule {$tracker}, with the same match, its own tracker and no gateway.");
 		}
 		$trackers[] = $tracker;
+		$rule_pairs[$tracker] = ['guard' => (string)$guard_id, 'action' => $guard['type']];
 		unset($rule['created'], $rule['updated'], $rule['descr']);
 		$rule['tracker'] = $tracker;
 		$scope[] = [$rule, $device, (string)$guard_id, $guard['type']];
@@ -298,7 +300,7 @@ function sdwan_preflight_native_rules(array $native, string $group, string $fami
 	if (!$trackers) {
 		return sdwan_preflight_error('Select a dedicated group already referenced by an enabled ingress pass rule.');
 	}
-	return ['errors' => [], 'trackers' => $trackers, 'scope' => $scope];
+	return ['errors' => [], 'trackers' => $trackers, 'scope' => $scope, 'rule_pairs' => $rule_pairs];
 }
 
 function sdwan_steering_preflight(array $config, string $policy, string $group, array $native): array {
@@ -333,6 +335,10 @@ function sdwan_steering_preflight(array $config, string $policy, string $group, 
 		}
 	}
 
+	$balance = ($policies[0]['strategy'] ?? null) === 'balance';
+	if ($balance && ($native['steering_abi'] ?? 0) !== 2) {
+		return sdwan_preflight_error('Weighted balancing requires native steering ABI 2.');
+	}
 	$group_members = [];
 	foreach ($groups[0]['item'] ?? [] as $item) {
 		$parts = is_string($item) ? explode('|', $item) : [];
@@ -340,7 +346,10 @@ function sdwan_steering_preflight(array $config, string $policy, string $group, 
 		    !in_array($parts[1], ['1', '2', '3', '4', '5'], true) || isset($group_members[$parts[0]])) {
 			return sdwan_preflight_error('The native group contains an invalid or duplicate gateway entry.');
 		}
-		$group_members[$parts[0]] = true;
+		$group_members[$parts[0]] = $parts[1];
+	}
+	if ($balance && count(array_unique($group_members)) !== 1) {
+		return sdwan_preflight_error('Place every balancing gateway in the same tier of the dedicated group.');
 	}
 	$members = array_column($config['members'] ?? [], 'gateway', 'name');
 	$paths = [];
@@ -438,5 +447,5 @@ function sdwan_steering_preflight(array $config, string $policy, string $group, 
 		'rules_revision' => hash('sha256', json_encode($scope, JSON_THROW_ON_ERROR)),
 		'group' => $group, 'policy' => $policy, 'gateways' => array_map('strval', array_keys($paths)),
 		'trackers' => $rules['trackers'],
-	]];
+	], 'rule_pairs' => $rules['rule_pairs']];
 }

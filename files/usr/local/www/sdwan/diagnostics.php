@@ -35,11 +35,13 @@ if (!$policies) {
 }
 if ($policy !== null):
 	$sla = $slas[$policy['sla']];
-	$selected = $result['selected'] ?? null;
+	$use_pool = $policy['strategy'] === 'balance';
+	$selected = $use_pool ? null : ($result['selected'] ?? null);
 	$use_cost = $policy['strategy'] === 'cost';
+	$show_checks = (bool)array_column(array_intersect_key($members, array_fill_keys($policy['members'], true)), 'probe_primary');
 	$metrics = [
 		'rtt_ms' => [' ms', (float)$sla['latency_ms']],
-		'rttsd_ms' => [' ms', null],
+		'rttsd_ms' => [' ms', isset($sla['rttsd_ms']) ? (float)$sla['rttsd_ms'] : null],
 		'loss_pct' => ['%', (float)$sla['loss_pct']],
 	];
 ?>
@@ -48,17 +50,21 @@ if ($policy !== null):
 	<div class="container-fluid">
 		<div class="row">
 			<div class="col-sm-5">
-				<p><strong><?=gettext('Recommended member')?></strong><br>
+				<p><strong><?=$use_pool ? gettext('Selection strategy') : gettext('Recommended member')?></strong><br>
 				<?php if ($selected !== null): ?>
 					<?=sdwan_ui_escape($selected)?><br><small><?=sdwan_ui_escape($result['reason'])?></small>
 				<?php else: ?>
-					<?=$result === null ? gettext('Awaiting evaluation') : gettext('No eligible member')?>
+					<?php if ($use_pool && !empty($result['eligible_count'])): ?>
+						<?=sdwan_ui_escape(gettext($result['reason']))?>
+					<?php else: ?>
+						<?=$result === null ? gettext('Awaiting evaluation') : gettext('No eligible member')?>
+					<?php endif; ?>
 				<?php endif; ?></p>
 			</div>
 			<div class="col-sm-5">
 				<p><strong><?=gettext('Performance SLA')?></strong><br>
 				<?=sdwan_ui_escape($sla['name'])?><br>
-				<small><?=sdwan_ui_escape(sprintf(gettext('Maximum RTT: %1$s ms · Maximum loss: %2$s%%'), $sla['latency_ms'], $sla['loss_pct']))?></small></p>
+				<small><?=sdwan_ui_escape(sprintf(gettext('Maximum RTT: %1$s ms · Maximum loss: %2$s%%'), $sla['latency_ms'], $sla['loss_pct']))?><?php if (isset($sla['rttsd_ms'])): ?><br><?=sdwan_ui_escape(sprintf(gettext('Maximum RTTsd: %s ms'), $sla['rttsd_ms']))?><?php endif; ?></small></p>
 			</div>
 			<?php if ($result !== null): ?>
 			<div class="col-sm-2">
@@ -86,6 +92,7 @@ if ($policy !== null):
 				<th scope="col" class="text-right"><?=gettext('RTT')?></th>
 				<th scope="col" class="text-right" title="<?=gettext('RTT standard deviation')?>"><?=gettext('RTTsd')?></th>
 				<th scope="col" class="text-right"><?=gettext('Loss')?></th>
+				<?php if ($show_checks): ?><th scope="col"><?=gettext('Service checks')?></th><?php endif; ?>
 				<?php if ($use_cost): ?><th scope="col" class="text-right"><?=gettext('Cost')?></th><?php endif; ?>
 			</tr></thead>
 			<tbody>
@@ -126,6 +133,13 @@ if ($policy !== null):
 						<?=sdwan_ui_metric($value, $unit)?>
 					</td>
 					<?php endforeach; ?>
+					<?php if ($show_checks): ?>
+					<td><?php foreach (['probe_primary' => gettext('Primary'), 'probe_secondary' => gettext('Secondary')] as $field => $label): ?>
+						<?php if (isset($members[$member][$field])): ?>
+						<div><?=sdwan_ui_escape($label)?> · <?=sdwan_ui_escape(gettext($reading['checks'][$field] ?? 'Unavailable'))?></div>
+						<?php endif; ?>
+					<?php endforeach; ?></td>
+					<?php endif; ?>
 					<?php if ($use_cost): ?>
 					<td class="text-right"><?=sdwan_ui_escape($members[$member]['cost'] ?? '—')?></td>
 					<?php endif; ?>

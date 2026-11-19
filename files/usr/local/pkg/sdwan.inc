@@ -155,6 +155,7 @@ function sdwan_gateways(): array {
 			'interface' => $interface,
 			'device' => $device,
 			'probe' => $probe,
+			...((int)($gateway['weight'] ?? 1) !== 1 ? ['weight' => (int)$gateway['weight']] : []),
 			'transport' => str_starts_with($device, 'ipsec') ? ($transports[$device] ?? '') : $interface,
 			'address' => $address,
 			'monitor' => !empty($gateway['monitor']) ? $gateway['monitor'] : $address,
@@ -197,6 +198,7 @@ function sdwan_validate_config(array $config, ?array $gateways, array $previous 
 		'slas' => ['name', 'latency_ms', 'loss_pct'],
 		'policies' => ['name', 'sla', 'members', 'strategy'],
 	];
+	$optional = ['slas' => ['rttsd_ms'], 'members' => ['probe_primary', 'probe_secondary']];
 	if (($config['version'] ?? null) !== SDWAN_CONFIG_VERSION ||
 	    array_diff_key($config, sdwan_empty_config())) {
 		return ['Unsupported SD-WAN configuration format.'];
@@ -204,6 +206,8 @@ function sdwan_validate_config(array $config, ?array $gateways, array $previous 
 
 	$names = [];
 	$used_gateways = [];
+	$used_probes = [];
+	$old_members_by_name = array_column($previous['members'] ?? [], null, 'name');
 	$member_families = [];
 	$changed_gateways = [];
 	$unavailable = [];
@@ -215,8 +219,8 @@ function sdwan_validate_config(array $config, ?array $gateways, array $previous 
 			return ["Invalid list in {$section}."];
 		}
 		foreach ($rows as $row) {
-			if (!is_array($row) || count($row) !== count($required) ||
-			    array_diff($required, array_keys($row)) || !sdwan_valid_name($row['name'])) {
+			if (!is_array($row) || array_diff($required, array_keys($row)) ||
+			    array_diff(array_keys($row), $required, $optional[$section] ?? []) || !sdwan_valid_name($row['name'])) {
 				return ["Invalid fields or name in {$section}."];
 			}
 			$name = $row['name'];
@@ -243,6 +247,24 @@ function sdwan_validate_config(array $config, ?array $gateways, array $previous 
 				$used_gateways[$gateway] = true;
 				$changed_gateways[$name] = ($old_gateways[$name] ?? null) !== $gateway;
 				$member_families[$name] = $gateways[$gateway]['family'] ?? '';
+				foreach (['probe_primary', 'probe_secondary'] as $probe_field) {
+					if (!array_key_exists($probe_field, $row)) {
+						continue;
+					}
+					require_once(__DIR__ . '/sdwan_probe.inc');
+					$probe = sdwan_probe_target($row[$probe_field]);
+					if ($probe === null || ($probe_field === 'probe_secondary' && !isset($row['probe_primary']))) {
+						return ["Enter a valid primary or secondary service check for {$name}."];
+					}
+					if (isset($gateways[$gateway]) && $probe['family'] !== $member_families[$name] &&
+					    (($old_members_by_name[$name][$probe_field] ?? null) !== $row[$probe_field] || $changed_gateways[$name])) {
+						return ["Service check addresses must match the gateway address family for {$name}."];
+					}
+					if (isset($used_probes[$probe['address']])) {
+						return ['Each service check needs a distinct destination address and a matching native host route.'];
+					}
+					$used_probes[$probe['address']] = true;
+				}
 				$cost = $row['cost'];
 				if ((!is_string($cost) && !is_int($cost)) ||
 				    !preg_match('/\A[0-9]{1,5}\z/', (string)$cost) || (int)$cost > 65535) {
@@ -253,9 +275,12 @@ function sdwan_validate_config(array $config, ?array $gateways, array $previous 
 				    !sdwan_valid_decimal($row['loss_pct'], 100, true)) {
 					return ["Invalid latency or loss threshold for {$name}."];
 				}
+				if (array_key_exists('rttsd_ms', $row) && !sdwan_valid_decimal($row['rttsd_ms'], 600000, true)) {
+					return ["Invalid RTT standard deviation threshold for {$name}."];
+				}
 			} else {
 				if (!sdwan_valid_name($row['sla']) || !isset($names['slas'][$row['sla']]) ||
-				    !in_array($row['strategy'], ['cost', 'latency'], true)) {
+				    !in_array($row['strategy'], ['cost', 'latency', 'balance'], true)) {
 					return ["Invalid SLA or strategy for {$name}."];
 				}
 				if (!is_array($row['members']) || !array_is_list($row['members']) || !$row['members']) {
@@ -312,6 +337,14 @@ function sdwan_save_config(array $candidate, string $expected_revision, bool $al
 		}
 		if ($current === $candidate) {
 			return [];
+		}
+		if (!$allow_forwarding_changes) {
+			$checks = static fn($config) => array_filter(array_map(
+			    static fn($row) => array_intersect_key($row, ['probe_primary' => true, 'probe_secondary' => true]),
+			    array_column($config['members'], null, 'name')));
+			if ($checks($current) !== $checks($candidate)) {
+				return ['Editing service checks requires access to edit firewall rules and gateway groups.'];
+			}
 		}
 		$binding_rows = null;
 		if (config_get_path('gateways/sdwan_bindings/item', [])) {

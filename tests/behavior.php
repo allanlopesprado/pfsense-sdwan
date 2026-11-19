@@ -83,6 +83,14 @@ $boundary = $gateways;
 $boundary['GW_A']['delay'] = '100ms';
 $boundary['GW_A']['loss'] = '2%';
 check('SLA limits are inclusive', selected($config, $boundary) === 'a');
+$variation = $config;
+$variation['slas'][0]['rttsd_ms'] = '0.5';
+check('an optional variation limit preserves the stored schema', sdwan_decode_config(sdwan_encode_config($variation)) === $variation);
+$unstable = $gateways;
+$unstable['GW_B']['stddev'] = '0.5ms';
+check('RTT variation excludes an unstable path and accepts its exact limit', selected($variation, $unstable) === 'b');
+$variation['slas'][0]['rttsd_ms'] = '-1';
+check('negative RTT variation thresholds are rejected', sdwan_validate_config($variation, $inventory) !== []);
 $invalid = $gateways;
 unset($invalid['GW_A']['delay']);
 check('missing RTT does not become zero', selected($config, $invalid) === 'b');
@@ -102,6 +110,38 @@ $tied['members'][1]['cost'] = '10';
 $tied['policies'][0]['members'] = ['b', 'a'];
 check('policy order breaks ties', selected($tied, $gateways) === 'b');
 check('missing monitoring data has no eligible member', selected($config, []) === null);
+
+$checks = $config;
+$checks['members'][0]['probe_primary'] = 'https://monitor.example.com/health 192.0.2.55';
+$checks['members'][0]['probe_secondary'] = 'dns://example.com 192.0.2.53';
+$inventory['GW_A']['family'] = 'inet';
+$inventory['GW_B']['family'] = 'inet';
+check('service check configuration survives saved XML structure',
+    sdwan_validate_config($checks, $inventory) === [] && sdwan_decode_config(sdwan_encode_config($checks)) === $checks);
+check('unknown service checks cannot make a configured link eligible', selected($checks, $gateways) === 'b');
+$result = sdwan_evaluate($checks, $gateways, 1700000000, $inventory, [
+    'a' => ['probe_primary' => 'Timed out', 'probe_secondary' => 'Passed'],
+]);
+check('a healthy secondary service check keeps a link eligible', $result['policies']['calls']['selected'] === 'a');
+$checks['members'][1]['probe_primary'] = 'dns://example.com 192.0.2.53';
+check('a service IP cannot take host routes on different members', sdwan_validate_config($checks, $inventory) !== []);
+check('service targets always require DNS or HTTPS and a concrete next destination',
+    sdwan_probe_target('http://example.com 192.0.2.53') === null &&
+    sdwan_probe_target('https://admin@example.com 192.0.2.53') === null &&
+    sdwan_probe_target('dns://example.com 127.0.0.1') === null &&
+    sdwan_probe_target('dns://example.com ::ffff:127.0.0.1') === null);
+$question = sdwan_probe_dns_question('example.com');
+$answer = pack('nnnnnn', 17, 0x8180, 1, 1, 0, 0) . $question .
+    pack('nnnNnC4', 0xc00c, 1, 1, 60, 4, 192, 0, 2, 43);
+check('DNS probe requires a response matching its transaction and question',
+    sdwan_probe_dns_answer($answer, 17, $question) && !sdwan_probe_dns_answer($answer, 18, $question) &&
+    !sdwan_probe_dns_answer($answer, 17, sdwan_probe_dns_question('another.example')));
+$route = "gateway: 192.0.2.1\ninterface: wan0\nflags: <UP,GATEWAY,HOST,DONE,STATIC>";
+check('service probes require an exact host route over the intended next hop',
+    sdwan_probe_route_matches($route, 'wan0', '192.0.2.1') &&
+    !sdwan_probe_route_matches($route, 'wan1', '192.0.2.1') &&
+    !sdwan_probe_route_matches($route, 'wan0', '192.0.2.2') &&
+    !sdwan_probe_route_matches(str_replace('HOST,', '', $route), 'wan0', '192.0.2.1'));
 
 $result = sdwan_evaluate($config, $gateways, 1700000000);
 check('time of evaluation is observable', $result['generated_at'] === 1700000000);

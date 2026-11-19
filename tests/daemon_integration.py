@@ -67,13 +67,14 @@ def stage(sandbox):
     # Only replace absolute installation paths. Keep the actual daemon and
     # snapshot read/write logic so this exercises the shipped CLI entry point.
     daemon = (ROOT / "files/usr/local/sbin/sdwand.php").read_text()
-    for name in ("sdwan.inc", "sdwan_engine.inc", "sdwan_log.inc"):
+    for name in ("sdwan.inc", "sdwan_engine.inc", "sdwan_log.inc", "sdwan_probe.inc"):
         installed = f"/usr/local/pkg/{name}"
         assert daemon.count(installed) == 1, f"Unknown daemon layout: {installed}"
         daemon = daemon.replace(installed, str(sandbox / name))
     (sandbox / "sdwand.php").write_text(daemon)
     shutil.copy(PKG / "sdwan.inc", sandbox)
     shutil.copy(PKG / "sdwan_log.inc", sandbox)
+    shutil.copy(PKG / "sdwan_probe.inc", sandbox)
     engine = (PKG / "sdwan_engine.inc").read_text()
     runtime = "/var/run/sdwan-observer.json"
     assert engine.count(runtime) == 1, "Unknown snapshot path"

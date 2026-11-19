@@ -141,8 +141,15 @@ function sdwan_candidate_reason(?array $member, ?array $sample, ?array $sla): st
 	if ($sample['rtt_ms'] > (float)$sla['latency_ms']) {
 		return 'RTT exceeds the SLA';
 	}
+	if (isset($sla['rttsd_ms']) && (!is_numeric($sample['rttsd_ms'] ?? null) ||
+	    $sample['rttsd_ms'] > (float)$sla['rttsd_ms'])) {
+		return 'RTT standard deviation exceeds the SLA or is unavailable';
+	}
 	if ($sample['loss_pct'] > (float)$sla['loss_pct']) {
 		return 'Loss exceeds the SLA';
+	}
+	if (($sample['checks'] ?? []) && !in_array('Passed', $sample['checks'], true)) {
+		return 'No configured service check passed';
 	}
 	return 'Eligible';
 }
@@ -157,12 +164,18 @@ function sdwan_path_status(int $configured, int $eligible): string {
 }
 
 /* Pure evaluation. Equal ranks retain policy member order. */
-function sdwan_evaluate(array $config, array $gateways, int $now, array $inventory = []): array {
+function sdwan_evaluate(array $config, array $gateways, int $now, array $inventory = [], array $checks = []): array {
 	$members = array_column($config['members'] ?? [], null, 'name');
 	$slas = array_column($config['slas'] ?? [], null, 'name');
 	$samples = [];
 	foreach ($members as $name => $member) {
 		$samples[$name] = sdwan_member_sample($gateways[$member['gateway']] ?? []);
+		if (isset($member['probe_primary'])) {
+			$fields = isset($member['probe_secondary']) ? ['probe_primary', 'probe_secondary'] : ['probe_primary'];
+			foreach ($fields as $field) {
+				$samples[$name]['checks'][$field] = $checks[$name][$field] ?? 'Unavailable';
+			}
+		}
 	}
 	$policies = [];
 	foreach ($config['policies'] ?? [] as $policy) {
@@ -201,6 +214,9 @@ function sdwan_evaluate(array $config, array $gateways, int $now, array $invento
 				case 'cost':
 					$rank = is_numeric($member['cost'] ?? null) ? (float)$member['cost'] : INF;
 					break;
+				case 'balance':
+					$rank = 0;
+					break;
 				case 'latency':
 					$rank = $sample['rtt_ms'];
 					break;
@@ -217,7 +233,11 @@ function sdwan_evaluate(array $config, array $gateways, int $now, array $invento
 		$policies[$policy['name']] = [
 			'selected' => $selected,
 			'reason' => $selected === null ? 'No eligible member' :
-			    ($policy['strategy'] === 'cost' ? 'Lowest configured cost within SLA' : 'Lowest measured RTT within SLA'),
+			    match ($policy['strategy']) {
+				'cost' => 'Lowest configured cost within SLA',
+				'balance' => 'Weighted connections across eligible gateways',
+				default => 'Lowest measured RTT within SLA',
+			},
 			'candidates' => $candidates,
 			'eligible_count' => $eligible,
 			'path_status' => sdwan_path_status(count($candidates), $eligible),
