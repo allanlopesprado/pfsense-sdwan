@@ -39,7 +39,7 @@ jobs:
       - name: Install DHCP and PPPoE implementations
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends iproute2 iputils-ping dnsmasq-base ppp pppoe busybox
+          sudo apt-get install -y --no-install-recommends iproute2 iputils-ping ethtool dnsmasq-base ppp pppoe busybox
           dpkg-query -W dnsmasq-base ppp pppoe busybox
       - name: Prepare PPPoE kernel driver
         if: matrix.protocol == 'pppoe'

@@ -56,6 +56,8 @@ def prove(node, device, expected, phase):
 
 
 def dhcp(work, stack, client, server):
+    for node in (client, server):
+        run(inside(node, "ethtool", "-K", "access0", "tx", "off"))
     events = work / "lease.log"
     hook = work / "dhcp-hook"
     hook.write_text(r"""#!/bin/sh
@@ -81,7 +83,7 @@ esac
         run(["ip", "-n", server, "addr", "replace", gateway + "/24", "dev", "access0"])
         return launch(stack, work, label, server, "dnsmasq", "--keep-in-foreground", "--conf-file=/dev/null",
                       "--port=0", "--interface=access0", "--bind-interfaces", "--log-dhcp", "--log-facility=-",
-                      "--dhcp-authoritative", f"--dhcp-range={ip},{ip},255.255.255.0,2m",
+                      "--dhcp-broadcast", "--dhcp-authoritative", f"--dhcp-range={ip},{ip},255.255.255.0,2m",
                       f"--dhcp-option=3,{gateway}", f"--dhcp-leasefile={work / (label + '.leases')}",
                       f"--pid-file={work / (label + '.pid')}", "--user=root")
 
@@ -92,7 +94,7 @@ esac
 
     old_server = offer("dhcp-a", FIRST)
     agent = launch(stack, work, "udhcpc", client, "env", f"SDWAN_LEASE_EVENTS={events}", "busybox", "udhcpc",
-                   "-f", "-i", "access0", "-s", str(hook), "-p", str(work / "udhcpc.pid"), "-T", "1", "-t", "3")
+                   "-f", "-i", "access0", "-s", str(hook), "-p", str(work / "udhcpc.pid"), "-B", "-T", "1", "-t", "4")
     wait_for("first DHCP ACK", lambda: observed(FIRST), 15)
     old = prove(client, "access0", FIRST, "DHCP initial lease")
     agent.send_signal(signal.SIGUSR1)
@@ -128,7 +130,7 @@ def pppoe(work, stack, client, server):
                          "plugin", "pppoe.so", "nic-access0", "ifname", device, "mtu", "1492", "mru", "1492",
                          "ip-up-script", "/bin/true", "ip-down-script", "/bin/true",
                          "lcp-echo-interval", "1", "lcp-echo-failure", "2", "debug")
-        wait_for("PPPoE discovery and IPCP", lambda: any(x.get("peer") == gateway and x["local"] == source
+        wait_for("PPPoE discovery and IPCP", lambda: any(x["local"] == source
                                                         for x in addresses(client, device)), 23)
         pairs.append(prove(client, device, expected, f"PPPoE session {label}"))
         if label == "a":

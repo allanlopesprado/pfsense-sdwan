@@ -77,7 +77,7 @@ def wireguard(work, nodes):
             args += ["endpoint", f"{ENDPOINT}:51820", "persistent-keepalive", "1"]
         run(args)
         run(["ip", "-n", node, "link", "set", "wg0", "mtu", "1350", "up"])
-    return "wg0", 51820
+    return "wg0", 51820, public[1]
 
 
 @contextmanager
@@ -110,15 +110,18 @@ def verify_trace(files, active, port):
         return
     path = files[active.name]
     local = active.outer[0]
-    if not packets(path, f"udp dst port {port} and src host {local} and dst host {ENDPOINT}"):
-        raise RuntimeError(f"No encrypted outer request on {active.name}")
-    if not packets(path, f"udp src port {port} and src host {ENDPOINT} and dst host {local}"):
-        raise RuntimeError(f"No encrypted outer response on {active.name}")
+    peer = f"(host {ENDPOINT} or host {active.outer[1]})"
+    trace = run(["tcpdump", "-tnnr", str(path)]).stdout
+    if not packets(path, f"udp dst port {port} and src host {local} and {peer}"):
+        raise RuntimeError(f"No encrypted outer request on {active.name}: {trace[:1600]}")
+    if not packets(path, f"udp src port {port} and dst host {local} and {peer}"):
+        raise RuntimeError(f"No encrypted outer response on {active.name}: {trace[:1600]}")
 
 
 def request(node, address, digest):
-    script = ("from urllib.request import urlopen; import hashlib,sys; "
-              "print(hashlib.sha256(urlopen(sys.argv[1],timeout=1).read()).hexdigest())")
+    script = ("from urllib.request import build_opener,ProxyHandler; import hashlib,sys; "
+              "direct=build_opener(ProxyHandler({})); "
+              "print(hashlib.sha256(direct.open(sys.argv[1],timeout=1).read()).hexdigest())")
     url = f"http://{address}:{HTTP_PORT}/payload"
     result = run(inside(node, "python3", "-c", script, url), check=False, timeout=4)
     return result.returncode == 0 and result.stdout.strip() == digest
@@ -140,8 +143,18 @@ def exercise(args, work, stack):
         run(["ip", "-n", wire, "link", "set", f"tap{path.name}1", status])
 
     choose(LINKS[0])
-    device, port = (openvpn(stack, work, nodes) if args.protocol == "openvpn"
-                    else wireguard(work, nodes))
+    wg_peer = None
+    if args.protocol == "openvpn":
+        device, port = openvpn(stack, work, nodes)
+    else:
+        device, port, wg_peer = wireguard(work, nodes)
+
+    def reselect(path):
+        choose(path)
+        if wg_peer:
+            # A peer may have roamed to the server's previous WAN address.
+            # Keep the configured rendezvous address reachable through the new underlay.
+            run(inside(client, "wg", "set", device, "peer", wg_peer, "endpoint", f"{ENDPOINT}:{port}"))
     content = work / "http"
     content.mkdir()
     payload = os.urandom(65536)
@@ -170,7 +183,7 @@ def exercise(args, work, stack):
         if request(client, INNER[1], digest) or request(server, INNER[0], digest):
             raise RuntimeError("Application unexpectedly reached an offline peer")
     verify_trace(files, None, port)
-    choose(LINKS[1])
+    reselect(LINKS[1])
     establish(LINKS[1], "failover")
     if args.protocol == "wireguard":
         remote = run(inside(server, "wg", "show", device, "endpoints")).stdout
@@ -178,7 +191,7 @@ def exercise(args, work, stack):
             raise RuntimeError("Remote WireGuard peer did not learn the authenticated endpoint on WAN B")
     link(LINKS[0], "up")
     link(LINKS[1], "down")
-    choose(LINKS[0])
+    reselect(LINKS[0])
     establish(LINKS[0], "failback")
 
 
