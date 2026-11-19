@@ -104,6 +104,9 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main' && startsWith(github.event.head_commit.message, 'Release ')
     needs: [offline, freebsd, ikev2]
     runs-on: ubuntu-24.04
+    concurrency:
+      group: sdwan-publish
+      cancel-in-progress: false
     permissions:
       contents: write
     steps:
@@ -127,12 +130,24 @@ jobs:
           tag="v$version"
           package="pfSense-pkg-SDWAN-$version.pkg"
           (cd dist && sha256sum --check "$package.sha256")
+          published_index=$(gh api "repos/$GITHUB_REPOSITORY/contents/dist/release.json?ref=main" --jq .content)
+          current_index=$(printf '%s' "$published_index" | base64 --decode | jq -cS .)
+          if [ "$current_index" != "$(jq -cS . dist/release.json)" ]; then
+            echo "A newer release index reached main while these checks were running." >&2
+            exit 1
+          fi
           if gh release view "$tag" >/dev/null 2>&1; then
+            tagged_blob=$(gh api "repos/$GITHUB_REPOSITORY/contents/dist/$package?ref=$tag" --jq .sha)
+            test "$tagged_blob" = "$(git rev-parse "HEAD:dist/$package")"
             dir=$(mktemp -d)
+            trap 'rm -f "$dir/$package" "$dir/$package.sha256"; rmdir "$dir"' EXIT
             gh release download "$tag" --dir "$dir" --pattern "$package" --pattern "$package.sha256"
             cmp "$dir/$package" "dist/$package"
             cmp "$dir/$package.sha256" "dist/$package.sha256"
             exit 0
+          fi
+          if tag_revision=$(gh api "repos/$GITHUB_REPOSITORY/commits/$tag" --jq .sha 2>/dev/null); then
+            test "$tag_revision" = "$GITHUB_SHA"
           fi
           gh release create "$tag" --target "$GITHUB_SHA" --latest \
             --title "SD-WAN para pfSense CE $version · Laboratório" \

@@ -7,6 +7,7 @@ from html.parser import HTMLParser
 import json
 import re
 from pathlib import Path
+from queue import Queue
 import shutil
 import subprocess
 import tempfile
@@ -65,9 +66,17 @@ def screenshots(directory, www, pages):
     if not chrome:
         raise RuntimeError("A Chromium browser is required to capture the WebGUI.")
     directory.mkdir(parents=True, exist_ok=True)
+    requests = Queue()
     class Handler(SimpleHTTPRequestHandler):
         def log_message(self, *args):
             pass
+        def do_POST(self):
+            body = self.rfile.read(int(self.headers["Content-Length"])).decode("utf-8")
+            requests.put((self.path, parse_qs(body)))
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(b"<title>Native system log fixture</title>")
     with tempfile.TemporaryDirectory() as folder:
         site = Path(folder)
         for assets in ("css", "vendor/bootstrap/css", "vendor/font-awesome", "vendor/jquery-ui"):
@@ -96,6 +105,18 @@ def screenshots(directory, www, pages):
                                     f"--screenshot={out.resolve()}", f"http://127.0.0.1:{server.server_port}/{preview}.html"],
                                    capture_output=True, check=True, timeout=35)
                     assert out.read_bytes().startswith(b"\x89PNG"), out
+                page = pages["status"].replace("</body>",
+                    '<script>document.querySelector(\'button[form="sdwan-system-logs"]\').click();</script></body>')
+                (site / "system-logs-click.html").write_text(page)
+                subprocess.run([chrome, "--headless", "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage",
+                                f"--user-data-dir={folder}/chrome", "--dump-dom",
+                                f"http://127.0.0.1:{server.server_port}/system-logs-click.html"],
+                               capture_output=True, check=True, timeout=35)
+                path, fields = requests.get(timeout=5)
+                assert path == "/status_logs.php" and fields.get("logfile") == ["system"], (path, fields)
+                assert fields.get("filterlogentries_process") == ["sdwan"] and fields.get("filterlogentries_submit") == ["1"]
+                assert fields.get("__csrf_magic")
+                print("ok - the browser submits a native System Logs POST with its filter and CSRF token")
             finally:
                 server.shutdown()
                 worker.join()
