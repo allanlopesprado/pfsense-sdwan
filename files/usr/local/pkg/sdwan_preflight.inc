@@ -190,6 +190,43 @@ function sdwan_preflight_unrestricted(array $endpoint): bool {
 	return array_key_exists('any', $endpoint) || preg_match('~/0+$~D', $endpoint['address'] ?? '') === 1;
 }
 
+/* Native endpoint validation permits a literal address or an ingress network.
+ * If the interface address is dynamic or unavailable, treat overlap as unknown. */
+function sdwan_preflight_rule_source(array $rule, array $interface, string $family): ?string {
+	if (isset($rule['source']['network'])) {
+		$suffix = $family === 'inet6' ? 'v6' : '';
+		return isset($interface['ipaddr' . $suffix], $interface['subnet' . $suffix])
+		    ? $interface['ipaddr' . $suffix] . '/' . $interface['subnet' . $suffix] : null;
+	}
+	return $rule['source']['address'] ?? null;
+}
+
+function sdwan_preflight_prefix(array $parts): ?array {
+	$address = @inet_pton($parts[0]);
+	if ($address === false) {
+		return null;
+	}
+	$width = strlen($address) * 8;
+	$bits = $parts[1] ?? (string)$width;
+	return ctype_digit($bits) && (int)$bits <= $width ? [$address, (int)$bits] : null;
+}
+
+function sdwan_preflight_prefixes_overlap(?string $first, ?string $second): bool {
+	$a = sdwan_preflight_prefix(explode('/', $first ?? '', 2));
+	$b = sdwan_preflight_prefix(explode('/', $second ?? '', 2));
+	if ($a === null || $b === null) {
+		return true;
+	}
+	if (strlen($a[0]) !== strlen($b[0])) {
+		return false;
+	}
+	$bits = min($a[1], $b[1]);
+	$bytes = intdiv($bits, 8);
+	$tail = $bits % 8;
+	return substr($a[0], 0, $bytes) === substr($b[0], 0, $bytes) &&
+	    ($tail === 0 || ((ord($a[0][$bytes]) ^ ord($b[0][$bytes])) >> (8 - $tail)) === 0);
+}
+
 function sdwan_preflight_native_rules(array $native, string $group, string $family, array $uplinks, bool $vti): array {
 	$trackers = [];
 	$scope = [];
@@ -226,6 +263,15 @@ function sdwan_preflight_native_rules(array $native, string $group, string $fami
 		    !sdwan_preflight_endpoint($rule['source'] ?? null, $family, $ingress) ||
 		    !sdwan_preflight_endpoint($rule['destination'] ?? null, $family, $ingress)) {
 			return sdwan_preflight_error("Rule {$tracker} requires an unscheduled match with literal addresses, the ingress subnet or any, and numeric ports.");
+		}
+		$vpn_sources = $vti ? [] : ($native['full_tunnel_sources'][$family] ?? []);
+		if ($vpn_sources) {
+			$source = sdwan_preflight_rule_source($rule, $native['interfaces'][$ingress], $family);
+			foreach ($vpn_sources as $vpn_source) {
+				if (sdwan_preflight_prefixes_overlap($source, $vpn_source)) {
+					return sdwan_preflight_error("Rule {$tracker} overlaps the local source of a policy-based IPsec full tunnel. Use native VPN rules for traffic covered by the tunnel.");
+				}
+			}
 		}
 		if ($vti && sdwan_preflight_unrestricted($rule['destination'])) {
 			return sdwan_preflight_error("Rule {$tracker} requires a specific protected destination for VTI steering.");

@@ -35,6 +35,37 @@ function sdwan_steering_request_reload(): bool {
 	}
 }
 
+/* A routed WAN rule must never take precedence over an overlapping policy-mode
+ * full tunnel. pfSense omits /0 selectors from its automatic negate table. */
+function sdwan_steering_full_tunnel_sources(array $phases, array $children): array {
+	$sources = [];
+	$peers = [];
+	foreach ($phases as $phase) {
+		if (isset($phase['ikeid']) && !isset($phase['disabled']) && !isset($phase['mobile'])) {
+			$peers[$phase['ikeid']] = true;
+		}
+	}
+	foreach ($children as $child) {
+		$mode = $child['mode'] ?? '';
+		$remote = $child['remoteid'] ?? [];
+		if (!isset($peers[$child['ikeid'] ?? '']) || isset($child['disabled']) || isset($child['mobile']) ||
+		    !in_array($mode, ['tunnel', 'tunnel6'], true) || !isset($remote['type'])) {
+			continue;
+		}
+		if (!str_ends_with((string)ipsec_idinfo_to_cidr($remote, true, $mode), '/0')) {
+			continue;
+		}
+		$local = $child['localid'] ?? [];
+		$family = $mode === 'tunnel6' ? 'inet6' : 'inet';
+		try {
+			$sources[$family][] = isset($local['type']) ? ipsec_idinfo_to_cidr($local, true, $mode) : null;
+		} catch (Throwable) {
+			$sources[$family][] = null;
+		}
+	}
+	return $sources;
+}
+
 function sdwan_steering_native(?array $inventory = null): array {
 	$paths = [
 		'groups' => 'gateways/gateway_group', 'rules' => 'filter/rule',
@@ -57,6 +88,14 @@ function sdwan_steering_native(?array $inventory = null): array {
 	$native['default4'] = config_get_path('gateways/defaultgw4', '');
 	$native['default6'] = config_get_path('gateways/defaultgw6', '');
 	$native['filtermode'] = config_get_path('ipsec/filtermode', '');
+	$policy_children = array_filter($native['phase2'], static fn($child) =>
+	    in_array($child['mode'] ?? '', ['tunnel', 'tunnel6'], true));
+	if ($policy_children) {
+		require_once('ipsec.inc');
+		if (ipsec_enabled()) {
+			$native['full_tunnel_sources'] = sdwan_steering_full_tunnel_sources($native['phase1'], $policy_children);
+		}
+	}
 	return $native;
 }
 

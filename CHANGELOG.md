@@ -4,6 +4,7 @@ Versions are listed newest first, in numeric order. The [dist directory](dist/) 
 
 | Version | Main changes | Notes |
 | --- | --- | --- |
+| 0.4.21 | Protect sources covered by policy-based IPsec full tunnels from direct WAN steering. | [Notes](docs/releases/v0.4.21.md) |
 | 0.4.20 | Preserve active forwarding bindings when pfSense reloads XML configuration. | [Notes](docs/releases/v0.4.20.md) |
 | 0.4.19 | Expire dashboard readings after a lost refresh and restart the observer after an unexpected exit. | [Notes](docs/releases/v0.4.19.md) |
 | 0.4.18 | Remove the preferred policy label and link from gateway rows in the dashboard widget. | [Notes](docs/releases/v0.4.18.md) |
