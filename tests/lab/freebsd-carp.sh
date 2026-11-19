@@ -1,5 +1,5 @@
 #!/bin/sh
-# Isolated IPv4 CARP failover with two VIPs and an application behind NAT.
+# Isolated IPv4 CARP failover with two VIPs, NAT and pfsync.
 set -eu
 
 if [ "$(uname -s)" != FreeBSD ] || [ "$(id -u)" != 0 ]; then
@@ -20,6 +20,7 @@ remote_ip=198.51.100.4
 jails=''
 links=''
 bridges=''
+session_pid=''
 repo=$(CDPATH='' cd "$(dirname "$0")/../.." && pwd)
 work=$(mktemp -d /tmp/sdwan-carp.XXXXXXXX)
 
@@ -27,13 +28,18 @@ cleanup() {
     result=$?
     trap - EXIT
     set +e
+    if [ -n "$session_pid" ]; then
+        kill "$session_pid" 2>/dev/null
+        wait "$session_pid" 2>/dev/null
+    fi
     if [ "$result" -ne 0 ]; then
         for jailname in $jails; do
             echo "CARP lab diagnostics for $jailname" >&2
             jexec "$jailname" ifconfig -a
             jexec "$jailname" arp -an
             jexec "$jailname" netstat -rn -f inet
-            jexec "$jailname" pfctl -ss
+            jexec "$jailname" pfctl -vv -ss
+            jexec "$jailname" netstat -s -p pfsync
         done
     fi
     for jailname in $jails; do jail -r "$jailname" >/dev/null 2>&1; done
@@ -44,7 +50,7 @@ cleanup() {
 }
 trap cleanup EXIT
 trap 'exit 1' HUP INT TERM
-for module in carp if_bridge if_epair pf; do kldload -n "$module"; done
+for module in carp if_bridge if_epair pf pfsync; do kldload -n "$module"; done
 
 make_jail() {
     jail -c name="$1" persist vnet allow.raw_sockets
@@ -87,6 +93,15 @@ attach "$first" 198.51.100.2 "$remote" "$wan_bridge"
 first_wan=$peer
 attach "$second" 198.51.100.3 "$remote" "$wan_bridge"
 second_wan=$peer
+first_sync=$(ifconfig epair create)
+second_sync=${first_sync%a}b
+links="$first_sync $second_sync $links"
+ifconfig "$first_sync" vnet "$first"
+ifconfig "$second_sync" vnet "$second"
+sync_a=203.0.113.1
+sync_b=203.0.113.2
+jexec "$first" ifconfig "$first_sync" inet "$sync_a/30" up
+jexec "$second" ifconfig "$second_sync" inet "$sync_b/30" up
 for node in "$first" "$second"; do
     jexec "$node" sysctl net.inet.carp.preempt=1 net.inet.ip.forwarding=1
 done
@@ -96,8 +111,24 @@ jexec "$first" ifconfig "$first_wan" inet add vhid "$wan_vhid" advbase 1 advskew
 jexec "$second" ifconfig "$second_wan" inet add vhid "$wan_vhid" advbase 1 advskew 150 "$wan_vip/29"
 jexec "$client" route -n add default "$vip"
 for node_wan in "$first:$first_wan" "$second:$second_wan"; do
-    printf 'nat on %s inet from 192.0.2.0/29 to %s -> %s\npass all\n' \
-        "${node_wan#*:}" "$remote_ip" "$wan_vip" >"$work/${node_wan%:*}.pf"
+    node=${node_wan%:*}
+    if [ "$node" = "$first" ]; then
+        lan_if=$first_if sync_if=$first_sync local_sync=$sync_a peer_sync=$sync_b hostid=0x51d0a001
+    else
+        lan_if=$second_if sync_if=$second_sync local_sync=$sync_b peer_sync=$sync_a hostid=0x51d0a002
+    fi
+    cat >"$work/$node.pf" <<EOF
+set state-policy floating
+set hostid $hostid
+nat on ${node_wan#*:} inet from 192.0.2.0/29 to $remote_ip -> $wan_vip
+block all
+pass quick on { $lan_if ${node_wan#*:} } inet proto carp no state
+pass quick on $sync_if inet proto pfsync from $peer_sync to $local_sync no state
+pass quick on $sync_if inet proto pfsync from $local_sync to $peer_sync no state
+pass inet proto icmp no state
+pass inet proto tcp to $remote_ip port 7 flags S/SA keep state
+EOF
+    jexec "$node" pfctl -nf "$work/$node.pf"
     jexec "${node_wan%:*}" pfctl -f "$work/${node_wan%:*}.pf"
     jexec "${node_wan%:*}" pfctl -e
 done
@@ -147,6 +178,46 @@ transaction() {
     echo "ok - $2 TCP request and reply used the shared WAN VIP after NAT"
 }
 
+wait_reply() {
+    for attempt in 1 2 3 4 5; do
+        if grep -Fqx "$wan_vip $2" "$work/$1.out"; then return 0; fi
+        sleep 1
+    done
+    echo "TCP reply missing for $2 on the open $1 connection" >&2
+    return 1
+}
+
+open_session() {
+    mkfifo "$work/$1.in"
+    # This nc process opens the socket once. Keep its stdin open across the outage.
+    jexec "$client" nc -n -N -w 45 -p "$2" "$remote_ip" 7 <"$work/$1.in" >"$work/$1.out" &
+    session_pid=$!
+    exec 3>"$work/$1.in"
+    printf '%s\n' "$1-before" >&3
+    wait_reply "$1" "$1-before"
+}
+
+close_session() {
+    exec 3>&-
+    kill "$session_pid" 2>/dev/null || :
+    wait "$session_pid" 2>/dev/null || :
+    session_pid=''
+}
+
+session_state() {
+    jexec "$1" pfctl -vv -ss | awk -v source="192.0.2.4:$2" -v target="$remote_ip:7" -v translation="$wan_vip:" '
+        /^[^[:space:]]/ { match_flow = index($0, source) && index($0, target) && index($0, translation) &&
+                                        /ESTABLISHED:ESTABLISHED/ }
+        match_flow && $1 == "id:" && $3 == "creatorid:" { print $2 "/" $4; match_flow = 0 }
+    '
+}
+
+disable_preferred_data() {
+    jexec "$first" ifconfig "$first_if" down
+    jexec "$first" ifconfig "$first_wan" down
+    wait_roles INIT MASTER
+}
+
 wait_roles MASTER BACKUP
 probe "$client" 192.0.2.2
 probe "$client" 192.0.2.3
@@ -154,10 +225,47 @@ probe "$client" "$vip"
 transaction "$client" initial
 echo 'ok - both node addresses and the initial VIP reply to the LAN client'
 
+# The same topology permits a fresh connection without pfsync, while an
+# already-established socket requires the original NAT state on the new owner.
+open_session unsynced 34240
+test -n "$(session_state "$first" 34240)"
+test -z "$(session_state "$second" 34240)"
+disable_preferred_data
+printf 'unsynced-after\n' >&3
+transaction "$client" unsynced-new
+sleep 3
+test -z "$(session_state "$second" 34240)"
+if grep -Fqx "$wan_vip unsynced-after" "$work/unsynced.out"; then
+    echo 'The negative-control connection survived without state synchronization' >&2
+    exit 1
+fi
+close_session
+echo 'ok - without pfsync only the fresh application connection survived takeover'
+jexec "$first" ifconfig "$first_if" up
+jexec "$first" ifconfig "$first_wan" up
+wait_roles MASTER BACKUP
+
+jexec "$first" ifconfig pfsync0 syncdev "$first_sync" syncpeer "$sync_b" maxupd 1 up
+jexec "$second" ifconfig pfsync0 syncdev "$second_sync" syncpeer "$sync_a" maxupd 1 up
+wait_roles MASTER BACKUP
+open_session synced 34241
+state=$(session_state "$first" 34241)
+test -n "$state"
+for attempt in 1 2 3 4 5; do
+    if [ "$(session_state "$second" 34241)" = "$state" ]; then break; fi
+    sleep 1
+done
+test "$(session_state "$second" 34241)" = "$state"
+echo "ok - the standby received the established TCP NAT state with the same PF id and creator $state"
+
 start=$(date +%s)
-jexec "$first" ifconfig "$first_if" down
-jexec "$first" ifconfig "$first_wan" down
-wait_roles INIT MASTER
+jexec "$first" ifconfig "$first_sync" down
+disable_preferred_data
+printf 'synced-after\n' >&3
+wait_reply synced synced-after
+test "$(session_state "$second" 34241)" = "$state"
+close_session
+echo 'ok - the same TCP socket completed a new request after both VIPs moved with the original NAT state'
 probe "$client" "$vip"
 transaction "$client" takeover
 elapsed=$(($(date +%s) - start))
@@ -177,6 +285,7 @@ probe "$fresh" "$vip"
 transaction "$fresh" new-client
 echo 'ok - a newly attached LAN client reached the VIP on the surviving peer'
 
+jexec "$first" ifconfig "$first_sync" up
 jexec "$first" ifconfig "$first_if" up
 jexec "$first" ifconfig "$first_wan" up
 wait_roles MASTER BACKUP
