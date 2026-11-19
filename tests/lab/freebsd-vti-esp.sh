@@ -1,6 +1,8 @@
 #!/bin/sh
 # End-of-suite test in the disposable VNETs from freebsd-dataplane.sh.
 # Manual ESP SAs isolate kernel behavior from IKE negotiation and CARP.
+# Reproduce on a disposable FreeBSD VM as root: sh tests/lab/freebsd-dataplane.sh
+# See FreeBSD if_ipsec(4), setkey(8), and tests/sys/netipsec/tunnel/aes_gcm_128.sh.
 set +x
 set -eu
 export LC_ALL=C

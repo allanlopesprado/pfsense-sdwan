@@ -65,3 +65,32 @@ jobs:
             sh tests/freebsd-install.sh
             sh tests/lab/freebsd-carp.sh
             SDWAN_RENDERED_RULES="$PWD/lab-rendered" sh tests/lab/freebsd-dataplane.sh
+  publish:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && startsWith(github.event.head_commit.message, 'Release ')
+    needs: [offline, freebsd]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Publish verified laboratory distribution
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          version=$(jq -er '.version | select(test("^[0-9]+[.][0-9]+[.][0-9]+$"))' dist/release.json)
+          tag="v$version"
+          package="pfSense-pkg-SDWAN-$version.pkg"
+          (cd dist && sha256sum --check "$package.sha256")
+          if gh release view "$tag" >/dev/null 2>&1; then
+            dir=$(mktemp -d)
+            gh release download "$tag" --dir "$dir" --pattern "$package" --pattern "$package.sha256"
+            cmp "$dir/$package" "dist/$package"
+            cmp "$dir/$package.sha256" "dist/$package.sha256"
+            exit 0
+          fi
+          gh release create "$tag" --target "$GITHUB_SHA" --latest \
+            --title "SD-WAN para pfSense CE $version · Laboratório" \
+            --notes-file "docs/releases/$tag.md" "dist/$package" "dist/$package.sha256"

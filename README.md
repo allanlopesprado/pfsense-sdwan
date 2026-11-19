@@ -1,6 +1,6 @@
 # SD-WAN para pfSense CE
 
-Esta branch contém a versão de laboratório **0.3.0**, com observação de gateways e integração experimental de encaminhamento. A versão 0.2.0 do observador continua disponível em `main`. O alvo de homologação é o **pfSense CE 2.9.1**. O pacote é experimental e independente do projeto pfSense e da Netgate.
+Esta branch contém a versão de laboratório **0.3.0**, com observação de gateways e integração experimental de encaminhamento. O observador 0.2.0 continua disponível no histórico de versões do projeto. O alvo de homologação é o **pfSense CE 2.9.1**. O pacote é experimental e independente do projeto pfSense e da Netgate.
 
 ## Como instalar pelo Diagnostics → Command Prompt
 
@@ -62,6 +62,8 @@ pkg info -e pfSense-pkg-SDWAN; echo "pkg info retornou $?"
 pgrep -lf '/usr/local/sbin/[s]dwand\.php'
 test ! -e /usr/local/www/sdwan/status.php && test ! -e /usr/local/www/widgets/widgets/sdwan.widget.php && test ! -e /var/run/sdwan-observer.json && echo "Arquivos removidos"
 ```
+
+[Resultados dos testes de tráfego e instalação](docs/RESULTADOS.pt-BR.md)
 
 ## Verificação de desenvolvimento
 
