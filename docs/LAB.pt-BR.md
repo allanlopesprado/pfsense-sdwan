@@ -27,7 +27,19 @@ make package
 make -V PKGFILE
 ```
 
-O último comando informa o caminho do pacote gerado. Registre seu SHA-256 no builder e confira o mesmo valor após copiar o arquivo para o clone. No clone, como root, substitua o caminho abaixo pelo nome exato do arquivo:
+### Alternativa de empacotamento para laboratório
+
+O arquivo de pré-lançamento também pode ser reproduzido com Python 3.9+, a ferramenta oficial FreeBSD `pkg` v2 (testada na versão 2.9.3) e um ambiente que represente os arquivos do pacote como UID 0/GID 0. Em Linux, com essas dependências e `fakeroot` instalados:
+
+```sh
+fakeroot python3 tools/build-lab-pkg.py --output ./dist
+```
+
+Essa rota empacota o conteúdo listado em `pkg-plist`, preenche o manifesto e os hooks e compara os bytes, modos e proprietários do arquivo final com o conteúdo esperado antes de imprimir o SHA-256. O port declara `NO_ARCH`. A ABI no pacote é `FreeBSD:16:*`; confirme a família e o major com `pkg config ABI` no alvo. O ensaio de extração em uma raiz temporária utiliza scripts desativados. A validação dos hooks, WebGUI, serviço e HA exige uma instalação real em clone.
+
+### Instalação no clone
+
+O último comando do build por ports informa o caminho do pacote gerado. Registre seu SHA-256 no builder e confira o mesmo valor após copiar o arquivo para o clone. No clone, como root, substitua o caminho abaixo pelo nome exato do arquivo:
 
 ```sh
 cat /etc/version
@@ -88,8 +100,3 @@ O snapshot público examinado do gerador PF pode omitir regras de pacote durante
 - [VTI no pfSense](https://docs.netgate.com/pfsense/en/latest/vpn/ipsec/routed-vti.html)
 - [IPsec em HA, associação de VTI, DPD e VIP CARP](https://docs.netgate.com/pfsense/en/latest/highavailability/ipsec.html)
 - [Revisão de referência do gerador de regras PF](https://github.com/pfsense/pfsense/blob/9363ac5b8651a1c7a333180425ce7719070f95f9/src/etc/inc/filter.inc#L6098-L6162)
-
-
-## Reprodução do artefato experimental
-
-O script `tools/build-lab-pkg.py` lê os arquivos deste port, prepara o manifesto e chama `pkg create`. Ele confere o pacote resultante com `pkg info -F` e verifica a identidade, os hooks, os modos e os bytes de todos os arquivos. A compilação cruzada usada para o arquivo em dist empregou a CLI FreeBSD pkg 2.9.3 em Linux, com metadados de proprietário root:wheel. Para repetir a geração com essa CLI em um ambiente de empacotamento com a propriedade correta, execute `python3 tools/build-lab-pkg.py --pkg /caminho/para/pkg --output /tmp/sdwan-dist`. A validação do artefato não executa os hooks no appliance.
