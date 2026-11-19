@@ -37,6 +37,12 @@ As nove combinações passaram no FreeBSD 15.1. Em cada rodada, o leitor da pág
 
 Dois processos strongSwan do Ubuntu 24.04 negociaram duas IKE_SAs e dois CHILD_SAs independentes. O teste observou ESP nas duas direções de cada enlace e contadores de dados nas duas pontas. Durante a renovação do CHILD_SA e depois da IKE_SA do caminho A, o caminho B manteve seus SPIs e continuou transportando dados. Ao remover a associação A, as sondagens protegidas desse caminho falharam nos dois sentidos e os contadores de tráfego em claro permaneceram estáveis nos dois enlaces. [Execução com strongSwan 5.9.13](https://github.com/allanlopesprado/pfsense-sdwan/actions/runs/44460493186/job/135345795505)
 
+## Continuidade TCP com CARP e pfsync
+
+Em uma VM FreeBSD 15.1, dois nós VNET compartilharam um VIP na LAN e outro na WAN. O pfsync usou um enlace dedicado e estados flutuantes do PF. Com pfsync desligado, a sessão TCP aberta no nó inicial parou de receber respostas após a troca dos VIPs. Uma nova conexão funcionou no nó que assumiu.
+
+Com pfsync ativo, o standby recebeu o estado TCP estabelecido com o mesmo ID e identificador de origem do PF. Após a perda dos enlaces do nó preferido, o mesmo socket completou outra transação com o mesmo estado e endereço WAN traduzido. Quando o nó preferido voltou a assumir os dois VIPs, o socket completou mais uma transação preservando o estado NAT. [Regressão no GitHub Actions](https://github.com/allanlopesprado/pfsense-sdwan/actions/runs/44503280903/job/135488666307)
+
 ## Aceite em equipamento
 
 No CE 2.9.1, a atualização do 0.4.2 para o 0.4.3 executou os hooks reais. A verificação no equipamento confirmou integridade, registro de pacote e serviço, amostra atual e eventos no leitor nativo do log. A configuração do SD-WAN e as regras PF e NAT apresentaram os mesmos valores antes e depois. [Versão 0.4.3](https://github.com/allanlopesprado/pfsense-sdwan/releases/tag/v0.4.3)
