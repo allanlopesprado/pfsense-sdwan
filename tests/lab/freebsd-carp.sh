@@ -264,7 +264,6 @@ disable_preferred_data
 printf 'synced-after\n' >&3
 wait_reply synced synced-after
 test "$(session_state "$second" 34241)" = "$state"
-close_session
 echo 'ok - the same TCP socket completed a new request after both VIPs moved with the original NAT state'
 probe "$client" "$vip"
 transaction "$client" takeover
@@ -289,6 +288,11 @@ jexec "$first" ifconfig "$first_sync" up
 jexec "$first" ifconfig "$first_if" up
 jexec "$first" ifconfig "$first_wan" up
 wait_roles MASTER BACKUP
+printf 'synced-failback\n' >&3
+wait_reply synced synced-failback
+test "$(session_state "$first" 34241)" = "$state"
+close_session
+echo 'ok - the same TCP socket and NAT state survived failback to the preferred node'
 probe "$client" 192.0.2.2
 probe "$client" 192.0.2.3
 probe "$client" "$vip"
