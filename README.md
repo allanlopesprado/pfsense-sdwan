@@ -54,6 +54,7 @@ For installations running **0.4.8** or later, open **SD-WAN → Updates**, click
 - [Configuration impact matrix](docs/CONFIGURATIONS.md)
 - [Validation scenarios and tests](docs/VALIDATION.md)
 - [Lab results and evidence](docs/RESULTS.md)
+- [Compatibility with IDS, IPS, and other packages](docs/PACKAGE-COMPATIBILITY.md)
 - [IPsec, CARP, NAT, and routing integration](docs/INTEGRATION.md)
 - [FortiOS interoperability](docs/FORTIOS.md)
 

@@ -90,12 +90,16 @@ jexec "$firewall" pfctl -e
 # the native rule's position ahead of the broader independent route.
 cat >"$work/before.pf" <<EOF
 set state-policy if-bound
+table <snort2c> persist
 nat on $wan_a inet from 192.0.2.0/25 to any -> ($wan_a)
 nat on $wan_b inet from 192.0.2.0/25 to any -> ($wan_b)
 nat on $wan_c inet from 192.0.2.0/25 to any -> ($wan_c)
 rdr on $wan_b inet proto tcp from any to 203.0.113.1 port 7 -> 192.0.2.11
 rdr on $wan_c inet proto tcp from any to 192.0.2.129 port 7 -> 192.0.2.11
 block all
+# Native pfSense places its offender-table quick blocks before user rules.
+block drop quick from <snort2c> to any label "ids-block-from"
+block drop quick from any to <snort2c> label "ids-block-to"
 pass in quick on $wan_b reply-to ($wan_b 203.0.113.2) inet proto tcp to 192.0.2.11 port 7 keep state label "port-forward-b"
 pass in quick on $wan_c reply-to ($wan_c 192.0.2.130) inet proto tcp to 192.0.2.11 port 7 keep state label "port-forward-c"
 pass out on $lan inet proto tcp to 192.0.2.11 port 7
@@ -241,6 +245,22 @@ jexec "$firewall" pfctl -s labels | counter baseline
 baseline >"$work/final"
 cmp "$work/baseline" "$work/final"
 echo 'ok - baseline PF rules, NAT rules and kernel default route survived the path changes'
+
+jexec "$firewall" pfctl -t snort2c -T add 192.0.2.162 >/dev/null
+for path in a b; do
+    steer "$path"
+    if request 192.0.2.162 "ids-block-$path" >"$work/ids-blocked"; then
+        echo "A new connection bypassed the offender block on path $path" >&2
+        exit 1
+    fi
+    test ! -s "$work/ids-blocked"
+    jexec "$firewall" pfctl -s labels | counter ids-block-to
+    expect_roundtrip 192.0.2.163 198.51.100.1 "ids-control-$path"
+done
+jexec "$firewall" pfctl -t snort2c -T delete 192.0.2.162 >/dev/null
+expect_roundtrip 192.0.2.162 203.0.113.1 ids-removal-B
+steer a
+echo 'ok - the legacy PF offender block survived SD-WAN re-selection and stopped new sessions on both paths'
 
 if [ -n "${SDWAN_RENDERED_RULES:-}" ]; then
     for path in a b c; do

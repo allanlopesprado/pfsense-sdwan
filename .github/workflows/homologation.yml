@@ -1,4 +1,4 @@
-name: Access and VPN recovery labs
+name: Access, VPN recovery, and traffic inspection labs
 on:
   workflow_call:
   workflow_dispatch:
@@ -63,3 +63,20 @@ jobs:
           dpkg-query -W isc-dhcp-client kea-dhcp6-server radvd
       - name: Delegate, advertise, withdraw and replace an IPv6 prefix
         run: sudo python3 -B -u tests/lab/ipv6-pd.py
+  inspection:
+    name: Suricata inspection across two WANs
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install Suricata and Linux inspection dependencies
+        run: |
+          bash .github/scripts/ubuntu-archive.sh
+          sudo systemctl mask --runtime suricata.service
+          sudo apt-get install -y --no-install-recommends iproute2 iputils-ping nftables suricata
+          dpkg-query -W suricata
+          sudo modprobe nfnetlink_queue
+      - name: Verify alert, drop, and failover behavior
+        run: sudo python3 -B -u tests/lab/inspection.py
