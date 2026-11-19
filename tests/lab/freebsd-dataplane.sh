@@ -209,6 +209,57 @@ grep -Fqx '198.51.100.1 held-after' "$work/held"
 echo 'ok - an established session retains A while a new session uses B'
 steer a
 
+if [ -n "${SDWAN_RENDERED_RULES:-}" ]; then
+    # Keep an SD-WAN session and an unrelated native session on A. After the
+    # filter changes to B, recover only the sessions whose state carries the
+    # SD-WAN rule identifier and the retired route-to hop.
+    hold_request() {
+        scope=$1
+        (
+            printf '%s-before\n' "$scope"
+            for tick in $(jot 24); do
+                [ ! -f "$work/reconnect-release" ] || break
+                sleep 1
+            done
+            printf '%s-after\n' "$scope"
+        ) | jexec "$client" nc -n -N -w 28 "$2" 7
+    }
+    hold_request scoped 192.0.2.162 >"$work/scoped" &
+    scoped_pid=$!
+    hold_request control 192.0.2.163 >"$work/control-reconnect" &
+    control_pid=$!
+    for tick in $(jot 5); do
+        if grep -Fqx '198.51.100.1 scoped-before' "$work/scoped" &&
+           grep -Fqx '198.51.100.1 control-before' "$work/control-reconnect"; then break; fi
+        sleep 1
+    done
+    grep -Fqx '198.51.100.1 scoped-before' "$work/scoped"
+    grep -Fqx '198.51.100.1 control-before' "$work/control-reconnect"
+    steer b
+    jexec "$firewall" pfctl -vvss >"$work/states-reconnect"
+    php -r '
+        require $argv[1];
+        foreach (sdwan_steering_state_ids(file($argv[2]), ["41001"], $argv[3], "198.51.100.2") as $id) {
+            echo $id, PHP_EOL;
+        }
+    ' "$(dirname "$0")/../../files/usr/local/pkg/sdwan_steering.inc" "$work/states-reconnect" "$wan_a" >"$work/state-ids"
+    test -s "$work/state-ids"
+    while IFS= read -r id; do
+        jexec "$firewall" pfctl -k id -k "$id" 2>&1 | grep -Ei 'killed [01] states?'
+    done <"$work/state-ids"
+    touch "$work/reconnect-release"
+    wait "$scoped_pid" || true
+    wait "$control_pid"
+    if grep -Fq 'scoped-after' "$work/scoped"; then
+        echo 'The retired SD-WAN state carried another transaction' >&2
+        exit 1
+    fi
+    grep -Fqx '198.51.100.1 control-after' "$work/control-reconnect"
+    expect_roundtrip 192.0.2.162 203.0.113.1 scoped-session-reconnected
+    steer a
+    echo 'ok - state recovery reconnected only the retired SD-WAN path and preserved an unrelated established session'
+fi
+
 # Drop remotely on only A. The independent destination remains usable on A.
 printf 'block drop in quick on %s inet proto tcp from 198.51.100.1 to 192.0.2.162 port 7 label "outage"\npass all no state\n' \
     "$remote_a" >"$work/remote.pf"

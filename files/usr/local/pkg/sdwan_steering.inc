@@ -448,6 +448,111 @@ function sdwan_steering_pf_status(array $binding, array $state, array $inventory
 	return $target === null ? 'blocked' : 'applied';
 }
 
+
+/* The native state dump includes the originating rule identifier as well as
+ * the next hop. Rule ordinals are transient across filter reloads. */
+function sdwan_steering_state_ids(iterable $lines, array $trackers, string $device, string $address): array {
+	$target = @inet_pton(explode('%', $address, 2)[0]);
+	$ids = [];
+	if ($target === false) {
+		return $ids;
+	}
+	$record = [];
+	$finish = static function (array $state) use ($trackers, $device, $target, &$ids): void {
+		if (count($ids) < 64 && isset($state['tracker'], $state['id'], $state['hop']) &&
+		    in_array($state['tracker'], $trackers, true) && $state['hop'][1] === $device &&
+		    @inet_pton(explode('%', $state['hop'][0], 2)[0]) === $target) {
+			$ids[$state['id']] = true;
+		}
+	};
+	foreach ($lines as $line) {
+		if (preg_match('/^\S/', $line)) {
+			$finish($record);
+			$record = [];
+		}
+		if (preg_match('/\bridentifier\s+([0-9]{1,10})\b/', $line, $tracker)) {
+			$record['tracker'] = $tracker[1];
+		}
+		if (preg_match('/\bid:\s*([a-f0-9]{1,16})\s+creatorid:\s*([a-f0-9]{1,8})\b/i', $line, $id)) {
+			$record['id'] = $id[1] . '/' . $id[2];
+		}
+		if (preg_match('/\b(?:route-to|rt):\s*([a-f0-9:.]+(?:%[a-z0-9_.-]+)?)@([a-z0-9_.-]+)(?:\s|$)/i', $line, $hop)) {
+			$record['hop'] = [$hop[1], $hop[2]];
+		}
+	}
+	$finish($record);
+	return array_keys($ids);
+}
+
+function sdwan_steering_reconnect(string $group, string $gateway, string $revision): array {
+	$lock = try_lock('sdwan-settings', 5);
+	if (!is_resource($lock)) {
+		return ['errors' => ['SD-WAN settings are busy. Review the current policy and try again.']];
+	}
+	try {
+		if (!config_read_file(false, false) || !hash_equals(sdwan_steering_revision(), $revision)) {
+			return ['errors' => ['Settings changed. Review the current policy before reconnecting sessions.']];
+		}
+		$binding = sdwan_steering_bindings()[$group] ?? null;
+		if ($binding === null || !in_array($gateway, $binding['gateways'], true)) {
+			return ['errors' => ['This gateway is outside the active forwarding binding.']];
+		}
+		$config = sdwan_get_config();
+		$inventory = sdwan_gateways();
+		$preview = sdwan_steering_preflight($config, $binding['policy'], $group, sdwan_steering_native($inventory));
+		if ($preview['errors'] || $preview['binding']['rules_revision'] !== $binding['rules_revision'] ||
+		    $binding['policy_revision'] !== sdwan_steering_policy_revision($config, $binding['policy'])) {
+			return ['errors' => ['The native rules or policy changed. Review the binding before reconnecting sessions.']];
+		}
+		$snapshot = sdwan_current_snapshot($config, $inventory);
+		$state = $snapshot['steering'][$group] ?? [];
+		$member = array_column($config['members'], 'name', 'gateway')[$gateway] ?? '';
+		$reason = $snapshot['policies'][$binding['policy']]['candidates'][$member] ?? null;
+		$pool = $state['pool'] ?? array_filter([$state['gateway'] ?? null]);
+		if ($reason === null || $reason === 'Eligible' || in_array($gateway, $pool, true) ||
+		    sdwan_steering_pf_status($binding, $state, $inventory, sdwan_steering_pf_rules()) !== 'applied') {
+			return ['errors' => ['Reconnect is available after the filter has applied a different eligible gateway.']];
+		}
+		$metadata = $inventory[$gateway] ?? [];
+		$address = $metadata['address'] ?? '';
+		$device = $metadata['device'] ?? '';
+		if ($address === 'dynamic') {
+			$address = $metadata['family'] === 'inet6' ? get_interface_gateway_v6($metadata['interface'])
+			    : get_interface_gateway($metadata['interface']);
+		}
+		if (!is_string($address) || $device === '' ||
+		    sdwan_monitor_address($address, $metadata['family'] ?? '', $device, true) === null ||
+		    !function_exists('popen') || !function_exists('pclose') || !function_exists('exec')) {
+			return ['errors' => ['The previous native next hop cannot be identified.']];
+		}
+		$stream = @popen('/bin/timeout 3 /sbin/pfctl -vvss 2>/dev/null', 'r');
+		if (!is_resource($stream)) {
+			return ['errors' => ['Unable to inspect the active state table.']];
+		}
+		$lines = static function () use ($stream): Generator {
+			while (($line = fgets($stream)) !== false) {
+				yield $line;
+			}
+		};
+		$ids = sdwan_steering_state_ids($lines(), $binding['trackers'], $device, $address);
+		if (pclose($stream) !== 0) {
+			return ['errors' => ['Unable to read the full state table. No states were removed.']];
+		}
+		$count = 0;
+		foreach ($ids as $id) {
+			$lines = [];
+			exec('/bin/timeout 1 /sbin/pfctl -k id -k ' . escapeshellarg($id) . ' 2>&1', $lines, $status);
+			if ($status !== 0 || !preg_match('/\bkilled\s+([01])\s+states?\b/i', implode("\n", $lines), $match)) {
+				return ['errors' => ['State recovery could not finish. Review the active states before retrying.']];
+			}
+			$count += (int)$match[1];
+		}
+		return ['errors' => [], 'count' => $count];
+	} finally {
+		unlock($lock);
+	}
+}
+
 /* Exclude ongoing preference timers from the native filter reload signature. */
 function sdwan_steering_signature(array $states): string {
 	$effective = [];

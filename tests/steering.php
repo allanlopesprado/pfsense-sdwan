@@ -178,6 +178,23 @@ verify(sdwan_steering_pf_status($edited_binding, $runtime, $inventory, ['block d
     sdwan_steering_pf_status($edited_binding, $runtime, $inventory, $loaded) === 'pending' &&
     sdwan_steering_pf_status($edited_binding, $runtime, $inventory, null) === 'unavailable',
     'blocking is verified from PF and missing output is explicit');
+$states = [
+	'all tcp first -> second ESTABLISHED:ESTABLISHED',
+	'   age 00:00:04, anchor 1, rule 33',
+	'   id: 000000010000000a creatorid: 12345678',
+	'   route-to: 192.0.2.1@igb0',
+	'   ridentifier 301',
+	'all tcp third -> fourth ESTABLISHED:ESTABLISHED',
+	'   id: 000000010000000b creatorid: 12345678',
+	'   route-to: 192.0.2.1@igb0',
+	'   ridentifier 999',
+	'all tcp fifth -> sixth ESTABLISHED:ESTABLISHED',
+	'   id: 000000010000000c creatorid: 12345678',
+	'   route-to: 192.0.2.1@igb1',
+	'   ridentifier 301',
+];
+verify(sdwan_steering_state_ids($states, ['301'], 'igb0', '192.0.2.1') === ['000000010000000a/12345678'],
+    'state recovery matches the stable tracker, exact interface, next hop and unique state identity');
 $abi = 0;
 $current = $disk;
 verify(sdwan_steering_unbind('G', sdwan_steering_revision()) === [] && !sdwan_steering_bindings() &&

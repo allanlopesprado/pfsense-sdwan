@@ -15,6 +15,7 @@ if (!sdwan_can_view_forwarding()) {
 }
 
 $native_edit = sdwan_can_edit_forwarding();
+$can_reconnect = $native_edit && isAllowedPage('/diag_dump_states.php');
 $supported = sdwan_steering_supported();
 $is_post = $_SERVER['REQUEST_METHOD'] === 'POST';
 $form_source = $is_post ? $_POST : $_GET;
@@ -40,6 +41,7 @@ if (!$is_post && $group_name === '' && $policy_name === '' && count($bindings_by
 $binding = $bindings_by_group[$group_name] ?? null;
 $preview = null;
 $errors = [];
+$notice = '';
 
 if ($is_post) {
 	$action = sdwan_ui_scalar($_POST, 'action');
@@ -51,12 +53,19 @@ if ($is_post) {
 		$errors[] = gettext('This firewall supports forwarding previews only.');
 	} elseif ($action === 'bind') {
 		$errors = sdwan_steering_bind($policy_name, $group_name, $revision);
+	} elseif ($action === 'reconnect' && $supported && $can_reconnect) {
+		$operation = sdwan_steering_reconnect($group_name,
+		    sdwan_ui_choice_value(sdwan_ui_scalar($_POST, 'gateway')), $revision);
+		$errors = $operation['errors'];
+		if (!$errors) {
+			$notice = sprintf(gettext('Sessions marked for reconnection: %d.'), $operation['count']);
+		}
 	} elseif ($action === 'unbind') {
 		$errors = sdwan_steering_unbind($group_name, $revision);
 	} else {
 		$errors[] = gettext('Unknown forwarding action.');
 	}
-	if (!$errors) {
+	if (!$errors && $notice === '') {
 		header('Location: /sdwan/forwarding.php?' . http_build_query(['policy' => $policy_name, 'group' => $group_name]), true, 303);
 		exit;
 	}
@@ -104,6 +113,8 @@ include('head.inc');
 sdwan_ui_tabs('forwarding');
 if ($errors) {
 	print_input_errors($errors);
+} elseif ($notice !== '') {
+	print_info_box($notice, 'success', false);
 }
 if ($supported) {
 	print_info_box(gettext('Experimental forwarding integration detected. Test binding and recovery on a lab firewall before deployment.'), 'warning', false);
@@ -171,6 +182,26 @@ if ($preview !== null):
 			<dt><?=gettext('Default gateway')?></dt><dd><?=sdwan_ui_escape(implode(', ', $default_families))?></dd>
 			<?php endif; ?>
 		</dl>
+		<?php if ($can_reconnect && $filter_status === 'applied' && $binding['policy'] === $policy_name):
+			$choice_pool = $steering['pool'] ?? [$steering['gateway']];
+			$member_names = array_flip($member_gateways);
+			$reconnect_revision = sdwan_steering_revision();
+			foreach (array_diff($binding['gateways'], $choice_pool) as $name):
+				$reason = $sample['policies'][$policy_name]['candidates'][$member_names[$name] ?? ''] ?? null;
+				if ($reason === null || $reason === 'Eligible') {
+					continue;
+				}
+		?>
+		<form method="post" action="/sdwan/forwarding.php" class="action-buttons">
+			<input type="hidden" name="policy" value="<?=sdwan_ui_escape($policy_name)?>">
+			<input type="hidden" name="group" value="<?=sdwan_ui_escape($group_name)?>">
+			<input type="hidden" name="gateway" value="<?=sdwan_ui_escape($name)?>">
+			<input type="hidden" name="revision" value="<?=sdwan_ui_escape($reconnect_revision)?>">
+			<button type="submit" name="action" value="reconnect" class="btn btn-default btn-sm"><?=sdwan_ui_escape(sprintf(
+			    gettext('Reconnect sessions on %s'), $name))?></button>
+			<span class="help-block"><?=gettext('Interrupts matching sessions so clients can reconnect through an eligible gateway.')?></span>
+		</form>
+		<?php endforeach; endif; ?>
 		<?php if ($group !== null): ?>
 		<div class="table-responsive"><table class="table table-striped table-hover table-condensed">
 			<thead><tr><th><?=gettext('Native gateway')?></th><th><?=gettext('Configured tier')?></th></tr></thead><tbody>
