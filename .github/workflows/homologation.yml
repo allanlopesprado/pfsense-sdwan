@@ -80,3 +80,23 @@ jobs:
           sudo modprobe nfnetlink_queue
       - name: Verify alert, drop, and failover behavior
         run: sudo python3 -B -u tests/lab/inspection.py
+  netmap:
+    name: FreeBSD Suricata netmap inspection
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Configure the Ubuntu dependency mirror
+        run: bash .github/scripts/ubuntu-archive.sh
+      - name: Verify native netmap packet delivery and blocking
+        uses: vmactions/freebsd-vm@4441bea20b31bfa77329a5af583199362489567e # v1.4.9
+        with:
+          release: "15.1"
+          usesh: true
+          prepare: |
+            env ASSUME_ALWAYS_YES=yes pkg bootstrap
+            pkg install -y python3 suricata
+            pkg info suricata
+          run: sh tests/lab/freebsd-netmap.sh
