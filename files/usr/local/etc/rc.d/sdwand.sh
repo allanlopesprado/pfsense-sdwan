@@ -8,7 +8,7 @@
 name="sdwand"
 command="/usr/sbin/daemon"
 pidfile="/var/run/sdwand.pid"
-command_args="-f -P ${pidfile} /usr/local/bin/php /usr/local/sbin/sdwand.php"
+command_args="-f -R 5 -P ${pidfile} /usr/local/bin/php /usr/local/sbin/sdwand.php"
 
 # Removal runs the same cleanup after stop even when the service was already down.
 if [ "${SDWAN_PACKAGE_REMOVING:-0}" != 1 ]; then

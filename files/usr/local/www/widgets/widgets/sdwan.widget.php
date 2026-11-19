@@ -155,8 +155,15 @@ $sdwanRender = static function (): void {
 	<?php endif;
 };
 
-if ($sdwanDirectRequest) {
+// Mark valid fragments so a login or error page cannot replace the widget.
+$sdwanFragment = static function () use ($sdwanRender): void {
+	echo '<div class="sdwan-widget-content">';
 	$sdwanRender();
+	echo '</div>';
+};
+
+if ($sdwanDirectRequest) {
+	$sdwanFragment();
 	return;
 }
 $sdwanBodyId = 'sdwan-status-' . $widgetkey;
@@ -191,21 +198,46 @@ $sdwanBodyId = 'sdwan-status-' . $widgetkey;
 }
 .sdwan-status-widget .sdwan-widget-note { padding: .4em .5em; margin: 0; overflow-wrap: anywhere; }
 </style>
-<div class="sdwan-status-widget" tabindex="-1" role="region" aria-label="<?=gettext('SD-WAN link monitoring')?>" id="<?=htmlspecialchars($sdwanBodyId, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8')?>"><?php $sdwanRender(); ?></div>
+<div class="sdwan-status-widget" tabindex="-1" role="region" aria-label="<?=gettext('SD-WAN link monitoring')?>" id="<?=htmlspecialchars($sdwanBodyId, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8')?>">
+	<?php $sdwanFragment(); ?>
+	<p class="sdwan-widget-note text-center" role="status" hidden><?=gettext('Gateway status unavailable.')?></p>
+</div>
 <script>
 events.push(function () {
+	const body = document.getElementById(<?=json_encode($sdwanBodyId, JSON_HEX_TAG)?>);
+	if (!body) return;
+	const notice = body.querySelector('[role="status"]');
+	let content = body.querySelector('.sdwan-widget-content');
+	let refreshTimeout;
+
+	function waitForRefresh() {
+		notice.hidden = true;
+		clearTimeout(refreshTimeout);
+		refreshTimeout = setTimeout(function () {
+			if (content.contains(document.activeElement)) body.focus({preventScroll: true});
+			content.hidden = true;
+			notice.hidden = false;
+		}, <?=SDWAN_MAX_SNAPSHOT_AGE * 1000?>);
+	}
+
+	waitForRefresh();
 	register_ajax({
 		name: "SD-WAN",
 		url: "/widgets/widgets/sdwan.widget.php",
 		parms: {ajax: "ajax", widgetkey: <?=json_encode($widgetkey, JSON_HEX_TAG)?>},
 		freq: 10,
 		callback: function (html) {
-			var body = document.getElementById(<?=json_encode($sdwanBodyId, JSON_HEX_TAG)?>);
-			if (!body) return;
-			var focused = body.contains(document.activeElement) ? document.activeElement.getAttribute('href') : null;
-			$(body).html(html);
+			if (!body.isConnected) return;
+			const fragment = document.createElement('template');
+			fragment.innerHTML = html;
+			const next = fragment.content.firstElementChild;
+			if (!next || next.nextElementSibling || !next.classList.contains('sdwan-widget-content')) return;
+			const focused = content.contains(document.activeElement) ? document.activeElement.getAttribute('href') : null;
+			content.replaceWith(next);
+			content = next;
+			waitForRefresh();
 			if (focused !== null) {
-				var link = Array.from(body.querySelectorAll('a[href]')).find(function (item) {
+				const link = Array.from(content.querySelectorAll('a[href]')).find(function (item) {
 					return item.getAttribute('href') === focused;
 				});
 				(link || body).focus({preventScroll: true});

@@ -2,7 +2,7 @@
 # These tests exercise FreeBSD tools in a disposable VM, without pfSense hooks.
 set -eu
 root=$(mktemp -d)
-trap 'rm -rf "$root"' EXIT
+trap 'if [ -f "$root/sdwand.sh" ]; then sh "$root/sdwand.sh" stop >/dev/null 2>&1 || true; fi; rm -rf "$root"' EXIT
 dbroot="$root/image"
 mkdir -p "$dbroot/tmp" "$dbroot/var/db/pkg" "$dbroot/var/cache/pkg" "$root/bin"
 export SDWAN_TEST_ROOT="$dbroot"
@@ -97,18 +97,47 @@ test "$(run_pkg query '%v' "$package")" = "$version"
 run_pkg check -s "$package"
 # Exercise the shipped service wrapper with FreeBSD rc.subr and daemon(8).
 # Substitute a temporary pidfile and a sleeping process for the pfSense worker.
+cat > "$root/observer" <<'WORKER'
+#!/bin/sh
+printf '%s\n' "$$" > "$1"
+exec /bin/sleep 120
+WORKER
+chmod +x "$root/observer"
 sed -e "s|/var/run/sdwand.pid|$root/sdwand.pid|" \
-    -e 's|/usr/local/bin/php /usr/local/sbin/sdwand.php|/bin/sleep 120|' \
+    -e "s|/usr/local/bin/php /usr/local/sbin/sdwand.php|$root/observer $root/child.pid|" \
     -e "s|/usr/local/bin/php -f /usr/local/pkg/sdwan_invalidate.inc|/usr/bin/touch $root/invalidated|" \
     "$dbroot/usr/local/etc/rc.d/sdwand.sh" > "$root/sdwand.sh"
+wait_for_child() {
+    for attempt in 1 2 3 4 5 6 7 8 9 10 11 12; do
+        if [ -s "$root/child.pid" ]; then
+            current=$(cat "$root/child.pid")
+            if [ -n "$current" ] && [ "$current" != "$1" ] && kill -0 "$current" 2>/dev/null; then
+                printf '%s\n' "$current"
+                return 0
+            fi
+        fi
+        sleep 1
+    done
+    echo 'FreeBSD daemon failed to run a distinct observer process.' >&2
+    return 1
+}
 sh "$root/sdwand.sh" start
 sh "$root/sdwand.sh" status
+supervisor=$(cat "$root/sdwand.pid")
+first=$(wait_for_child '')
+kill -KILL "$first"
+recovered=$(wait_for_child "$first")
+test "$(cat "$root/sdwand.pid")" = "$supervisor"
 sh "$root/sdwand.sh" restart
+restarted=$(wait_for_child "$recovered")
 test -f "$root/invalidated"
 rm "$root/invalidated"
 sh "$root/sdwand.sh" status
 sh "$root/sdwand.sh" stop
 test -f "$root/invalidated"
 if sh "$root/sdwand.sh" status; then exit 1; fi
-echo "Verified FreeBSD service start, restart and stop with a fixture worker."
+sleep 6
+test "$(cat "$root/child.pid")" = "$restarted"
+if kill -0 "$restarted" 2>/dev/null; then exit 1; fi
+echo "Verified FreeBSD service crash recovery, start, restart and deliberate stop with a fixture worker."
 echo "Verified checksum rejection, download failure, direct upgrades through 0.4.12 to $version, removal, rollback to each prior version and reinstall (hooks disabled)."

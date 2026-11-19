@@ -42,7 +42,15 @@ class WidgetHandler(SimpleHTTPRequestHandler):
         if self.path != "/widgets/widgets/sdwan.widget.php" or params != {"ajax": ["ajax"], "widgetkey": ["sdwan-0"]}:
             self.send_error(400)
             return
-        content = (Path(self.directory) / "refresh.html").read_bytes()
+        directory = Path(self.directory)
+        failure = directory / "refresh-failure"
+        if failure.is_file():
+            if failure.read_text() == "unreachable":
+                self.send_error(503)
+                return
+            content = b'<html><body><form>Sign in to pfSense</form></body></html>'
+        else:
+            content = (directory / "refresh.html").read_bytes()
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=UTF-8")
         self.send_header("Content-Length", str(len(content)))
@@ -209,6 +217,42 @@ def verify_dashboard_layout(core, output, widget, fragment):
                 assert stress <= 1, (theme, width, stress)
                 metrics.append(dict(data, theme=theme, tabOrder=tabs, focusRetainedAfterRefresh=True,
                                     longIdentifierOverflow=stress))
+        call("/url", {"url": f"http://127.0.0.1:{server.server_port}/light.html"})
+        failure = web / "refresh-failure"
+        failure.write_text("unreachable")
+        assert call("/execute/async", {"args": [], "script": """
+            const done=arguments[0], w=ajaxspecs[0];
+            $.post(w.url,w.parms).done(()=>done(false)).fail(xhr=>done(xhr.status===503));
+        """})
+        assert js("return !document.querySelector('.sdwan-widget-content').hidden")
+        failure.write_text("login")
+        call("/timeouts", {"script": 34000})
+        assert call("/execute/async", {"args": [], "script": """
+            const done=arguments[0], w=ajaxspecs[0];
+            const content=document.querySelector('.sdwan-widget-content');
+            const notice=document.querySelector('.sdwan-status-widget [role="status"]');
+            content.querySelector('a').focus();
+            setTimeout(()=>{
+                $.post(w.url,w.parms).done(html=>{
+                    w.callback(html);
+                    if (document.querySelector('.sdwan-widget-content')!==content) done(false);
+                }).fail(()=>done(false));
+            }, 10000);
+            setTimeout(()=>done(content.hidden && !notice.hidden &&
+                notice.textContent.includes('Gateway status unavailable') &&
+                document.activeElement===notice.parentElement), 32000);
+        """})
+        failure.unlink()
+        assert call("/execute/async", {"args": [], "script": """
+            const done=arguments[0], w=ajaxspecs[0];
+            $.post(w.url,w.parms).done(html=>{
+                w.callback(html);
+                done(!document.querySelector('.sdwan-widget-content').hidden &&
+                    document.querySelector('.sdwan-status-widget [role="status"]').hidden &&
+                    document.querySelector('.sdwan-widget-rtt').textContent==='23.450ms');
+            }).fail(()=>done(false));
+        """})
+        print("ok - failed and invalid refreshes expire the visible readings, and a valid response restores them")
         (output / "widget-fragment.html").write_text(widget)
         (output / "metrics.json").write_text(json.dumps(metrics, indent=2) + "\n")
         print("ok - eight native theme/width screenshots, status contrast, keyboard navigation and AJAX focus")
