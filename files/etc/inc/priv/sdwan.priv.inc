@@ -2,7 +2,7 @@
 
 global $priv_list;
 
-$sdwan_view_pages = ['sdwan/status.php*', 'sdwan/diagnostics.php*'];
+$sdwan_view_pages = ['sdwan/status.php*', 'sdwan/diagnostics.php*', 'widgets/widgets/sdwan.widget.php*'];
 $priv_list['page-services-sdwan-view'] = [
 	'name' => 'WebCfg - Services: SD-WAN status',
 	'descr' => 'View SD-WAN health and path recommendations.',
@@ -15,6 +15,7 @@ $priv_list['page-services-sdwan-manage'] = [
 		'sdwan/members.php*',
 		'sdwan/slas.php*',
 		'sdwan/policies.php*',
+		'sdwan/updates.php*',
 	]),
 ];
 unset($sdwan_view_pages);

@@ -42,13 +42,7 @@ function sdwan_gateway_observations(array $config, array $inventory): array {
 			continue;
 		}
 		$process = $processes[$name] ?? null;
-		if ($process === null) {
-			continue;
-		}
-		// A renamed monitor may leave an old socket until pfSense reloads.
-		$expected = $gateway['monitor'];
-		if (filter_var($expected, FILTER_VALIDATE_IP) !== false &&
-		    @inet_pton($process['targetip']) !== inet_pton($expected)) {
+		if ($process === null || !sdwan_monitor_matches($gateway, $process)) {
 			continue;
 		}
 		$values = sdwan_sample_socket($process, $name);
@@ -70,8 +64,10 @@ function sdwan_gateway_observations(array $config, array $inventory): array {
 			$loss > $limits['losslow'] => 'loss',
 			default => 'none'
 		};
+		$alarm_down = in_array($substatus, ['highdelay', 'highloss'], true) &&
+		    !isset($settings[$name]['action_disable']);
 		$observations[$name] = [
-			'status' => 'online', 'substatus' => $substatus,
+			'status' => $alarm_down ? 'down' : 'online', 'substatus' => $substatus,
 			'delay' => number_format($rtt, 3, '.', '') . 'ms',
 			'stddev' => number_format($variation, 3, '.', '') . 'ms',
 			'loss' => $loss . '%'

@@ -4,6 +4,7 @@ import argparse
 import errno
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack
+import fcntl
 import json
 from pathlib import Path
 import shutil
@@ -27,6 +28,7 @@ def php(binary, *args):
 
 def fixture(sandbox):
     gateway_ips = {"GW_A": "192.0.2.1", "GW_B": "198.51.100.1"}
+    source_ips = {"GW_A": "192.0.2.100", "GW_B": "198.51.100.100"}
     gateways = [
         {"name": name, "gateway": ip, "interface": f"opt{i}"}
         for i, (name, ip) in enumerate(gateway_ips.items(), start=1)
@@ -42,8 +44,14 @@ def fixture(sandbox):
         },
         "interfaces": {gw["interface"]: {"enable": ""} for gw in gateways},
         "gateways/gateway_item": gateways,
+        "fixture_sources": {gw["interface"]: source_ips[gw["name"]] for gw in gateways},
+        # Representative unrelated state. The observer may read the firewall
+        # configuration but must leave the entire backing document intact.
+        "nat": {"outbound": {"mode": "hybrid"}},
+        "ipsec": {"phase2": [{"mode": "vti"}]},
+        "filter": {"rule": [{"type": "pass", "interface": "lan"}]},
         "processes": {
-            name: {"socket": str(sandbox / f"{name}.sock"), "targetip": ip}
+            name: {"socket": str(sandbox / f"{name}.sock"), "targetip": ip, "srcip": source_ips[name]}
             for name, ip in gateway_ips.items()
         },
     }
@@ -101,6 +109,29 @@ def run(binary, require_unix):
         offline = json.loads(snapshot.read_text())
         assert offline["policies"]["calls"]["selected"] is None
         assert json.loads(php(binary, "-r", read)) == offline
+
+        def expect_failure(message):
+            last_snapshot = snapshot.read_bytes()
+            try:
+                php(binary, "-d", f"include_path={sandbox}", str(sandbox / "sdwand.php"), "--once")
+            except RuntimeError as exc:
+                assert "PHP failed (1)" in str(exc) and message in str(exc), str(exc)
+            else:
+                raise AssertionError(f"The worker should have rejected: {message}")
+            assert snapshot.read_bytes() == last_snapshot
+
+        with (sandbox / "snapshot.json.lock").open() as held_lock:
+            fcntl.flock(held_lock, fcntl.LOCK_EX)
+            expect_failure("Another observation is running")
+        invalid_config = json.loads(config_path.read_text())
+        invalid_config["installedpackages/sdwan"]["version"] = "future"
+        config_path.write_text(json.dumps(invalid_config))
+        expect_failure("Unsupported SD-WAN configuration format")
+        config_path.write_text(json.dumps(offline_config))
+        php(binary, "-d", f"include_path={sandbox}", str(sandbox / "sdwand.php"), "--once")
+        assert json.loads(snapshot.read_text())["config_revision"] == offline["config_revision"]
+        print("ok - a concurrent worker or unreadable schema preserves the last snapshot, and retry succeeds")
+
         offline["generated_at"] -= 300
         snapshot.write_text(json.dumps(offline))
         assert json.loads(php(binary, "-r", read)) is None
@@ -134,17 +165,20 @@ def run(binary, require_unix):
             listeners[name] = listener
         workers = stack.enter_context(ThreadPoolExecutor(max_workers=2))
 
-        def observe(first_loss):
-            responders = [
-                workers.submit(answer, listeners["GW_A"], f"GW_A 20000 1000 {first_loss}"),
-                workers.submit(answer, listeners["GW_B"], "GW_B 10000 2000 0"),
-            ]
+        def observe(configuration, samples):
+            config_path.write_text(json.dumps(configuration))
+            expected_bytes = config_path.read_bytes()
+            responders = [workers.submit(answer, listeners[name], sample)
+                          for name, sample in samples.items()]
             php(binary, "-d", f"include_path={sandbox}", str(sandbox / "sdwand.php"), "--once")
             for job in responders:
                 job.result()
+            assert config_path.read_bytes() == expected_bytes
             return json.loads(snapshot.read_text())
 
-        first = observe(0)
+        baseline = fixture(sandbox)
+        healthy = {"GW_A": "GW_A 20000 1000 0", "GW_B": "GW_B 10000 2000 0"}
+        first = observe(baseline, healthy)
         assert first["policies"]["calls"]["selected"] == "a"
         assert first["members"]["a"]["rtt_ms"] == 20
         assert first["members"]["b"]["rttsd_ms"] == 2
@@ -154,7 +188,7 @@ def run(binary, require_unix):
 
         with snapshot.open() as old_inode:
             old_number = snapshot.stat().st_ino
-            second = observe(3)
+            second = observe(baseline, dict(healthy, GW_A="GW_A 20000 1000 3"))
             assert second["policies"]["calls"]["selected"] == "b"
             assert second["members"]["a"]["loss_pct"] == 3
             assert second["config_revision"] == first["config_revision"]
@@ -163,6 +197,33 @@ def run(binary, require_unix):
         assert list(sandbox.glob(".sdwan-*")) == []
         assert config_path.read_bytes() == original_config
         print("ok - degradation changes recommendation and atomically replaces the snapshot")
+
+        for case, expected_status in [("missing interface", "unknown"),
+                                      ("changed monitor address", "unknown"),
+                                      ("changed source address", "unknown"),
+                                      ("monitor_disable", "unknown"), ("force_down", "down")]:
+            configuration = fixture(sandbox)
+            if case == "missing interface":
+                del configuration["interfaces"]["opt1"]
+            elif case == "changed monitor address":
+                configuration["processes"]["GW_A"]["targetip"] = "192.0.2.23"
+            elif case == "changed source address":
+                configuration["processes"]["GW_A"]["srcip"] = "192.0.2.252"
+            else:
+                configuration["gateways/gateway_item"][0][case] = ""
+            observed = observe(configuration, {"GW_B": healthy["GW_B"]})
+            assert observed["policies"]["calls"]["selected"] == "b", case
+            assert observed["members"]["a"]["status"] == expected_status, case
+        print("ok - missing, retargeted, disabled and forced-down gateways cannot win")
+
+        for sample in ("GW_A 0 0 0", "OTHER 20000 1000 0"):
+            observed = observe(baseline, dict(healthy, GW_A=sample))
+            assert observed["members"]["a"]["status"] == "unknown", sample
+            assert observed["policies"]["calls"]["selected"] == "b", sample
+        outage = observe(baseline, {"GW_A": "GW_A 0 0 100", "GW_B": "GW_B 0 0 100"})
+        assert outage["policies"]["calls"]["selected"] is None
+        assert all(member["status"] == "down" for member in outage["members"].values())
+        print("ok - monitor start-up, wrong socket identity and complete loss fail closed")
 
         second["generated_at"] -= 300
         snapshot.write_text(json.dumps(second))

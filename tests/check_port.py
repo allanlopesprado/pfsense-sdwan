@@ -90,7 +90,10 @@ def check_packaging():
         page = url.split("?")[0].lstrip("/")
         if not (FILES / PREFIX / "www" / page).is_file():
             fail(f"Missing GUI for registered menu entry: {url}")
-    for name in ("status", "slas", "members", "policies", "diagnostics"):
+    tabs = (FILES / PREFIX / "www/sdwan/ui.inc.php").read_text()
+    for name in ("status", "slas", "members", "policies", "diagnostics", "updates"):
+        if not re.search(r"^\s*'" + name + r"'\s*=>\s*gettext\(", tabs, re.MULTILINE):
+            fail(f"Missing SD-WAN tab: {name}")
         if not (FILES / PREFIX / "www/sdwan" / (name + ".php")).is_file():
             fail(f"Missing SD-WAN page: {name}")
     service = FILES / PREFIX / "etc/rc.d/sdwand.sh"

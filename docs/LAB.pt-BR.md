@@ -1,12 +1,12 @@
 # Homologação em pfSense CE 2.9.1
 
-Esta versão observa as medições dos gateways e recomenda membros para políticas. O teste deve demonstrar duas coisas distintas: que a recomendação acompanha os dados do gateway e que a instalação, o serviço e a interface preservam o encaminhamento nativo. A alteração real do caminho é um ensaio de uma versão futura.
+O pacote 0.2.0 observa as medições dos gateways e recomenda membros para políticas. Neste roteiro, registre se a recomendação acompanha as métricas e se o encaminhamento nativo se mantém durante a instalação, as edições e a remoção. A alteração real de caminhos exige uma versão futura com controle de encaminhamento. [Integração com IPsec, CARP, NAT, estados e rotas](INTEGRACAO.pt-BR.md)
 
 ## Topologia e evidência
 
 Use um clone CE 2.9.1 com console independente. Para testar HA, inclua dois nós pfSense, um peer em outra rede, duas WANs virtuais com degradação independente, uma LAN de clientes e uma rede de sincronização. Use endereços e certificados de laboratório. Registre revisão Git, versão do pacote, arquitetura, versão do peer, nomes reais de interfaces, parâmetros do dpinger e limite de cada SLA. Preserve uma cópia local da configuração e snapshots dos nós antes da instalação.
 
-Configure ao menos dois gateways com monitoramento habilitado, alvos distintos e rotas de retorno conhecidas. Se usar VTI, identifique qual VTI corresponde a cada transporte. Para HA, atribua as interfaces VTI na mesma ordem, separadamente nos dois nós. Vincule a Fase 1 ao VIP da WAN que corresponde ao túnel. Teste uma conexão pelo caminho em uso e anote o resultado antes da instalação.
+Para observar um SLA, basta um gateway com monitoramento habilitado. Para comparar alternativas, configure dois ou mais gateways da mesma família IP, com alvos que representem o mesmo serviço e rotas de retorno conhecidas. Se usar VTI, identifique qual VTI corresponde a cada transporte. Para HA, atribua as interfaces VTI na mesma ordem, separadamente nos dois nós. Vincule a Fase 1 ao VIP da WAN que corresponde ao túnel. Teste uma conexão pelo caminho em uso e anote o resultado antes da instalação.
 
 ## Construção e instalação
 
@@ -15,8 +15,8 @@ Para baixar e instalar diretamente pela WebGUI, siga [Como instalar pelo Diagnos
 O diretório [dist](../dist/) contém o .pkg de laboratório e seu checksum. Para usar o artefato já construído, baixe os dois arquivos no mesmo diretório do clone e confira a integridade com o comando abaixo. Compare a saída com o hash publicado antes de usar `pkg add`.
 
 ```sh
-sha256 -q pfSense-pkg-SDWAN-0.1.1.pkg
-cat pfSense-pkg-SDWAN-0.1.1.pkg.sha256
+sha256 -q pfSense-pkg-SDWAN-0.2.0.pkg
+cat pfSense-pkg-SDWAN-0.2.0.pkg.sha256
 ```
 
 Para compilar o port, use um builder FreeBSD/pfSense com a árvore de ports, dependências e ABI compatíveis com o appliance alvo. O diretório que contém o Makefile deste projeto é o port. Disponibilize-o como `net/pfSense-pkg-SDWAN` na árvore de trabalho do builder. Dentro desse diretório, execute:
@@ -37,7 +37,14 @@ O arquivo de pré-lançamento também pode ser reproduzido com Python 3.9+, a fe
 fakeroot python3 tools/build-lab-pkg.py --output ./dist
 ```
 
-Essa rota empacota o conteúdo listado em `pkg-plist`, preenche o manifesto e os hooks e compara os bytes, modos e proprietários do arquivo final com o conteúdo esperado antes de imprimir o SHA-256. O port declara `NO_ARCH`. A ABI no pacote é `FreeBSD:16:*`; confirme a família e o major com `pkg config ABI` no alvo. O ensaio de extração em uma raiz temporária utiliza scripts desativados. A validação dos hooks, WebGUI, serviço e HA exige uma instalação real em clone.
+Depois de produzir o pacote e seu arquivo `.sha256`, gere o índice consultado pela aba **Updates**. A verificação confere nome e versão do manifesto, arquivo e SHA-256. Publique o índice e o pacote na mesma revisão. No README de distribuição, fixe a URL do pacote nesse commit e atualize seu SHA-256.
+
+```sh
+python3 tools/update-release-index.py
+python3 tools/update-release-index.py --check
+```
+
+O empacotador inclui o conteúdo listado em `pkg-plist`, preenche o manifesto e os hooks e compara os bytes, modos e proprietários do arquivo final com o conteúdo esperado antes de imprimir o SHA-256. O port declara `NO_ARCH`. A ABI no pacote é `FreeBSD:16:*`; confirme a família e o major com `pkg config ABI` no alvo. O ensaio de extração em uma raiz temporária utiliza scripts desativados. A validação dos hooks, WebGUI, serviço e HA exige uma instalação real em clone.
 
 ### Instalação no clone
 
@@ -52,7 +59,7 @@ pkg info -l pfSense-pkg-SDWAN
 /usr/local/etc/rc.d/sdwand.sh status
 ```
 
-Confirme a instalação na lista de pacotes instalados e abra **Services → SD-WAN**. Falha no registro, ABI, dependência, checksum ou menu é um resultado de teste a investigar. Registre o erro original. Evite mascará-lo copiando os arquivos diretamente para a WebGUI.
+Consulte a versão com `pkg query '%n-%v' pfSense-pkg-SDWAN` e abra **Services → SD-WAN**. Na aba **Updates**, confira a versão instalada e clique em **Check GitHub** para comparar com o índice público do projeto. **System → Package Manager** usa o repositório do produto e pode omitir um pacote adicionado diretamente de um arquivo. A inclusão no catálogo passa pela avaliação da Netgate. Registre a saída original de qualquer falha no registro, ABI, dependência, checksum ou menu. [Guia do catálogo](https://docs.netgate.com/pfsense/en/latest/packages/manager.html) · [Processo de inclusão de ports](https://docs.netgate.com/pfsense/en/latest/development/develop-packages.html)
 
 ## Estado de referência
 
@@ -74,6 +81,10 @@ Verifique os estados relevantes com **Diagnostics → States**. Faça capturas d
 | Teste | Ação no laboratório | Evidência esperada |
 |---|---|---|
 | Instalação sem configuração | Abrir todas as abas com o conjunto inicial vazio. | Navegação funcional e ausência de recomendação para política inexistente. Rota padrão e regras de passagem continuam equivalentes às da referência. |
+| Um caminho | Criar uma política com um único membro monitorado. Tornar seu alvo indisponível. | O único membro aparece enquanto elegível. Após a perda da medição ou do SLA, o conjunto fica sem alternativa. |
+| Atualização de 0.1.1 | Instalar 0.1.1, salvar uma política de um membro e anotar sua configuração. Aplicar o pacote novo com o instalador do README e reiniciar o observador. | O registro local passa a 0.2.0. A política é lida, o serviço publica uma amostra nova e o membro continua representando um único caminho. |
+| Widget do dashboard | Em **Status → Dashboard**, usar **+ → SD-WAN**. Comparar o membro e a hora da amostra com o status. Parar o observador e aguardar a expiração. Retirar pelo **×**. | Exibe o resultado local válido, informa ausência de políticas ou de medição atual, respeita os privilégios do usuário e sai do painel quando solicitado. |
+| Consulta de versão | Abrir **Updates**, observar a versão instalada, acionar **Check GitHub** e repetir com a saída HTTPS indisponível. | A consulta externa ocorre ao clicar. A página diferencia uma versão publicada, uma falha de consulta e uma versão local desconhecida. A operação apenas exibe informação. |
 | Dois caminhos saudáveis | Cadastrar membros associados aos gateways reais, SLA e uma política com ambos. Definir custos distintos e verificar também a estratégia de menor latência. | O candidato selecionado e o motivo batem com os dados de monitoramento e o critério configurado. Os novos fluxos continuam seguindo a política **nativa** já presente. |
 | Degradação com túnel ativo | Introduzir perda ou atraso só no transporte A através do emulador da WAN. Aguardar a janela do dpinger e o ciclo do observador. | Confirmar em **Status → Gateways** o efeito no A. Registrar a primeira alteração de recomendação e conferir os dois caminhos com captura. Uma eventual comutação causada por regra nativa deve ser identificada separadamente. |
 | Falha do alvo | Tornar indisponível apenas um destino de monitoramento. Remover candidatos elegíveis para uma política em teste. | Resultado reflete a perda de observabilidade desse membro. Uma política sem candidatos elegíveis não recomenda caminho saudável. Serviço real e endereço de teste podem ter condições diferentes. |
@@ -82,7 +93,7 @@ Verifique os estados relevantes com **Diagnostics → States**. Faça capturas d
 | Controle de acesso | Testar com administrador, usuário sem privilégio de acesso e sessão encerrada; incluir acessos às URLs diretas. | Política de acesso da WebGUI respeitada inclusive nos formulários de gravação. |
 | Recarga | No clone e sob tráfego, usar **Status → Filter Reload** para recarregar o filtro. Repetir a observação com o serviço parado. | Rotas, NAT, política existente e alcance da gerência equivalentes à referência. Uma recomendação não cria regra de encaminhamento. |
 | HA | Instalar a mesma versão nos dois nós de teste e configurar ambos explicitamente. Desligar o MASTER. Registrar papel CARP, SAs, primeiro tráfego útil e atualização da telemetria do novo MASTER. | Distinguir tempo de takeover de tempo de renegociação IPsec. O observador não deve promover nó nem reiniciar túnel. Verificar a configuração em ambos antes de considerar que existe sincronização. |
-| Remoção | Remover o pacote em **System → Package Manager → Installed Packages**. Verificar menu, processo e encaminhamento; depois reinstalar a mesma versão. | Serviço parado, entrada removida e regras/rotas nativas preservadas. Registrar se preferências locais persistiram e se a reinstalação funciona. |
+| Remoção | Em **Diagnostics → Command Prompt**, executar `pkg delete -y pfSense-pkg-SDWAN` e as verificações do README. Recarregar a WebGUI e reinstalar o pacote. | O pacote deixa o banco local. O processo, o menu, o arquivo do widget e o arquivo das amostras desaparecem. Registrar o resultado da comparação de regras e rotas, a retenção de preferências e o resultado da reinstalação. |
 
 O teste de degradação fica mais fácil de atribuir se a política nativa inicial fixar um caminho para o tráfego de teste. Se houver failover de um grupo de gateways já configurado, repita com o observador parado e compare os eventos. Os mecanismos nativos podem trocar a rota independentemente do pacote.
 

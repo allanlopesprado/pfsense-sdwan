@@ -3,6 +3,67 @@
 const SDWAN_SNAPSHOT_PATH = '/var/run/sdwan-observer.json';
 const SDWAN_MAX_SNAPSHOT_AGE = 30;
 
+/* Canonical dpinger endpoint, including the kernel interface for link-local IPv6. */
+function sdwan_monitor_address(string $value, string $family, string $device, bool $infer_scope): ?string {
+	[$ip, $scope] = array_pad(explode('%', $value, 2), 2, null);
+	$packed = @inet_pton($ip);
+	$length = match ($family) { 'inet' => 4, 'inet6' => 16, default => 0 };
+	if ($packed === false || strlen($packed) !== $length) {
+		return null;
+	}
+	$address = inet_ntop($packed);
+	if ($family === 'inet6' && ord($packed[0]) === 0xfe && (ord($packed[1]) & 0xc0) === 0x80) {
+		if ($scope === null && $infer_scope) {
+			$scope = $device;
+		}
+		return $device !== '' && $scope === $device ? $address . '%' . $device : null;
+	}
+	return $scope === null ? $address : null;
+}
+
+/* Match the live interface, source and target used by gwlb.inc::start_dpinger().
+ * A socket with the right gateway name can outlive a DHCP change or restore. */
+function sdwan_monitor_matches(array $gateway, array $process): bool {
+	$family = $gateway['family'];
+	$interface = $gateway['interface'];
+	$device = get_real_interface($interface, $family, false, true);
+	if (!is_string($device) || $device === '') {
+		return false;
+	}
+	$monitor = $gateway['monitor'];
+	if ($monitor === 'dynamic') {
+		$monitor = $family === 'inet6' ? get_interface_gateway_v6($interface) : get_interface_gateway($interface);
+	}
+	if (!is_string($monitor)) {
+		return false;
+	}
+	$target = sdwan_monitor_address($monitor, $family, $device, true);
+	if ($target === null || $target !== sdwan_monitor_address($process['targetip'] ?? '', $family, $device, false)) {
+		return false;
+	}
+	if ($family === 'inet') {
+		$source = find_interface_ip($device, true);
+	} elseif (str_contains($target, '%')) {
+		$source = find_interface_ipv6_ll($device, true);
+		if (is_string($source) && $source !== '' && !str_contains($source, '%')) {
+			$source .= '%' . $device;
+		}
+	} else {
+		$source = find_interface_ipv6($device, true);
+	}
+	if (!is_string($source)) {
+		return false;
+	}
+	$expected = sdwan_monitor_address($source, $family, $device, false);
+	if ($expected === null || $expected === '0.0.0.0' || $expected === '::') {
+		return false;
+	}
+	/* Native long socket names shorten only the source to eight hex digits. */
+	$reported = $process['srcip'] ?? '';
+	return $reported === substr(md5($source), 0, 8) ||
+	    $expected === sdwan_monitor_address($reported, $family, $device, false);
+}
+
 /* dpinger uses integer microseconds for RTT and deviation, and percent for loss. */
 function sdwan_parse_dpinger_line(string $line, string $name): ?array {
 	$values = preg_split('/\s+/', trim($line));
@@ -45,12 +106,12 @@ function sdwan_member_sample(array $gateway): array {
 	if (isset($gateway['monitor_disable'])) {
 		$rtt = $variation = $loss = null;
 	} elseif (($gateway['status'] ?? '') === 'down' || $loss === 100.0 ||
-	    in_array($substatus, ['down', 'force_down', 'highdelay', 'highloss'], true)) {
+	    in_array($substatus, ['down', 'force_down'], true)) {
 		$status = 'down';
 	} elseif (($gateway['status'] ?? '') === 'online' && $rtt !== null && $variation !== null && $loss !== null) {
 		$status = match ($substatus) {
 			'none' => 'online',
-			'delay', 'loss' => 'degraded',
+			'delay', 'loss', 'highdelay', 'highloss' => 'degraded',
 			default => 'unknown'
 		};
 	}
@@ -79,6 +140,15 @@ function sdwan_candidate_reason(?array $member, ?array $sample, ?array $sla): st
 	return 'Eligible';
 }
 
+function sdwan_path_status(int $configured, int $eligible): string {
+	return match (true) {
+		$eligible === 0 => 'no_eligible',
+		$configured === 1 => 'single',
+		$eligible === 1 => 'degraded',
+		default => 'alternatives',
+	};
+}
+
 /* Pure evaluation. Equal ranks retain policy member order. */
 function sdwan_evaluate(array $config, array $gateways, int $now, array $inventory = []): array {
 	$members = array_column($config['members'] ?? [], null, 'name');
@@ -95,10 +165,19 @@ function sdwan_evaluate(array $config, array $gateways, int $now, array $invento
 		$candidates = [];
 		// Gateways can change family outside this package after a restore.
 		$families = [];
+		$interfaces = [];
+		$transports = [];
 		foreach ($policy['members'] as $name) {
-			$family = $inventory[$members[$name]['gateway'] ?? '']['family'] ?? null;
+			$gateway = $inventory[$members[$name]['gateway'] ?? ''] ?? [];
+			$family = $gateway['family'] ?? null;
 			if ($family !== null) {
 				$families[$family] = true;
+			}
+			if (!empty($gateway['interface'])) {
+				$interfaces[] = $gateway['interface'];
+			}
+			if (!empty($gateway['transport'])) {
+				$transports[] = $gateway['transport'];
 			}
 		}
 		$mixed = count($families) > 1;
@@ -127,11 +206,16 @@ function sdwan_evaluate(array $config, array $gateways, int $now, array $invento
 				$selected = $name;
 			}
 		}
+		$eligible = count(array_keys($candidates, 'Eligible', true));
 		$policies[$policy['name']] = [
 			'selected' => $selected,
 			'reason' => $selected === null ? 'No eligible member' :
 			    ($policy['strategy'] === 'cost' ? 'Lowest configured cost within SLA' : 'Lowest measured RTT within SLA'),
-			'candidates' => $candidates
+			'candidates' => $candidates,
+			'eligible_count' => $eligible,
+			'path_status' => sdwan_path_status(count($candidates), $eligible),
+			'shared_interface' => count($interfaces) !== count(array_unique($interfaces)),
+			'shared_underlay' => count($transports) !== count(array_unique($transports)),
 		];
 	}
 	return ['generated_at' => $now, 'members' => $samples, 'policies' => $policies];
@@ -177,6 +261,16 @@ function sdwan_read_snapshot(): ?array {
 		}
 		foreach ($policy['candidates'] as $member => $reason) {
 			if (!isset($data['members'][$member]) || !is_string($reason)) {
+				return null;
+			}
+		}
+		/* Old snapshots remain readable for their normal 30-second lifetime. */
+		if (array_key_exists('path_status', $policy) || array_key_exists('eligible_count', $policy) ||
+		    array_key_exists('shared_interface', $policy) || array_key_exists('shared_underlay', $policy)) {
+			$count = count(array_keys($policy['candidates'], 'Eligible', true));
+			if (($policy['eligible_count'] ?? null) !== $count ||
+			    ($policy['path_status'] ?? null) !== sdwan_path_status(count($policy['candidates']), $count) ||
+			    !is_bool($policy['shared_interface'] ?? null) || !is_bool($policy['shared_underlay'] ?? null)) {
 				return null;
 			}
 		}

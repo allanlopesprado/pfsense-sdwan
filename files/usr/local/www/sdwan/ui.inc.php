@@ -19,6 +19,7 @@ function sdwan_ui_tabs(string $current): void {
 		'slas' => gettext('Performance SLAs'),
 		'policies' => gettext('Policies'),
 		'diagnostics' => gettext('Diagnostics'),
+		'updates' => gettext('Updates'),
 	];
 	$tabs = [];
 	foreach ($labels as $page => $label) {

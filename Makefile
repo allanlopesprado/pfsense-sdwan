@@ -1,5 +1,5 @@
 PORTNAME=	pfSense-pkg-SDWAN
-PORTVERSION=	0.1.1
+PORTVERSION=	0.2.0
 CATEGORIES=	net
 MASTER_SITES=	# empty
 DISTFILES=	# empty
@@ -21,10 +21,13 @@ do-extract:
 
 do-install:
 	@ ${MKDIR} ${STAGEDIR}${PREFIX}/pkg ${STAGEDIR}${PREFIX}/www/sdwan \
+		${STAGEDIR}${PREFIX}/www/widgets/include ${STAGEDIR}${PREFIX}/www/widgets/widgets \
 		${STAGEDIR}${PREFIX}/sbin ${STAGEDIR}${PREFIX}/etc/rc.d \
 		${STAGEDIR}/etc/inc/priv ${STAGEDIR}${DATADIR}
 	${INSTALL_DATA} ${FILESDIR}/usr/local/pkg/* ${STAGEDIR}${PREFIX}/pkg/
 	${INSTALL_DATA} ${FILESDIR}/usr/local/www/sdwan/* ${STAGEDIR}${PREFIX}/www/sdwan/
+	${INSTALL_DATA} ${FILESDIR}/usr/local/www/widgets/include/sdwan.inc ${STAGEDIR}${PREFIX}/www/widgets/include/
+	${INSTALL_DATA} ${FILESDIR}/usr/local/www/widgets/widgets/sdwan.widget.php ${STAGEDIR}${PREFIX}/www/widgets/widgets/
 	${INSTALL_DATA} ${FILESDIR}/etc/inc/priv/sdwan.priv.inc ${STAGEDIR}/etc/inc/priv/
 	${INSTALL_SCRIPT} ${FILESDIR}/usr/local/sbin/sdwand.php ${STAGEDIR}${PREFIX}/sbin/
 	${INSTALL_SCRIPT} ${FILESDIR}/usr/local/etc/rc.d/sdwand.sh ${STAGEDIR}${PREFIX}/etc/rc.d/

@@ -31,18 +31,26 @@ if run_pkg info -e pfSense-pkg-SDWAN; then exit 1; fi
 printf '#!/bin/sh\nexit 1\n' > "$root/bin/fetch"
 if PATH="$root/bin:$PATH" sh -c "$installer"; then exit 1; fi
 rm "$root/bin/fetch"
-# Upgrade from the original observer. A truncated upgrade must preserve it.
-run_pkg add -I "$PWD/dist/pfSense-pkg-SDWAN-0.1.0.pkg"
-head -c 80 dist/pfSense-pkg-SDWAN-0.1.1.pkg > "$root/interrupted.pkg"
-if run_pkg add -I "$root/interrupted.pkg"; then exit 1; fi
-test "$(run_pkg query '%v' pfSense-pkg-SDWAN)" = 0.1.0
-run_pkg check -s pfSense-pkg-SDWAN
-PATH="$root/bin:$PATH" sh -c "$installer"
+# The prior published release remains installed after a rejected upgrade.
+package=pfSense-pkg-SDWAN
+baseline=0.1.1
 version=$(awk '$1=="PORTVERSION="{print $2}' Makefile)
-test "$(run_pkg query '%v' pfSense-pkg-SDWAN)" = "$version"
+test -n "$version"
+test "$(run_pkg version -t "$baseline" "$version")" = '<'
+run_pkg add -I "$PWD/dist/$package-$baseline.pkg"
+test "$(run_pkg query '%v' "$package")" = "$baseline"
+head -c 80 "$PWD/dist/$package-$version.pkg" > "$root/interrupted.pkg"
+if run_pkg add -I "$root/interrupted.pkg"; then exit 1; fi
+test "$(run_pkg query '%v' "$package")" = "$baseline"
+run_pkg check -s "$package"
+PATH="$root/bin:$PATH" sh -c "$installer"
+test "$(run_pkg query '%v' "$package")" = "$version"
 run_pkg check -s pfSense-pkg-SDWAN
 run_pkg delete -Dy pfSense-pkg-SDWAN
 test ! -e "$dbroot/usr/local/www/sdwan/status.php"
+test ! -e "$dbroot/usr/local/www/sdwan/updates.php"
+test ! -e "$dbroot/usr/local/www/widgets/widgets/sdwan.widget.php"
+test ! -e "$dbroot/usr/local/sbin/sdwand.php"
 if run_pkg info -e pfSense-pkg-SDWAN; then exit 1; fi
 PATH="$root/bin:$PATH" sh -c "$installer"
 run_pkg check -s pfSense-pkg-SDWAN
@@ -58,4 +66,4 @@ sh "$root/sdwand.sh" status
 sh "$root/sdwand.sh" stop
 if sh "$root/sdwand.sh" status; then exit 1; fi
 echo "Verified FreeBSD service start, restart and stop with a fixture worker."
-echo "Verified checksum rejection, download failure, installation, removal and reinstall (hooks disabled)."
+echo "Verified checksum rejection, download failure, upgrade from $baseline to $version, removal and reinstall (hooks disabled)."

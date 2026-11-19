@@ -66,10 +66,45 @@ function sdwan_get_config(): array {
 	return sdwan_decode_config(config_get_path(SDWAN_CONFIG_PATH));
 }
 
+/* Only report a VTI transport when its Phase 1 names an assigned interface.
+ * A gateway group, VIP or unrecognized tunnel has no known single transport. */
+function sdwan_vti_transports(array $interfaces, array $phases1, array $phases2): array {
+	$parents = [];
+	foreach ($phases1 as $phase) {
+		$interface = $phase['interface'] ?? 'wan';
+		if (isset($phase['ikeid'], $interfaces[$interface]['enable']) &&
+		    !isset($phase['disabled']) && !isset($phase['mobile'])) {
+			$parents[$phase['ikeid']] = [
+				'interface' => $interface,
+				'split' => ($phase['iketype'] ?? '') === 'ikev1' || isset($phase['splitconn']),
+			];
+		}
+	}
+	$transports = [];
+	$first = [];
+	foreach ($phases2 as $phase) {
+		$ikeid = $phase['ikeid'] ?? '';
+		$parent = $parents[$ikeid] ?? null;
+		$id = $phase['reqid'] ?? '';
+		if ($parent === null || !preg_match('/^[1-9][0-9]*$/D', (string)$id)) {
+			continue;
+		}
+		/* A merged IKEv2 tunnel uses the first Phase 2 reqid for its device. */
+		$first[$ikeid] ??= $id;
+		if (($phase['mode'] ?? '') === 'vti' && !isset($phase['disabled'])) {
+			$device = 'ipsec' . ($parent['split'] ? $id : $first[$ikeid]);
+			$transports[$device] = $parent['interface'];
+		}
+	}
+	return $transports;
+}
+
 /* Never call get_gateways() here: a cache miss can persist new gateway entries. */
 function sdwan_gateways(): array {
 	require_once('config.inc');
 	$interfaces = config_get_path('interfaces', []);
+	$transports = sdwan_vti_transports($interfaces, config_get_path('ipsec/phase1', []),
+	    config_get_path('ipsec/phase2', []));
 	$inventory = [];
 	foreach (config_get_path('gateways/gateway_item', []) as $gateway) {
 		$name = $gateway['name'] ?? '';
@@ -78,13 +113,17 @@ function sdwan_gateways(): array {
 		    isset($gateway['disabled']) || !isset($interfaces[$interface]['enable'])) {
 			continue;
 		}
-		$address = $gateway['gateway'] ?? 'dynamic';
+		$address = !empty($gateway['gateway']) ? $gateway['gateway'] : 'dynamic';
+		$device = $interfaces[$interface]['if'] ?? '';
+		$ip = explode('%', $address, 2)[0];
+		$family = filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6) ? 'inet6' :
+		    (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) ? 'inet' : ($gateway['ipprotocol'] ?? 'inet'));
 		$inventory[$name] = [
 			'interface' => $interface,
+			'transport' => str_starts_with($device, 'ipsec') ? ($transports[$device] ?? '') : $interface,
 			'address' => $address,
 			'monitor' => !empty($gateway['monitor']) ? $gateway['monitor'] : $address,
-			'family' => $gateway['ipprotocol'] ??
-			    (filter_var($address, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6) ? 'inet6' : 'inet'),
+			'family' => $family,
 			'monitor_disabled' => isset($gateway['monitor_disable']),
 			'force_down' => isset($gateway['force_down']),
 		];
@@ -106,7 +145,7 @@ function sdwan_valid_decimal($value, int $maximum, bool $allow_zero): bool {
 }
 
 /* A null inventory checks stored structure without requiring restored interfaces. */
-function sdwan_validate_config(array $config, ?array $gateways): array {
+function sdwan_validate_config(array $config, ?array $gateways, array $previous = []): array {
 	$fields = [
 		'members' => ['name', 'gateway', 'cost'],
 		'slas' => ['name', 'latency_ms', 'loss_pct'],
@@ -120,6 +159,10 @@ function sdwan_validate_config(array $config, ?array $gateways): array {
 	$names = [];
 	$used_gateways = [];
 	$member_families = [];
+	$changed_gateways = [];
+	$unavailable = [];
+	$old_gateways = array_column($previous['members'] ?? [], 'gateway', 'name');
+	$old_policies = array_column($previous['policies'] ?? [], null, 'name');
 	foreach ($fields as $section => $required) {
 		$rows = $config[$section] ?? null;
 		if (!is_array($rows) || !array_is_list($rows)) {
@@ -138,14 +181,21 @@ function sdwan_validate_config(array $config, ?array $gateways): array {
 
 			if ($section === 'members') {
 				$gateway = $row['gateway'];
-				if (!is_string($gateway) || $gateway === '' ||
-				    ($gateways !== null && !array_key_exists($gateway, $gateways))) {
+				if (!is_string($gateway) || $gateway === '') {
 					return ["Select an available configured gateway for {$name}."];
+				}
+				if ($gateways !== null && (!isset($gateways[$gateway]) || !empty($gateways[$gateway]['monitor_disabled']))) {
+					if (($old_gateways[$name] ?? null) !== $gateway) {
+						return ["Select an available gateway with monitoring enabled for {$name}."];
+					}
+					/* Existing members survive a restore or a native monitor change. */
+					$unavailable[$name] = true;
 				}
 				if (isset($used_gateways[$gateway])) {
 					return ["Gateway already assigned to another member: {$name}."];
 				}
 				$used_gateways[$gateway] = true;
+				$changed_gateways[$name] = ($old_gateways[$name] ?? null) !== $gateway;
 				$member_families[$name] = $gateways[$gateway]['family'] ?? '';
 				$cost = $row['cost'];
 				if ((!is_string($cost) && !is_int($cost)) ||
@@ -167,17 +217,26 @@ function sdwan_validate_config(array $config, ?array $gateways): array {
 				}
 				$selected = [];
 				$families = [];
+				$old_members = $old_policies[$name]['members'] ?? [];
+				$unchanged_paths = $old_members === $row['members'];
 				foreach ($row['members'] as $member) {
 					if (!sdwan_valid_name($member) || !isset($names['members'][$member]) ||
 					    isset($selected[$member])) {
 						return ["Invalid or repeated member in policy {$name}."];
 					}
 					$selected[$member] = true;
+					if (isset($unavailable[$member]) && !in_array($member, $old_members, true)) {
+						return ["Select members with available monitored gateways for {$name}."];
+					}
+					if ($changed_gateways[$member]) {
+						$unchanged_paths = false;
+					}
 					if ($member_families[$member] !== '') {
 						$families[$member_families[$member]] = true;
 					}
 				}
-				if (count($families) > 1) {
+				/* Allow unrelated edits while repairing native family drift after a restore. */
+				if (count($families) > 1 && !$unchanged_paths) {
 					return ["Members in policy {$name} must use the same address family."];
 				}
 			}
@@ -201,21 +260,7 @@ function sdwan_save_config(array $candidate, string $expected_revision): array {
 		if (!hash_equals(sdwan_config_revision($current), $expected_revision)) {
 			return ['Settings have changed. Reload the page before saving.'];
 		}
-		$inventory = sdwan_gateways();
-		/* A gateway can disappear after a restore. Allow existing references to
-		 * remain while the operator fixes the members one at a time. */
-		$old_gateways = array_column($current['members'], 'gateway', 'name');
-		$candidate_members = $candidate['members'] ?? null;
-		foreach (is_array($candidate_members) ? $candidate_members : [] as $member) {
-			if (!is_array($member) || !sdwan_valid_name($member['name'] ?? null)) {
-				continue;
-			}
-			$gateway = $member['gateway'] ?? null;
-			if (is_string($gateway) && ($old_gateways[$member['name']] ?? null) === $gateway) {
-				$inventory[$gateway] ??= [];
-			}
-		}
-		$errors = sdwan_validate_config($candidate, $inventory);
+		$errors = sdwan_validate_config($candidate, sdwan_gateways(), $current);
 		if ($errors) {
 			return $errors;
 		}

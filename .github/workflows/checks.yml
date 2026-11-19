@@ -15,6 +15,21 @@ jobs:
         env:
           REQUIRE_NATIVE_SOCKET_TEST: "1"
         run: sh tests/run.sh
+      - name: Check out native pfSense XML, privilege and form implementations
+        uses: actions/checkout@v4
+        with:
+          repository: pfsense/pfsense
+          ref: 9363ac5b8651a1c7a333180425ce7719070f95f9
+          path: pfsense-core-fixture
+          sparse-checkout: |
+            src/etc/inc
+            src/usr/local/www/classes
+            src/usr/local/www/csrf
+          persist-credentials: false
+      - name: Verify native XML, privileges and WebGUI form requests
+        run: |
+          php tests/pfsense_core.php "$GITHUB_WORKSPACE/pfsense-core-fixture"
+          python3 tests/webgui.py --classes "$GITHUB_WORKSPACE/pfsense-core-fixture/src/usr/local/www/classes"
   freebsd:
     runs-on: ubuntu-24.04
     timeout-minutes: 25

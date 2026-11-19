@@ -1,0 +1,56 @@
+<?php
+// Run one isolated page request against pfSense's actual Form classes.
+[$script, $web, $classes, $page] = $argv;
+$request = json_decode(stream_get_contents(STDIN), true, 512, JSON_THROW_ON_ERROR);
+set_include_path($web . PATH_SEPARATOR . __DIR__ . '/write');
+require_once($web . '/sdwan.inc');
+require_once('config.inc');
+const COLLAPSIBLE = 8;
+const SEC_CLOSED = 4;
+if (!function_exists('gettext')) {
+	function gettext($text) { return $text; }
+}
+spl_autoload_register(function ($name) use ($classes) {
+	$file = $classes . '/' . str_replace('_', '/', $name) . '.class.php';
+	if (is_file($file)) {
+		require_once($file);
+	}
+});
+// The upstream renderer reads unset optional attributes with warnings masked by the WebGUI.
+set_error_handler(function ($severity, $message, $file) use ($classes) {
+	return str_starts_with($file, $classes . '/') && str_starts_with($message, 'Undefined array key');
+});
+function display_top_tabs($tabs, $nodrop) {}
+function print_info_box($message, $class, $button = false) { echo htmlspecialchars($message); }
+function print_input_errors($errors) { echo htmlspecialchars(implode(' ', $errors)); }
+function isAllowedPage($url) { global $request; return $request['inspect'] ?? true; }
+function csrf_startup() {
+	csrf_conf('auto-session', false);
+	csrf_conf('secret', 'isolated-form-regression-fixture');
+	csrf_conf('callback', 'fixture_csrf_failure');
+}
+function fixture_csrf_failure($token) { echo 'CSRF check failed'; }
+$GLOBALS['csrf'] = [];
+session_id('sdwan-editor-fixture');
+$_COOKIE['PHPSESSID'] = session_id();
+$disk = $current = $request['native'];
+$config = $request['config'];
+$disk[SDWAN_CONFIG_PATH] = $current[SDWAN_CONFIG_PATH] = sdwan_encode_config($config);
+$writes = 0;
+$busy = $fail = false;
+$_GET = $request['get'] ?? [];
+$_POST = $request['post'] ?? [];
+$_SERVER['REQUEST_URI'] = '/sdwan/' . $page . '.php';
+$_SERVER['REQUEST_METHOD'] = $_POST ? 'POST' : 'GET';
+if (isset($request['snapshot'])) {
+	$snapshot = $request['snapshot'] + ['generated_at' => time(), 'config_revision' => sdwan_config_revision($config)];
+	file_put_contents($web . '/observer.json', json_encode($snapshot));
+}
+if ($_POST) {
+	$_POST['revision'] ??= sdwan_config_revision($config);
+	register_shutdown_function(function () {
+		global $disk, $writes;
+		echo "\nSAVED=" . json_encode([$writes, sdwan_decode_config($disk[SDWAN_CONFIG_PATH])]);
+	});
+}
+include $web . '/sdwan/' . $page . '.php';
