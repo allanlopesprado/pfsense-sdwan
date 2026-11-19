@@ -54,34 +54,44 @@ def render_harness(work, core):
     (work / "filter.inc").write_text(
         "<?php require_once(__DIR__.'/filter-sdwan.inc'); function is_platform_booting() { return true; }")
     (work / "Net").mkdir()
-    (work / "Net/IPv6.php").touch()  # The IPv4 lab does not use PEAR IPv6.
+    # Stand in for PEAR's numeric address validation for the literal fixtures.
+    (work / "Net/IPv6.php").write_text(
+        "<?php class Net_IPv6 { static function checkIPv6($ip) { "
+        "return filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6) !== false; } }")
 
 
-def test_config(work):
+def test_config(work, family):
     config = fixture(work)
-    rule = {"tracker": "41001", "type": "pass", "ipprotocol": "inet", "interface": "lan", "protocol": "tcp",
-            "source": {"address": "192.0.2.11"}, "destination": {"address": "192.0.2.162", "port": "7"},
+    if family == "inet6":
+        client, target, other = "2001:db8:10::11", "2001:db8:40::162", "2001:db8:40::164"
+        uplinks = [("2001:db8:20::1", "2001:db8:20::2"), ("fe80::1", "fe80::2")]
+    else:
+        client, target, other = "192.0.2.11", "192.0.2.162", "192.0.2.164"
+        uplinks = [("198.51.100.1", "198.51.100.2"), ("203.0.113.1", "203.0.113.2")]
+    rule = {"tracker": "41001", "type": "pass", "ipprotocol": family, "interface": "lan", "protocol": "tcp",
+            "source": {"address": client}, "destination": {"address": target, "port": "7"},
             "gateway": "G", "descr": "path-a"}
     guard = dict(rule, type="block", tracker="41002", descr="native-guard")
     del guard["gateway"]
-    second = dict(rule, tracker="41003", destination={"address": "192.0.2.164", "port": "7"})
+    second = dict(rule, tracker="41003", destination={"address": other, "port": "7"})
     second_guard = dict(guard, tracker="41004", destination=second["destination"])
     config.update({"filter/rule": [rule, guard, second, second_guard],
                    "gateways/gateway_group": [{"name": "G", "item": ["GW_A|1|", "GW_B|2|"]}],
                    "fixture_sources": {}, "fixture_devices": {}, "reload_gateways": {}})
     config["interfaces"]["lan"] = {"enable": "", "if": "lablan"}
-    for gw, network, device in zip(config["gateways/gateway_item"], ("198.51.100", "203.0.113"), ("labwana", "labwanb")):
+    for gw, (source, hop), device in zip(config["gateways/gateway_item"], uplinks, ("labwana", "labwanb")):
         interface, name = gw["interface"], gw["name"]
-        gw["gateway"] = network + ".2"
+        gw["gateway"] = hop
         config["interfaces"][interface]["if"] = device
         config["fixture_devices"][interface] = device
-        config["fixture_sources"][device] = network + ".1"
-        config["processes"][name].update(targetip=gw["gateway"], srcip=network + ".1")
-        config["reload_gateways"][name] = {"interface": device, "ipprotocol": "inet", "address": gw["gateway"], "online": True}
+        config["fixture_sources"][device] = source
+        scope = "%" + device if hop.startswith("fe80:") else ""
+        config["processes"][name].update(targetip=hop + scope, srcip=source + scope)
+        config["reload_gateways"][name] = {"interface": device, "ipprotocol": family, "address": hop, "online": True}
     return config
 
 
-def run(php, core, output, replay):
+def run(php, core, output, replay, family):
     with tempfile.TemporaryDirectory(prefix="sdwan-render-", dir="/tmp") as tmp, ExitStack() as stack:
         work = Path(tmp)
         render_harness(work, core)
@@ -93,7 +103,9 @@ def run(php, core, output, replay):
             code = daemon.read_text()
             assert code.count(call) == 1
             daemon.write_text(code.replace(call, "fopen($process['socket'], 'rb')"))
-        config = test_config(work)
+        config = test_config(work, family)
+        bound_rule = config["filter/rule"][0]
+        scoped_flow = f'{family} proto tcp from {bound_rule["source"]["address"]} to {bound_rule["destination"]["address"]} port 7'
         settings = work / "fixture.json"
         snapshot = work / "snapshot.json"
         def execute(*args):
@@ -137,6 +149,13 @@ def run(php, core, output, replay):
                     event.result()
             return compile_rule()
 
+        def next_hop(choice):
+            route = config["reload_gateways"][choice]
+            device, address = route["interface"], route["address"]
+            if address.startswith("fe80:"):
+                address += "%" + device
+            return f"{device} {address}"
+
         rules = {}
         for label, choice, losses in [("path-a", "GW_A", (0, 0)), ("path-b", "GW_B", (100, 0)),
                                       ("no-member", None, (100, 100))]:
@@ -146,13 +165,12 @@ def run(php, core, output, replay):
             normalized = " ".join(line.split())
             expected = "pass in quick" if choice else "block in quick"
             assert normalized.startswith(expected + " on $LABLAN "), line
-            for field in ("inet proto tcp from 192.0.2.11 to 192.0.2.162 port 7", "ridentifier 41001",
+            for field in (scoped_flow, "ridentifier 41001",
                           'label "id=41001"', 'label "tags=user_rule"', f'label "descr={label}"'):
                 assert field in normalized, line
             assert "\n" not in line and "$GW" not in line, line
             if choice:
-                route = config["reload_gateways"][choice]
-                assert f"route-to ({route['interface']} {route['address']})" in normalized and "keep state" in normalized, line
+                assert f"route-to ({next_hop(choice)})" in normalized and "keep state" in normalized, line
                 tier = 1 if choice == "GW_A" else 2
                 assert f'label "gw={tier}:G"' in normalized, line
                 shutil.copy(snapshot, work / ("sample-a.json" if choice == "GW_A" else "sample-b.json"))
@@ -161,7 +179,7 @@ def run(php, core, output, replay):
             rules[label] = line
         assert compile_rule("control") == "unchanged"
         transport = "file replay" if replay else "AF_UNIX"
-        print(f"ok - --once observations ({transport}) and upstream PF renderer selected A, failed to B, then denied without a path")
+        print(f"ok - {family} observations ({transport}) and upstream PF renderer selected A, failed to B, then denied without a path")
 
         def denied(reason):
             line = " ".join(compile_rule().split())
@@ -169,8 +187,8 @@ def run(php, core, output, replay):
         shutil.copy(work / "sample-a.json", snapshot)
         first, same_cycle, next_cycle = json.loads(compile_rule("freeze"))
         assert "41001" in first and "41003" in same_cycle
-        assert all("labwana 198.51.100.2" in line for line in (first, same_cycle))
-        assert "labwanb 203.0.113.2" in next_cycle
+        assert all(next_hop("GW_A") in line for line in (first, same_cycle))
+        assert next_hop("GW_B") in next_cycle
         old = json.loads(snapshot.read_text())
         old["generated_at"] -= 300
         snapshot.write_text(json.dumps(old))
@@ -190,7 +208,7 @@ def run(php, core, output, replay):
         config["reload_gateways"]["GW_A"]["online"] = False
         denied("native gateway down after sample")
         config = deepcopy(stable)
-        config["reload_gateways"]["GW_A"]["address"] = "224.0.0.1"
+        config["reload_gateways"]["GW_A"]["address"] = "ff02::1" if family == "inet6" else "224.0.0.1"
         denied("non-unicast next hop")
         config = deepcopy(stable)
         config["gateways/sdwan_bindings/item"].append(binding)
@@ -205,6 +223,8 @@ def run(php, core, output, replay):
         if output:
             output.mkdir(parents=True, exist_ok=True)
             for label, line in rules.items():
+                if family == "inet6":
+                    label = f"ipv6-{label}"
                 (output / f"{label}.pf").write_text(line + "\n")
 
 
@@ -213,6 +233,9 @@ if __name__ == "__main__":
     parser.add_argument("--php", default="php")
     parser.add_argument("--core", type=Path, required=True)
     parser.add_argument("--emit-dir", type=Path)
+    parser.add_argument("--family", choices=("inet", "inet6", "both"), default="both")
     parser.add_argument("--replay-lines", action="store_true", help="read dpinger frames from files for hosts that prohibit Unix sockets")
     args = parser.parse_args()
-    run(args.php, args.core.resolve(), args.emit_dir, args.replay_lines)
+    families = ("inet", "inet6") if args.family == "both" else (args.family,)
+    for family in families:
+        run(args.php, args.core.resolve(), args.emit_dir, args.replay_lines, family)

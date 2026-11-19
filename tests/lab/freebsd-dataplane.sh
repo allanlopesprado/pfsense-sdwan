@@ -71,7 +71,8 @@ jexec "$firewall" sysctl net.inet.ip.forwarding=1
 
 # Upstream PF tests use inetd and the standard echo port. Our handler also
 # returns the observed source IP so each direction and NAT are asserted.
-printf 'echo stream tcp4 nowait root %s tcp-peer\n' "$work/tcp-peer" >"$work/inetd.conf"
+printf 'echo stream tcp4 nowait root %s tcp-peer\necho stream tcp6 nowait root %s tcp-peer\n' \
+    "$work/tcp-peer" "$work/tcp-peer" >"$work/inetd.conf"
 jexec "$remote" inetd -p "$work/inetd.pid" "$work/inetd.conf"
 if ! printf 'listener-test\n' | jexec "$remote" nc -n -N -w 3 192.0.2.162 7 | grep -Eq '^[0-9.]+ listener-test$'; then
     echo 'The test TCP listener failed a local round trip' >&2
@@ -229,5 +230,78 @@ jexec "$firewall" pfctl -s labels | counter baseline
 baseline >"$work/final"
 cmp "$work/baseline" "$work/final"
 echo 'ok - baseline PF rules, NAT rules and kernel default route survived the path changes'
+
+if [ -n "${SDWAN_RENDERED_RULES:-}" ]; then
+    for node in "$client" "$firewall" "$remote"; do
+        jexec "$node" sysctl net.inet6.ip6.dad_count=0
+    done
+    lan_client=${lan%?}a
+    remote_b=${wan_b%?}b
+    add6() {
+        jexec "$1" ifconfig "$2" inet6 -ifdisabled
+        jexec "$1" ifconfig "$2" inet6 "$3" alias
+    }
+    add6 "$client" "$lan_client" 2001:db8:10::11/64
+    add6 "$firewall" "$lan" 2001:db8:10::1/64
+    add6 "$firewall" "$wan_a" 2001:db8:20::1/64
+    add6 "$remote" "$remote_a" 2001:db8:20::2/64
+    add6 "$firewall" "$wan_b" 2001:db8:30::1/64
+    add6 "$remote" "$remote_b" 2001:db8:30::2/64
+    add6 "$remote" "$remote_b" fe80::2/64
+    add6 "$remote" lo0 2001:db8:40::162/128
+    add6 "$remote" lo0 2001:db8:40::163/128
+    jexec "$firewall" sysctl net.inet6.ip6.forwarding=1
+    jexec "$client" route -n add -inet6 default 2001:db8:10::1
+    jexec "$firewall" route -n add -inet6 default 2001:db8:20::2
+    jexec "$remote" route -n add -inet6 2001:db8:10::/64 2001:db8:20::1
+    jexec "$firewall" route -n get -inet6 default | awk '/gateway:|interface:/ {print}' >"$work/default6.before"
+    test -s "$work/default6.before"
+
+    cat >"$work/remote6.pf" <<EOF
+pass in quick on $remote_a inet6 proto tcp from 2001:db8:10::11 to 2001:db8:40::162 port 7 no state label "ingress-a"
+pass in quick on $remote_b inet6 proto tcp from 2001:db8:10::11 to 2001:db8:40::162 port 7 no state label "ingress-b"
+pass all no state
+EOF
+    jexec "$remote" pfctl -f "$work/remote6.pf"
+    steer6() {
+        test -s "$SDWAN_RENDERED_RULES/ipv6-$1.pf"
+        {
+            printf 'set state-policy if-bound\nblock all\npass quick inet6 proto icmp6 no state\n'
+            sed -e 's/\$LABLAN/'"$lan"'/g' -e "s/labwana/$wan_a/g" -e "s/labwanb/$wan_b/g" \
+                "$SDWAN_RENDERED_RULES/ipv6-$1.pf"
+            printf 'pass in quick on %s inet6 proto tcp from 2001:db8:10::11 to 2001:db8:40::/64 port 7\n' "$lan"
+            printf 'pass out inet6 all\n'
+        } >"$work/ipv6.pf"
+        jexec "$firewall" pfctl -nf "$work/ipv6.pf"
+        jexec "$firewall" pfctl -f "$work/ipv6.pf"
+    }
+    request6() {
+        printf '%s\n' "$2" | jexec "$client" nc -6 -n -N -w 3 "$1" 7
+    }
+    steer6 path-a
+    test "$(request6 2001:db8:40::162 v6-wan-a)" = '2001:db8:10::11 v6-wan-a'
+    jexec "$remote" pfctl -s labels | counter ingress-a
+    steer6 path-b
+    jexec "$remote" route -n change -inet6 2001:db8:10::/64 2001:db8:30::1
+    test "$(request6 2001:db8:40::162 v6-wan-b)" = '2001:db8:10::11 v6-wan-b'
+    jexec "$remote" pfctl -s labels | counter ingress-b
+    steer6 no-member
+    jexec "$remote" route -n change -inet6 2001:db8:10::/64 2001:db8:20::1
+    if request6 2001:db8:40::162 v6-block >"$work/blocked6"; then
+        echo 'The IPv6 no-member rule allowed a new flow' >&2
+        exit 1
+    fi
+    test ! -s "$work/blocked6"
+    jexec "$firewall" pfctl -s labels | counter no-member
+    test "$(request6 2001:db8:40::163 v6-control)" = '2001:db8:10::11 v6-control'
+    steer6 path-a
+    test "$(request6 2001:db8:40::162 v6-recovered)" = '2001:db8:10::11 v6-recovered'
+    jexec "$firewall" route -n get -inet6 default | awk '/gateway:|interface:/ {print}' >"$work/default6.after"
+    cmp "$work/default6.before" "$work/default6.after"
+    echo 'ok - IPv6 TCP crossed both WANs (including a link-local next hop), blocked without a path and recovered'
+    jexec "$remote" pfctl -f "$work/remote.pf"
+    load_rules
+fi
+
 sh "$repo/tests/lab/freebsd-vti-no-sa.sh" "$firewall" "$remote" "$wan_a" "$remote_a" "$work"
 sh "$repo/tests/lab/freebsd-vti-esp.sh" "$firewall" "$remote" "$wan_a" "$remote_a" "$work"

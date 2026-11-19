@@ -12,14 +12,25 @@
 int
 main(void)
 {
-	struct sockaddr_in peer;
+	struct sockaddr_storage peer;
 	socklen_t length = sizeof(peer);
-	char address[INET_ADDRSTRLEN];
+	const void *source;
+	char address[INET6_ADDRSTRLEN];
 	char line[128];
 
-	if (getpeername(STDIN_FILENO, (struct sockaddr *)&peer, &length) != 0 ||
-	    peer.sin_family != AF_INET ||
-	    inet_ntop(AF_INET, &peer.sin_addr, address, sizeof(address)) == NULL)
+	if (getpeername(STDIN_FILENO, (struct sockaddr *)&peer, &length) != 0)
+		return 1;
+	switch (peer.ss_family) {
+	case AF_INET:
+		source = &((struct sockaddr_in *)&peer)->sin_addr;
+		break;
+	case AF_INET6:
+		source = &((struct sockaddr_in6 *)&peer)->sin6_addr;
+		break;
+	default:
+		return 1;
+	}
+	if (inet_ntop(peer.ss_family, source, address, sizeof(address)) == NULL)
 		return 1;
 	while (fgets(line, sizeof(line), stdin) != NULL) {
 		if (printf("%s %s", address, line) < 0 || fflush(stdout) == EOF)
