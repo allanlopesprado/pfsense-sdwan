@@ -25,12 +25,14 @@ $pkg_rc = 1;
 $local_version = '0.2.0';
 verify(sdwan_release_installed() === null);
 
-$index = ['schema' => 1, 'channel' => 'lab', 'package' => 'pfSense-pkg-SDWAN', 'version' => '0.2.0', 'sha256' => str_repeat('a', 64)];
-verify(sdwan_release_parse(json_encode($index)) === ['version' => '0.2.0', 'sha256' => str_repeat('a', 64)]);
+$index = ['schema' => 1, 'channel' => 'main', 'maturity' => 'experimental', 'package' => 'pfSense-pkg-SDWAN', 'version' => '0.2.0', 'sha256' => str_repeat('a', 64)];
+verify(sdwan_release_parse(json_encode($index)) === ['version' => '0.2.0', 'sha256' => str_repeat('a', 64), 'maturity' => 'experimental']);
+$stable = array_replace($index, ['maturity' => 'stable']);
+verify(sdwan_release_parse(json_encode($stable))['maturity'] === 'stable');
 foreach (['', 'null', '[]', '{', str_repeat(' ', SDWAN_RELEASE_MAX_BYTES) . json_encode($index)] as $invalid) {
 	verify(sdwan_release_parse($invalid) === null);
 }
-foreach ([['schema', '1'], ['channel', 'stable'], ['package', 'pfSense'], ['version', []], ['version', '2.0'], ['version', '00.2.0'],
+foreach ([['schema', '1'], ['channel', 'lab'], ['maturity', 'unknown'], ['maturity', null], ['package', 'pfSense'], ['version', []], ['version', '2.0'], ['version', '00.2.0'],
     ['version', '1.0.0;'], ['version', "1.0.0\n"], ['sha256', 'bogus'], ['sha256', []]] as [$key, $invalid]) {
 	$test = $index;
 	$test[$key] = $invalid;

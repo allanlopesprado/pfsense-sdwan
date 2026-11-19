@@ -11,6 +11,7 @@ DEINSTALL)
 	else
 		rm -f /var/run/sdwan-observer.json /var/run/sdwan-observer.json.forwarded
 	fi
+	rm -f /var/run/sdwan-observer.json.events || exit 1
 	;;
 POST-DEINSTALL) ;;
 *) exit 0 ;;

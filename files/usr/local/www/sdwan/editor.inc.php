@@ -139,10 +139,10 @@ if ($errors) {
 	print_info_box(gettext('SD-WAN configuration saved.'), 'success');
 }
 
-?>
+if (!$display_form): ?>
 <div class="panel panel-default">
 	<div class="panel-heading"><h2 class="panel-title"><?=sdwan_ui_escape($sections[$collection])?></h2></div>
-	<div class="table-responsive"><table class="table table-striped table-hover">
+	<div class="table-responsive"><table class="table table-striped table-hover table-condensed">
 		<thead><tr><?php foreach ($columns[$collection] as $label): ?>
 			<th><?=sdwan_ui_escape($label)?></th>
 		<?php endforeach; ?><th><?=gettext('Actions')?></th></tr></thead><tbody>
@@ -161,11 +161,11 @@ if ($errors) {
 			<td><form method="post" action="<?=$url?>" class="form-inline">
 				<input type="hidden" name="revision" value="<?=sdwan_ui_escape($revision)?>">
 				<input type="hidden" name="original" value="<?=sdwan_ui_escape($row['name'])?>">
-				<a class="btn btn-default btn-xs" href="<?=$url?>?edit=<?=rawurlencode($row['name'])?>"><?=gettext('Edit')?></a>
+				<a class="btn btn-default btn-xs" href="<?=$url?>?edit=<?=rawurlencode($row['name'])?>"><i class="fa-solid fa-pencil" aria-hidden="true"></i> <?=gettext('Edit')?></a>
 				<?php if (isset($used_by[$row['name']])): ?>
 				<small><?=sdwan_ui_escape(sprintf(gettext('Used by: %s'), implode(', ', $used_by[$row['name']])))?></small>
 				<?php else: ?>
-				<button type="submit" name="action" value="delete" class="btn btn-danger btn-xs"><?=gettext('Delete')?></button>
+				<button type="submit" name="action" value="delete" class="btn btn-danger btn-xs"><i class="fa-solid fa-trash-can" aria-hidden="true"></i> <?=gettext('Delete')?></button>
 				<?php endif; ?>
 			</form></td>
 		</tr>
@@ -177,14 +177,20 @@ if ($errors) {
 		</tbody>
 	</table></div>
 </div>
-<?php if ($prerequisite !== ''):
+<?php endif;
+if ($prerequisite !== ''):
 	print_info_box($prerequisite, 'info', false);
 elseif (!$display_form): ?>
-	<a class="btn btn-success" href="<?=$url?>?add=1"><i class="fa-solid fa-plus" aria-hidden="true"></i> <?=gettext('Add')?></a>
+	<a class="btn btn-success btn-sm" href="<?=$url?>?add=1"><i class="fa-solid fa-plus" aria-hidden="true"></i> <?=gettext('Add')?></a>
 <?php else:
 	$form = new Form();
 	$form->setAction($url);
-	$section = new Form_Section($original === '' ? gettext('Add entry') : gettext('Edit entry'));
+	$form_titles = [
+		'members' => [gettext('Add member'), gettext('Edit member')],
+		'slas' => [gettext('Add performance SLA'), gettext('Edit performance SLA')],
+		'policies' => [gettext('Add policy'), gettext('Edit policy')],
+	];
+	$section = new Form_Section($form_titles[$collection][$original === '' ? 0 : 1]);
 	$name_input = new Form_Input('name', gettext('Name'), 'text', $sdwan_record['name'] ?? '', [
 		'maxlength' => 32, 'pattern' => '[A-Za-z0-9][A-Za-z0-9_\-]{0,31}', 'required' => true,
 	]);

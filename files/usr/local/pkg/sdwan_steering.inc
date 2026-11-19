@@ -3,6 +3,7 @@
 require_once(__DIR__ . '/sdwan.inc');
 require_once(__DIR__ . '/sdwan_engine.inc');
 require_once(__DIR__ . '/sdwan_preflight.inc');
+require_once(__DIR__ . '/sdwan_log.inc');
 
 const SDWAN_BINDINGS_PATH = 'gateways/sdwan_bindings';
 const SDWAN_STEERING_HOLD = 30;
@@ -164,11 +165,15 @@ function sdwan_steering_edit(string $group, ?string $policy, string $expected_re
 		if (!is_array(config_set_path(SDWAN_BINDINGS_PATH, ['item' => $updated])) ||
 		    !is_array(write_config($policy === null ? 'Returned SD-WAN rules to native gateway selection' : 'Bound SD-WAN forwarding policy to native firewall rules'))) {
 			config_read_file(false, false);
+			sdwan_log_event('binding_error');
 			return ['pfSense could not save the forwarding binding.'];
 		}
 	} finally {
 		unlock($lock);
 	}
+	$label = sdwan_log_label($group);
+	sdwan_log_emit(LOG_NOTICE, $policy === null ? "Group {$label}: forwarding binding removed." :
+	    "Group {$label}: forwarding binding saved for policy " . sdwan_log_label($policy) . '.');
 	if (sdwan_steering_supported()) {
 		filter_configure();
 	}

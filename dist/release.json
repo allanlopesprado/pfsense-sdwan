@@ -1,7 +1,8 @@
 {
   "schema": 1,
-  "channel": "lab",
+  "channel": "main",
+  "maturity": "experimental",
   "package": "pfSense-pkg-SDWAN",
-  "version": "0.3.0",
-  "sha256": "6552b2fcbc97de2be53a5c926c7f1539d06514902a42b1eb87f9b0a2aa595476"
+  "version": "0.4.0",
+  "sha256": "b9300cb5ac2cf0655865aa46b2e59af2617ccb6838e9dbd5456a9d1ba8a57ce6"
 }

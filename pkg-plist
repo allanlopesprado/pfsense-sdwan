@@ -4,6 +4,7 @@ pkg/sdwan.inc
 pkg/sdwan.xml
 pkg/sdwan_engine.inc
 pkg/sdwan_invalidate.inc
+pkg/sdwan_log.inc
 pkg/sdwan_preflight.inc
 pkg/sdwan_release.inc
 pkg/sdwan_steering.inc

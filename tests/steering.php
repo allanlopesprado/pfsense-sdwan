@@ -10,7 +10,7 @@ register_shutdown_function(static function () use ($dir) {
 	foreach (glob($dir . '/*') as $path) { unlink($path); }
 	rmdir($dir);
 });
-foreach (['sdwan.inc', 'sdwan_engine.inc', 'sdwan_steering.inc', 'sdwan_preflight.inc'] as $file) {
+foreach (['sdwan.inc', 'sdwan_engine.inc', 'sdwan_steering.inc', 'sdwan_preflight.inc', 'sdwan_log.inc'] as $file) {
 	$contents = file_get_contents($pkg . '/' . $file);
 	if ($file === 'sdwan_engine.inc') {
 		$contents = str_replace('/var/run/sdwan-observer.json', $dir . '/snapshot', $contents);

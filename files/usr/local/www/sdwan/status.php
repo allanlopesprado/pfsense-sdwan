@@ -14,16 +14,35 @@ $can_inspect = isAllowedPage('/sdwan/diagnostics.php');
 $pgtitle = [gettext('Services'), gettext('SD-WAN'), gettext('Status')];
 include('head.inc');
 sdwan_ui_tabs('status');
-print_info_box(gettext('Recommendations reflect the latest gateway measurements. Check a new connection with Diagnostics > Packet Capture to verify its actual path.'), 'info', false);
-if ($snapshot === null) {
+if (!$sdwan['members']) {
+	print_info_box(gettext('Configure a member and a performance SLA to start monitoring a path.'), 'info', false);
+} elseif ($snapshot === null) {
 	print_info_box(gettext('Waiting for current gateway measurements. Check the observer service and Diagnostics.'), 'warning', false);
-} else {
-	echo '<p>' . sdwan_ui_escape(sprintf(gettext('Last sample: %s'), date('Y-m-d H:i:s T', $snapshot['generated_at']))) . '</p>';
+} elseif ($sdwan['policies']) {
+	$unavailable = $reduced = $pending = 0;
+	foreach ($sdwan['policies'] as $policy) {
+		$state = $snapshot['policies'][$policy['name']]['path_status'] ?? null;
+		$unavailable += (int)($state === 'no_eligible');
+		$reduced += (int)($state === 'degraded');
+		$pending += (int)($state === null);
+	}
+	$summary = [];
+	if ($unavailable) {
+		$summary[] = sprintf(gettext('Policies without an eligible path: %d.'), $unavailable);
+	}
+	if ($reduced) {
+		$summary[] = sprintf(gettext('Policies down to one eligible path: %d.'), $reduced);
+	}
+	if ($pending) {
+		$summary[] = sprintf(gettext('Policies awaiting evaluation: %d.'), $pending);
+	}
+	print_info_box($summary ? implode(' ', $summary) : gettext('Every policy has an eligible path within its SLA.'),
+	    $unavailable ? 'danger' : ($reduced || $pending ? 'warning' : 'success'), false);
 }
 ?>
 <div class="panel panel-default">
 	<div class="panel-heading"><h2 class="panel-title"><?=gettext('Policy recommendations')?></h2></div>
-	<div class="table-responsive"><table class="table table-striped table-hover">
+	<div class="table-responsive"><table class="table table-striped table-hover table-condensed">
 		<thead><tr><th><?=gettext('Policy')?></th><th><?=gettext('Eligible paths')?></th><th><?=gettext('Recommended member')?></th><th><?=gettext('Reason')?></th></tr></thead>
 		<tbody>
 		<?php foreach ($sdwan['policies'] as $policy):
@@ -47,18 +66,22 @@ if ($snapshot === null) {
 		?>
 		</tbody>
 	</table></div>
+	<?php if ($snapshot !== null): ?>
+	<div class="panel-footer"><?=sdwan_ui_escape(sprintf(gettext('Last sample: %s'), date('Y-m-d H:i:s T', $snapshot['generated_at'])))?></div>
+	<?php endif; ?>
 </div>
 <div class="panel panel-default">
 	<div class="panel-heading"><h2 class="panel-title"><?=gettext('Gateway measurements')?></h2></div>
-	<div class="table-responsive"><table class="table table-striped table-hover">
+	<div class="table-responsive"><table class="table table-striped table-hover table-condensed">
 		<thead><tr><th><?=gettext('Member')?></th><th><?=gettext('Gateway')?></th><th><?=gettext('State')?></th>
 			<th><?=gettext('RTT')?></th><th><?=gettext('RTT standard deviation')?></th><th><?=gettext('Loss')?></th></tr></thead>
 		<tbody>
 		<?php foreach ($sdwan['members'] as $member):
 			$reading = $snapshot['members'][$member['name']] ?? [];
+			[$cell_class, $state_text] = sdwan_ui_gateway_state($reading['status'] ?? null);
 		?>
 			<tr><td><?=sdwan_ui_escape($member['name'])?></td><td><?=sdwan_ui_escape($member['gateway'])?></td>
-				<td><?=sdwan_ui_escape($reading['status'] ?? gettext('Unknown'))?></td>
+				<td class="<?=$cell_class?>"><strong><?=sdwan_ui_escape($state_text)?></strong></td>
 				<td><?=sdwan_ui_metric($reading['rtt_ms'] ?? null, ' ms')?></td>
 				<td><?=sdwan_ui_metric($reading['rttsd_ms'] ?? null, ' ms')?></td>
 				<td><?=sdwan_ui_metric($reading['loss_pct'] ?? null, '%')?></td></tr>
@@ -69,5 +92,8 @@ if ($snapshot === null) {
 		?>
 		</tbody>
 	</table></div>
+	<?php sdwan_ui_links(['/status_gateways.php' => gettext('Gateway status'),
+	    SDWAN_UI_EVENT_LOG => gettext('SD-WAN events'),
+	    '/status_services.php' => gettext('Services')]); ?>
 </div>
 <?php include('foot.inc'); ?>

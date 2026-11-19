@@ -140,7 +140,7 @@ if ($supported) {
 			<?php endif; ?>
 		</dl>
 		<?php if ($group !== null): ?>
-		<table class="table table-striped">
+		<div class="table-responsive"><table class="table table-striped table-hover table-condensed">
 			<thead><tr><th><?=gettext('Native gateway')?></th><th><?=gettext('Configured tier')?></th></tr></thead><tbody>
 			<?php foreach (is_array($group['item'] ?? null) ? $group['item'] : [] as $item):
 				if (!is_string($item)) {
@@ -149,11 +149,16 @@ if ($supported) {
 				[$name, $tier] = array_pad(explode('|', $item, 3), 2, '');
 			?><tr><td><?=sdwan_ui_escape($name)?></td><td><?=sdwan_ui_escape($tier)?></td></tr><?php endforeach; ?>
 			</tbody>
-		</table>
-		<table class="table table-striped">
+		</table></div>
+		<div class="table-responsive"><table class="table table-striped table-hover table-condensed">
 			<thead><tr><th><?=gettext('Rule tracker')?></th><th><?=gettext('Interface')?></th><th><?=gettext('Description')?></th><th><?=gettext('State')?></th></tr></thead><tbody>
-			<?php foreach ($native_rules as $rule): ?><tr>
-				<td><?=sdwan_ui_escape($rule['tracker'] ?? '—')?></td>
+			<?php foreach ($native_rules as $rule):
+				$tracker = (string)($rule['tracker'] ?? '');
+				$log_url = '/status_logs_filter.php?filterlogentries_submit=1&filterlogentries_tracker=' . rawurlencode($tracker);
+			?><tr>
+				<td><?php if ($tracker !== '' && isset($rule['log']) && isAllowedPage($log_url)): ?>
+					<a href="<?=sdwan_ui_escape($log_url)?>" title="<?=gettext('View logged packets for this rule')?>"><?=sdwan_ui_escape($tracker)?></a>
+				<?php else: ?><?=sdwan_ui_escape($tracker !== '' ? $tracker : '—')?><?php endif; ?></td>
 				<td><?=sdwan_ui_escape($rule['interface'] ?? '—')?></td>
 				<td><?=sdwan_ui_escape($rule['descr'] ?? '')?></td>
 				<td><?=isset($rule['disabled']) ? gettext('Disabled') : gettext('Enabled')?></td>
@@ -162,11 +167,12 @@ if ($supported) {
 				sdwan_ui_empty(gettext('No configured firewall rule references this group.'), 4);
 			}
 			?></tbody>
-		</table>
-		<p class="help-block"><?=gettext('Review rule order and exceptions for local and VPN traffic on the ingress interface. Use Diagnostics > Packet Capture with a new connection to verify the actual egress path.')?></p>
-		<a href="/system_gateway_groups.php"><?=gettext('Gateway groups')?></a> · <a href="/firewall_rules.php"><?=gettext('Firewall rules')?></a>
+		</table></div>
+		<p class="help-block"><?=gettext('Review rule order and exceptions for local and VPN traffic on the ingress interface. Capture a new connection to verify its egress path.')?></p>
 		<?php endif; ?>
 	</div>
+	<?php sdwan_ui_links(['/system_gateway_groups.php' => gettext('Gateway groups'), '/firewall_rules.php' => gettext('Firewall rules'),
+	    '/diag_packet_capture.php' => gettext('Packet capture')]); ?>
 </div>
 <?php if ($supported && $native_edit && $binding === null && !$preview['errors'] && $preview['binding'] !== null): ?>
 	<form method="post" action="/sdwan/forwarding.php">

@@ -5,6 +5,7 @@ require_once('config.inc');
 require_once('gwlb.inc');
 require_once('/usr/local/pkg/sdwan.inc');
 require_once('/usr/local/pkg/sdwan_engine.inc');
+require_once('/usr/local/pkg/sdwan_log.inc');
 
 /*
  * Read the four fields of the native pfSense dpinger status socket. Bound the
@@ -97,6 +98,7 @@ function sdwan_observe_once(): void {
 		$snapshot['config_revision'] = sdwan_config_revision($config);
 		$receipt = SDWAN_SNAPSHOT_PATH . '.forwarded';
 		$reload = false;
+		$invalid_bindings = false;
 		/* Stock systems without bindings never run the native adapter. */
 		if (config_get_path('gateways/sdwan_bindings/item', []) || is_file($receipt)) {
 			require_once('/usr/local/pkg/sdwan_steering.inc');
@@ -106,7 +108,7 @@ function sdwan_observe_once(): void {
 					$snapshot['steering'] = sdwan_steering_observations($config, $snapshot, $prior['steering'] ?? []);
 				} catch (UnexpectedValueException $e) {
 					/* Unreadable bindings produce no pass decisions. */
-					error_log('sdwand: ' . $e->getMessage());
+					$invalid_bindings = true;
 					$snapshot['steering'] = [];
 				}
 				$signature = sdwan_steering_signature($snapshot['steering']);
@@ -141,6 +143,11 @@ function sdwan_observe_once(): void {
 				unlink($receipt);
 			}
 		}
+		if ($invalid_bindings) {
+			sdwan_log_event('error', [], 'bindings');
+		} else {
+			sdwan_log_event('observation', $snapshot);
+		}
 	} finally {
 		fclose($lock);
 	}
@@ -151,12 +158,30 @@ if (PHP_SAPI !== 'cli' || !in_array(array_slice($argv, 1), [[], ['--once']], tru
 	exit(64);
 }
 $once = count($argv) === 2;
+if (!$once) {
+	sdwan_log_event('start');
+}
 do {
 	try {
 		sdwan_observe_once();
 	} catch (Throwable $e) {
-		error_log('sdwand: ' . $e->getMessage());
+		/* A concurrent manual --once is expected. Its caller still receives
+		 * an error without producing repeated operational log records. */
+		$cause = match ($e->getMessage()) {
+			'Cannot refresh pfSense configuration' => 'config',
+			'Cannot create temporary snapshot', 'Cannot publish snapshot', 'Cannot open snapshot lock' => 'status',
+			'Cannot record the filter reload request' => 'reload',
+			default => $e instanceof UnexpectedValueException ? 'config' : 'observation',
+		};
+		if ($e->getMessage() !== 'Another observation is running') {
+			sdwan_log_event('error', [], $cause);
+		}
 		if ($once) {
+			$detail = match ($e->getMessage()) {
+				'Another observation is running', 'Unsupported SD-WAN configuration format.' => $e->getMessage(),
+				default => 'Observation failed. See the system log.',
+			};
+			fwrite(STDERR, "sdwand: {$detail}\n");
 			exit(1);
 		}
 	}

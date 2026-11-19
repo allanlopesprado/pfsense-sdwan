@@ -37,14 +37,17 @@ if ($installed === null) {
 			<dt><?=gettext('Installed locally')?></dt><dd><?=sdwan_ui_escape($installed ?? gettext('Unknown'))?></dd>
 			<?php if ($release !== null): ?>
 			<dt><?=gettext('Published on GitHub')?></dt><dd><?=sdwan_ui_escape($release['version'])?></dd>
-			<dt><?=gettext('Published SHA-256')?></dt><dd><code><?=sdwan_ui_escape($release['sha256'])?></code></dd>
+			<dt><?=gettext('Release maturity')?></dt>
+			<dd><?=$release['maturity'] === 'experimental' ? gettext('Experimental') : gettext('Stable')?></dd>
+			<dt><?=gettext('Published SHA-256')?></dt><dd><code><?=implode('<wbr>', array_map('sdwan_ui_escape', str_split($release['sha256'], 8)))?></code></dd>
 			<?php endif; ?>
 		</dl>
 		<form method="post" action="/sdwan/updates.php">
-			<p><?=gettext('Check the native-forwarding lab release on GitHub over HTTPS. The pfSense Package Manager uses its own catalog.')?></p>
+			<p><?=gettext('Check the release published on the main branch of the project over HTTPS. The pfSense Package Manager uses its own catalog.')?></p>
 			<button type="submit" name="check" value="github" class="btn btn-primary"><?=gettext('Check GitHub')?></button>
-			<a class="btn btn-default" href="https://github.com/allanlopesprado/pfsense-sdwan/tree/dev/native-forwarding#readme" target="_blank" rel="noopener noreferrer"><?=gettext('Installation instructions')?></a>
+			<a class="btn btn-default" href="https://github.com/allanlopesprado/pfsense-sdwan/blob/main/README.md" target="_blank" rel="noopener noreferrer"><?=gettext('Installation instructions')?></a>
 		</form>
 	</div>
+	<?php sdwan_ui_links(['/pkg_mgr_installed.php' => gettext('Installed packages')]); ?>
 </div>
 <?php include('foot.inc'); ?>

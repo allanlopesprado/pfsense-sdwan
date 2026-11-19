@@ -1,6 +1,6 @@
-# Resultados do laboratório 0.3.0
+# Resultados do laboratório de SD-WAN
 
-O pacote publicado contém a WebGUI, o widget, o serviço de medição e o módulo de seleção. O adaptador do filtro é entregue separadamente para uma imagem de laboratório. A distribuição `pfSense-pkg-SDWAN-0.3.0.pkg` ocupa 25.004 bytes e tem SHA-256 `6552b2fcbc97de2be53a5c926c7f1539d06514902a42b1eb87f9b0a2aa595476`. [Binário da revisão fixa](https://github.com/allanlopesprado/pfsense-sdwan/blob/fe20885be522fb680e2c607bb4c298fbfdb76490/dist/pfSense-pkg-SDWAN-0.3.0.pkg)
+A versão 0.3.0 do pacote contém a WebGUI, o widget, o serviço de medição e o módulo de seleção. O adaptador do filtro é entregue separadamente para uma imagem de laboratório. A distribuição `pfSense-pkg-SDWAN-0.3.0.pkg` ocupa 25.004 bytes e tem SHA-256 `6552b2fcbc97de2be53a5c926c7f1539d06514902a42b1eb87f9b0a2aa595476`. [Binário da revisão fixa](https://github.com/allanlopesprado/pfsense-sdwan/blob/fe20885be522fb680e2c607bb4c298fbfdb76490/dist/pfSense-pkg-SDWAN-0.3.0.pkg)
 
 | Ensaio | Observação |
 |---|---|
@@ -14,6 +14,10 @@ O pacote publicado contém a WebGUI, o widget, o serviço de medição e o módu
 O teste de VTI e o teste de failover CARP usam topologias diferentes. O teste de CARP mede a disponibilidade do VIP. Recuperar uma sessão de aplicação através de um túnel após troca de MASTER é outro critério. [Execução do teste com ESP e bloqueio após remoção da SA](https://github.com/allanlopesprado/pfsense-sdwan/actions/runs/44459464879/job/135342599341)
 
 A VM executou FreeBSD 15. A fonte pública do gerador do pfSense usada nos ensaios se identifica como `2.9.0-DEVELOPMENT`, revisão `9363ac5b8651a1c7a333180425ce7719070f95f9`. O daemon usou amostras controladas e o tráfego TCP atravessou interfaces reais de VNET. A captura em um appliance com dpinger medindo degradação física continua necessária para determinar o tempo de convergência de ponta a ponta. [Execução com regras do pfSense e tráfego no FreeBSD](https://github.com/allanlopesprado/pfsense-sdwan/actions/runs/44459108859)
+
+## Negociação IKEv2 com dois caminhos
+
+Dois processos strongSwan do Ubuntu 24.04 negociaram duas IKE_SAs e dois CHILD_SAs independentes. O teste observou ESP nas duas direções de cada enlace e contadores de dados nas duas pontas. Durante a renovação do CHILD_SA e depois da IKE_SA do caminho A, o caminho B manteve seus SPIs e continuou transportando dados. Ao remover a associação A, as sondagens protegidas desse caminho falharam nos dois sentidos e os contadores de tráfego em claro permaneceram estáveis nos dois enlaces. [Execução com strongSwan 5.9.13](https://github.com/allanlopesprado/pfsense-sdwan/actions/runs/44460493186/job/135345795505)
 
 ## Aceite em equipamento
 

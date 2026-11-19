@@ -1,12 +1,17 @@
 #!/usr/bin/env python3
 """Exercise native Form rendering and posts with a pinned pfSense classes directory."""
 import argparse
+from functools import partial
+from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from html.parser import HTMLParser
 import json
+import re
 from pathlib import Path
 import shutil
 import subprocess
 import tempfile
+from threading import Thread
+from urllib.parse import parse_qs, urlsplit
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / "files/usr/local"
@@ -18,11 +23,14 @@ class Choices(HTMLParser):
         self.fields, self.field = {}, None
         self.tokens = []
         self.revisions = []
+        self.links = []
         self.posts = 0
         self.feed(html)
 
     def handle_starttag(self, tag, attrs):
         attrs = dict(attrs)
+        if tag == "a" and "href" in attrs:
+            self.links.append(attrs["href"])
         if tag == "select":
             self.field = attrs["name"]
             self.fields[self.field] = []
@@ -40,20 +48,64 @@ class Choices(HTMLParser):
             self.field = None
 
 
-def run(php, classes):
+def screenshots(directory, www, pages):
+    chrome = shutil.which("google-chrome") or shutil.which("chromium")
+    if not chrome:
+        raise RuntimeError("A Chromium browser is required to capture the WebGUI.")
+    directory.mkdir(parents=True, exist_ok=True)
+    class Handler(SimpleHTTPRequestHandler):
+        def log_message(self, *args):
+            pass
+    with tempfile.TemporaryDirectory() as folder:
+        site = Path(folder)
+        for assets in ("css", "vendor/bootstrap/css", "vendor/jquery-ui"):
+            source = www / assets
+            if not source.is_dir():
+                raise RuntimeError(f"Missing upstream pfSense assets: {source}")
+            target = site / assets
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.symlink_to(source, target_is_directory=True)
+        with ThreadingHTTPServer(("127.0.0.1", 0), partial(Handler, directory=folder)) as server:
+            worker = Thread(target=server.serve_forever, daemon=True)
+            worker.start()
+            try:
+                for name, theme, size in [("status", "pfSense", "1440,900"), ("status", "pfSense-dark", "390,844"),
+                                          ("diagnostics", "pfSense", "1440,900")]:
+                    preview = name + "-" + theme
+                    html = pages[name].replace("</head>", f'<link rel="stylesheet" href="/css/{theme}.css"></head>')
+                    (site / (preview + ".html")).write_text(html)
+                    out = directory / (preview + ".png")
+                    subprocess.run([chrome, "--headless", "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage",
+                                    f"--user-data-dir={folder}/chrome", f"--window-size={size}",
+                                    f"--screenshot={out.resolve()}", f"http://127.0.0.1:{server.server_port}/{preview}.html"],
+                                   capture_output=True, check=True, timeout=35)
+                    assert out.read_bytes().startswith(b"\x89PNG"), out
+            finally:
+                server.shutdown()
+                worker.join()
+
+
+def run(php, classes, screenshot_dir=None):
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
         shutil.copytree(SOURCE / "www/sdwan", root / "sdwan")
-        for module in ("sdwan.inc", "sdwan_engine.inc", "sdwan_preflight.inc", "sdwan_steering.inc"):
+        for module in ("sdwan.inc", "sdwan_engine.inc", "sdwan_preflight.inc", "sdwan_steering.inc", "sdwan_release.inc", "sdwan_log.inc"):
             shutil.copyfile(SOURCE / "pkg" / module, root / module)
-        for ui in (root / "sdwan/ui.inc.php", root / "sdwan/forwarding.php"):
+        for ui in (root / "sdwan/ui.inc.php", root / "sdwan/forwarding.php", root / "sdwan/updates.php"):
             ui.write_text(ui.read_text().replace("'/usr/local/pkg/", "__DIR__ . '/../"))
         engine = root / "sdwan_engine.inc"
         engine.write_text(engine.read_text().replace("'/var/run/sdwan-observer.json'", "__DIR__ . '/observer.json'"))
-        (root / "guiconfig.inc").write_text("<?php require dirname($classes) . '/csrf/csrf-magic.php';")
+        upstream = (classes.parent / "guiconfig.inc").read_text()
+        native = [re.search(r"^function " + routine + r"\(.*?^\}", upstream, re.M | re.S)[0]
+                  for routine in ("display_top_tabs", "genhtmltitle", "print_input_errors", "sprint_info_box", "print_info_box")]
+        (root / "guiconfig.inc").write_text("<?php require dirname($classes) . '/csrf/csrf-magic.php';\n" + "\n".join(native))
+        for name in ("pfsense-utils.inc", "pkg-utils.inc"):
+            (root / name).touch()
         (root / "phpsessionmanager.inc").write_text("<?php function phpsession_end() {}")
-        (root / "head.inc").write_text("<html><head></head><body>")
-        (root / "foot.inc").write_text("</body></html>")
+        (root / "head.inc").write_text('<!doctype html><html lang="en"><head><meta charset="utf-8">'
+                                      '<meta name="viewport" content="width=device-width, initial-scale=1"></head>'
+                                      '<body><main class="container"><header class="header"><?=genhtmltitle($pgtitle)?></header>')
+        (root / "foot.inc").write_text("</main></body></html>")
 
         native = {"interfaces": {"wan": {"enable": ""}}, "gateways/gateway_item": [
             {"interface": "wan", "name": "GW1"}, {"interface": "wan", "name": "GW2"},
@@ -76,7 +128,7 @@ def run(php, classes):
         html = request("policies", get={"edit": "VOICE"})
         rendered = Choices(html)
         fields = rendered.fields
-        assert len(rendered.tokens) == rendered.posts == 2, html
+        assert len(rendered.tokens) == rendered.posts == 1 and 'value="delete"' not in html, html
         assert fields["members[]"] == [(":backup", True), (":01", True), (":1", False)], fields
         assert [v for v, enabled in fields["sla"] if enabled] == [":01"]
         posted = {"name": "VOICE", "original": "VOICE", "action": "save", "sla": ":01", "strategy": "cost",
@@ -116,14 +168,39 @@ def run(php, classes):
         snapshot = {"members": {"backup": sample, "01": sample}, "policies": {"VOICE": policy}}
         fresh = request("status", snapshot=snapshot)
         assert "2 of 2" in fresh and "Members share a transport interface" in fresh
+        excluded = {**policy, "candidates": {"backup": "Loss above SLA", "01": "Loss above SLA"},
+                    "selected": None, "eligible_count": 0, "path_status": "no_eligible"}
+        unavailable = request("status", snapshot={**snapshot, "policies": {"VOICE": excluded}})
+        assert "Policies without an eligible path: 1." in unavailable and 'alert-danger' in unavailable
         stale = request("status", snapshot={**snapshot, "generated_at": 1})
         assert "Waiting for current gateway measurements" in stale and "2 of 2" not in stale
         print("ok - native CSRF verifies form posts; status checks permissions, path diversity and sample freshness")
+        assert "Every policy has an eligible path" in fresh and 'class="bg-success"' in fresh
+        event_url = next(url for url in Choices(fresh).links if "filterlogentries_process" in url)
+        diagnostics = request("diagnostics", get={"policy": "VOICE"}, snapshot=snapshot)
+        assert "Maximum RTT" in diagnostics and "Maximum loss" in diagnostics and "1.00 ms" in diagnostics
+        assert "no longer configured" in request("diagnostics", get={"policy": "deleted"})
+        assert event_url not in Choices(request("diagnostics", privileges={event_url: False})).links
+        updates = request("updates")
+        assert "/pkg_mgr_installed.php" in Choices(updates).links
+        assert "/pkg_mgr_installed.php" not in Choices(request("updates", privileges={"/pkg_mgr_installed.php": False})).links
+
+        if screenshot_dir:
+            demo = {**config, "members": [{"name": "Fiber", "gateway": "FIBER_GW", "cost": "10"},
+                                          {"name": "LTE", "gateway": "CELL_GW", "cost": "30"}],
+                    "slas": [{"name": "Voice", "latency_ms": "40", "loss_pct": "1"}],
+                    "policies": [{"name": "Office", "sla": "Voice", "members": ["Fiber", "LTE"], "strategy": "cost"}]}
+            demo_snapshot = {"members": {"Fiber": {**sample, "rtt_ms": 15.2, "rttsd_ms": 1.1, "loss_pct": 0},
+                                        "LTE": {**sample, "status": "degraded", "rtt_ms": 76.1, "rttsd_ms": 5.8}},
+                             "policies": {"Office": {**policy, "candidates": {"Fiber": "Eligible", "LTE": "RTT above SLA"},
+                                 "selected": "Fiber", "path_status": "degraded", "eligible_count": 1, "shared_underlay": False}}}
+            pages = {page: request(page, config=demo, snapshot=demo_snapshot) for page in ("status", "diagnostics")}
+            screenshots(screenshot_dir, classes.parent, pages)
 
         native_group = {"name": "PBR", "item": ["GW1|1|address", "GW2|2|address"]}
         rule = {"tracker": "50321", "interface": "lan", "gateway": "PBR", "ipprotocol": "inet", "type": "pass",
                 "source": {"address": "192.0.2.9"}, "destination": {"address": "198.51.100.6"},
-                "descr": "Voice <A>"}
+                "descr": "Voice <A>", "log": ""}
         guard = {**rule, "tracker": "50322", "type": "block", "descr": "Guard for Voice"}
         del guard["gateway"]
         fixture = {"gateways/gateway_group": [native_group], "filter/rule": [rule, guard],
@@ -135,6 +212,24 @@ def run(php, classes):
         stock = request("forwarding", native=fixture, get=names)
         assert "matches the native group" in stock and "50321" in stock and "Voice &lt;A&gt;" in stock, stock
         assert "Preview mode" in stock and 'value="bind"' not in stock
+        tracker_url = next(url for url in Choices(stock).links if "filterlogentries_tracker" in url)
+        visible = request("forwarding", native=fixture, get=names, privileges={tracker_url: False})
+        assert tracker_url not in Choices(visible).links and "50321" in visible
+        # Exercise pfSense's GET readers with the precise query from each rendered link.
+        common = (classes.parent / "status_logs_common.inc").read_text()
+        for url, routine, field in ((event_url, "log_filter_form_system_submit", "process"),
+                                    (tracker_url, "log_filter_form_firewall_submit", "tracker")):
+            handler = re.search(r"^function " + routine + r"\(.*?^\}", common, re.M | re.S)[0]
+            getter = re.search(r"^function getGETPOSTsettingvalue\(.*?^\}", upstream, re.M | re.S)[0]
+            defaults = {key: "" for key in re.findall(r"getGETPOSTsettingvalue\('([^']+)'", handler)}
+            query = {key: values[0] for key, values in parse_qs(urlsplit(url).query).items()}
+            data = json.dumps([defaults | query, defaults])
+            output = subprocess.run([php, "-r", getter + handler + "; [$_GET,$_POST]=json_decode(stream_get_contents(STDIN),true);"
+                                     + routine + "(); echo json_encode([$filter_active,$filterfieldsarray]);"],
+                                    input=data, capture_output=True, text=True, check=True)
+            active, filters = json.loads(output.stdout)
+            assert active and filters[field] == query["filterlogentries_" + field] and not output.stderr
+        print("ok - native log filters open on the observer process and enabled rule tracker with page privilege checks")
         denied = request("forwarding", native=fixture, get=names, privileges={"/firewall_rules.php": False})
         assert "Access to Firewall" in denied and "50321" not in denied
         protected = request("forwarding", native={**fixture, "gateways/defaultgw4": "PBR"},
@@ -166,5 +261,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--php", default="php")
     parser.add_argument("--classes", type=Path, required=True)
+    parser.add_argument("--screenshots-dir", type=Path, help="capture synthetic page fixtures with upstream light and dark styles")
     args = parser.parse_args()
-    run(args.php, args.classes.resolve())
+    run(args.php, args.classes.resolve(), args.screenshots_dir)

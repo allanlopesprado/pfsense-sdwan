@@ -36,6 +36,7 @@ def check_shell_hooks(tmp):
     log = tmp / "calls"
     helper = tmp / "invalidate.inc"
     state = tmp / "sdwan-observer.json"
+    log_state = tmp / "sdwan-observer.json.events"
     fpm_pid = tmp / "php-fpm.pid"
     service = tmp / "rc.d" / "sdwand.sh"
     service.parent.mkdir()
@@ -67,11 +68,12 @@ def check_shell_hooks(tmp):
         return log.read_text().splitlines() if log.exists() else []
 
     state.write_text("measurement")
+    log_state.write_text("event suppression state")
     for phase, when in [("install", "POST-INSTALL"), ("deinstall", "DEINSTALL"),
                         ("deinstall", "POST-DEINSTALL")]:
         run(phase, when, root="/staging/image")
     run("install", "PRE-INSTALL")
-    if calls() or not state.exists():
+    if calls() or not state.exists() or not log_state.exists():
         raise AssertionError("A staged install or unsupported phase touched the host")
 
     deferred = run("install", "POST-INSTALL")
@@ -80,8 +82,8 @@ def check_shell_hooks(tmp):
     fpm_pid.touch()
     run("install", "POST-INSTALL")
     run("deinstall", "DEINSTALL")
-    if state.exists():
-        raise AssertionError("The measurement file survived removal")
+    if state.exists() or log_state.exists():
+        raise AssertionError("Runtime measurement or event suppression state survived removal")
     run("deinstall", "POST-DEINSTALL")
     expected = ["-f /etc/rc.packages pfSense-pkg-SDWAN POST-INSTALL", "service stop",
                 "-f /etc/rc.packages pfSense-pkg-SDWAN DEINSTALL",
@@ -91,7 +93,10 @@ def check_shell_hooks(tmp):
 
     # The installed helper invalidates runtime decisions even if the service is down.
     helper.touch()
+    log_state.touch()
     run("deinstall", "DEINSTALL")
+    if log_state.exists():
+        raise AssertionError("Event suppression state survived removal with the helper installed")
     if calls()[-3:] != ["service stop", "-f " + str(helper), expected[2]]:
         raise AssertionError("Removal did not invoke invalidation before unregistering")
     helper.unlink()
@@ -105,6 +110,7 @@ def check_shell_hooks(tmp):
 def check_invalidation(tmp, php):
     helper = tmp / "sdwan_invalidate.inc"
     helper.write_bytes((FILES / "usr/local/pkg/sdwan_invalidate.inc").read_bytes())
+    (tmp / "sdwan_log.inc").write_bytes((FILES / "usr/local/pkg/sdwan_log.inc").read_bytes())
     state = tmp / "sdwan-observer.json"
     receipt = tmp / "sdwan-observer.json.forwarded"
     marker = tmp / "reload"
