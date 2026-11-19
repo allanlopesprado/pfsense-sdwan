@@ -35,6 +35,15 @@ function sdwan_ui_scalar(array $source, string $key): string {
 	return isset($source[$key]) && is_string($source[$key]) ? trim($source[$key]) : '';
 }
 
+/* Native Form_Select compares values loosely. Keep "1" and "01" distinct. */
+function sdwan_ui_choice(string $value): string {
+	return $value === '' ? '' : ':' . $value;
+}
+
+function sdwan_ui_choice_value(string $value): string {
+	return str_starts_with($value, ':') ? substr($value, 1) : $value;
+}
+
 function sdwan_ui_snapshot(array $config): ?array {
 	$snapshot = sdwan_read_snapshot();
 	if (($snapshot['config_revision'] ?? null) !== sdwan_config_revision($config)) {
@@ -61,16 +70,19 @@ function sdwan_ui_gateway_state(?string $state): array {
 	};
 }
 
-function sdwan_ui_links(array $links): void {
+/* Follow the action toolbar below native Gateway Groups and Firewall Aliases. */
+function sdwan_ui_actions(array $links): void {
 	$buttons = [];
-	foreach ($links as $url => $label) {
+	foreach ($links as $url => [$label, $icon]) {
 		if (isAllowedPage($url)) {
-			$buttons[] = '<a class="btn btn-default btn-sm" href="' . sdwan_ui_escape($url) . '">' .
+			$buttons[] = '<a class="btn btn-info btn-sm" role="button" href="' . sdwan_ui_escape($url) . '">' .
+			    '<i class="fa-solid ' . sdwan_ui_escape($icon) . ' icon-embed-btn" aria-hidden="true"></i> ' .
 			    sdwan_ui_escape($label) . '</a>';
 		}
 	}
 	if ($buttons) {
-		echo '<div class="panel-footer">' . implode(' ', $buttons) . '</div>';
+		echo '<nav class="action-buttons" aria-label="' . sdwan_ui_escape(gettext('Related pages')) . '">' .
+		    implode(' ', $buttons) . '</nav>';
 	}
 }
 

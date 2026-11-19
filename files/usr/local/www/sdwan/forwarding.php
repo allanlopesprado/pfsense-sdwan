@@ -19,8 +19,8 @@ $native_edit = isAllowedPage('/firewall_rules_edit.php') && isAllowedPage('/syst
 $supported = sdwan_steering_supported();
 $is_post = $_SERVER['REQUEST_METHOD'] === 'POST';
 $form_source = $is_post ? $_POST : $_GET;
-$policy_name = sdwan_ui_scalar($form_source, 'policy');
-$group_name = sdwan_ui_scalar($form_source, 'group');
+$policy_name = sdwan_ui_choice_value(sdwan_ui_scalar($form_source, 'policy'));
+$group_name = sdwan_ui_choice_value(sdwan_ui_scalar($form_source, 'group'));
 $policy_names = array_column($sdwan['policies'], 'name');
 $groups = config_get_path('gateways/gateway_group', []);
 $groups_by_name = array_column(is_array($groups) ? $groups : [], null, 'name');
@@ -93,33 +93,32 @@ if ($supported) {
 } else {
 	print_info_box(gettext('Preview mode. This pfSense core does not advertise the required forwarding integration. Compare the recommendation with the gateway group and its rules below.'), 'info', false);
 }
-?>
-<div class="panel panel-default">
-	<div class="panel-heading"><h2 class="panel-title"><?=gettext('Forwarding preview')?></h2></div>
-	<div class="panel-body">
-	<form method="get" action="/sdwan/forwarding.php" class="form-inline">
-		<label for="policy"><?=gettext('Policy')?></label>
-		<select id="policy" name="policy" class="form-control" required>
-			<option value=""><?=gettext('Select a policy')?></option>
-			<?php foreach ($policy_names as $name): ?>
-			<option value="<?=sdwan_ui_escape($name)?>"<?=$policy_name === $name ? ' selected' : ''?>><?=sdwan_ui_escape($name)?></option>
-			<?php endforeach; ?>
-		</select>
-		<label for="group"><?=gettext('Gateway group')?></label>
-		<select id="group" name="group" class="form-control" required>
-			<option value=""><?=gettext('Select a gateway group')?></option>
-			<?php foreach ($groups_by_name as $item): ?>
-			<option value="<?=sdwan_ui_escape($item['name'])?>"<?=$group_name === $item['name'] ? ' selected' : ''?>><?=sdwan_ui_escape($item['name'])?></option>
-			<?php endforeach; ?>
-		</select>
-		<button type="submit" class="btn btn-primary"><?=gettext('Preview')?></button>
-	</form>
-	<?php if (!$policy_names || !$groups_by_name): ?>
-	<p class="help-block"><?=gettext('A forwarding preview requires an SD-WAN policy and a native gateway group.')?></p>
-	<?php endif; ?>
-	</div>
-</div>
-<?php if ($preview !== null):
+$policy_options = ['' => gettext('Select a policy')];
+foreach ($policy_names as $name) {
+	$policy_options[sdwan_ui_choice($name)] = $name;
+}
+$group_options = ['' => gettext('Select a gateway group')];
+foreach ($groups_by_name as $item) {
+	$group_options[sdwan_ui_choice($item['name'])] = $item['name'];
+}
+$form = new Form(false);
+$form->setAction('/sdwan/forwarding.php')->setMethod('get');
+$section = new Form_Section(gettext('Forwarding Preview'));
+$section->addInput(new Form_Select('policy', gettext('Policy'), sdwan_ui_choice($policy_name), $policy_options))
+    ->setAttribute('required', 'required');
+$section->addInput(new Form_Select('group', gettext('Gateway Group'), sdwan_ui_choice($group_name), $group_options))
+    ->setAttribute('required', 'required');
+$form->add($section);
+$preview_button = $form->addGlobal(new Form_Button('preview', gettext('Preview'), null, 'fa-solid fa-search'))
+    ->addClass('btn-primary');
+if (!$policy_names || !$groups_by_name) {
+	$preview_button->setAttribute('disabled', 'disabled');
+}
+print $form;
+if (!$policy_names || !$groups_by_name) {
+	print_info_box(gettext('A forwarding preview requires an SD-WAN policy and a native gateway group.'), 'info', false);
+}
+if ($preview !== null):
 	if ($preview['errors']) {
 		print_input_errors($preview['errors']);
 	} elseif ($preview['binding'] !== null) {
@@ -171,36 +170,43 @@ if ($supported) {
 		<p class="help-block"><?=gettext('Review rule order and exceptions for local and VPN traffic on the ingress interface. Capture a new connection to verify its egress path.')?></p>
 		<?php endif; ?>
 	</div>
-	<?php sdwan_ui_links(['/system_gateway_groups.php' => gettext('Gateway groups'), '/firewall_rules.php' => gettext('Firewall rules'),
-	    '/diag_packet_capture.php' => gettext('Packet capture')]); ?>
 </div>
 <?php if ($supported && $native_edit && $binding === null && !$preview['errors'] && $preview['binding'] !== null): ?>
-	<form method="post" action="/sdwan/forwarding.php">
+	<form method="post" action="/sdwan/forwarding.php" class="action-buttons">
 		<input type="hidden" name="policy" value="<?=sdwan_ui_escape($policy_name)?>">
 		<input type="hidden" name="group" value="<?=sdwan_ui_escape($group_name)?>">
 		<input type="hidden" name="revision" value="<?=sdwan_ui_escape($preview['revision'])?>">
-		<button type="submit" class="btn btn-primary" name="action" value="bind"><?=gettext('Bind policy to this group')?></button>
+		<button type="submit" class="btn btn-primary btn-sm" name="action" value="bind"><i class="fa-solid fa-link icon-embed-btn" aria-hidden="true"></i> <?=gettext('Bind policy to this group')?></button>
 	</form>
 <?php endif;
 endif;
 if ($bindings_by_group): ?>
 <div class="panel panel-default">
 	<div class="panel-heading"><h2 class="panel-title"><?=gettext('Configured bindings')?></h2></div>
-	<div class="table-responsive"><table class="table table-striped">
-		<thead><tr><th><?=gettext('Gateway group')?></th><th><?=gettext('Policy')?></th><th><?=gettext('Action')?></th></tr></thead><tbody>
+	<div class="panel-body">
+	<div class="table-responsive"><table class="table table-striped table-hover table-condensed">
+		<thead><tr><th scope="col"><?=gettext('Gateway Group')?></th><th scope="col"><?=gettext('Policy')?></th><th scope="col"><?=gettext('Actions')?></th></tr></thead><tbody>
 		<?php $revision = sdwan_steering_revision();
 		foreach ($bindings_by_group as $item): ?>
 		<tr><td><?=sdwan_ui_escape($item['group'])?></td><td><?=sdwan_ui_escape($item['policy'])?></td>
 		<td><?php if ($native_edit): ?>
-		<form method="post" action="/sdwan/forwarding.php">
+		<form method="post" action="/sdwan/forwarding.php" class="form-inline">
 			<input type="hidden" name="group" value="<?=sdwan_ui_escape($item['group'])?>">
 			<input type="hidden" name="policy" value="<?=sdwan_ui_escape($item['policy'])?>">
 			<input type="hidden" name="revision" value="<?=sdwan_ui_escape($revision)?>">
-			<button type="submit" class="btn btn-default btn-xs" name="action" value="unbind"><?=gettext('Remove binding')?></button>
+			<button type="submit" class="btn btn-link btn-xs fa-solid fa-trash-can" name="action" value="unbind"
+			    title="<?=gettext('Remove binding')?>" aria-label="<?=gettext('Remove binding')?>"></button>
 			<?php if (!$supported): ?><span class="help-block"><?=gettext('Clear the saved binding. Verify the active rules in pfSense before assuming native forwarding has resumed.')?></span><?php endif; ?>
 		</form><?php else: ?>—<?php endif; ?></td></tr>
 		<?php endforeach; ?>
 		</tbody>
 	</table></div>
+	</div>
 </div>
-<?php endif; include('foot.inc'); ?>
+<?php endif;
+sdwan_ui_actions([
+	'/system_gateway_groups.php' => [gettext('Gateway Groups'), 'fa-network-wired'],
+	'/firewall_rules.php' => [gettext('Firewall Rules'), 'fa-list'],
+	'/diag_packet_capture.php' => [gettext('Packet Capture'), 'fa-magnifying-glass'],
+]);
+include('foot.inc');

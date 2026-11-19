@@ -38,7 +38,7 @@ test -n "$version"
 head -c 80 "$PWD/dist/$package-$version.pkg" > "$root/interrupted.pkg"
 
 # Direct upgrades from both the main observer and the earlier lab release.
-for baseline in 0.2.0 0.3.0; do
+for baseline in 0.2.0 0.3.0 0.4.0; do
     test "$(run_pkg version -t "$baseline" "$version")" = '<'
     run_pkg add -I "$PWD/dist/$package-$baseline.pkg"
     test "$(run_pkg query '%v' "$package")" = "$baseline"
@@ -89,4 +89,4 @@ sh "$root/sdwand.sh" stop
 test -f "$root/invalidated"
 if sh "$root/sdwand.sh" status; then exit 1; fi
 echo "Verified FreeBSD service start, restart and stop with a fixture worker."
-echo "Verified checksum rejection, download failure, direct upgrades from 0.2.0 and 0.3.0 to $version, removal, rollback to each prior version and reinstall (hooks disabled)."
+echo "Verified checksum rejection, download failure, direct upgrades from 0.2.0, 0.3.0 and 0.4.0 to $version, removal, rollback to each prior version and reinstall (hooks disabled)."

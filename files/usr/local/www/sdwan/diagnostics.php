@@ -5,7 +5,7 @@ require_once(__DIR__ . '/ui.inc.php');
 
 $snapshot = sdwan_ui_snapshot($sdwan);
 $policies = array_column($sdwan['policies'], null, 'name');
-$requested = sdwan_ui_scalar($_GET, 'policy');
+$requested = sdwan_ui_choice_value(sdwan_ui_scalar($_GET, 'policy'));
 $current = $requested !== '' ? $requested : ($sdwan['policies'][0]['name'] ?? '');
 $policy = $policies[$current] ?? null;
 $result = $snapshot['policies'][$current] ?? null;
@@ -16,30 +16,27 @@ sdwan_ui_tabs('diagnostics');
 if ($requested !== '' && $policy === null) {
 	print_input_errors([gettext('This policy is no longer configured. Select an available policy.')]);
 }
+if (!$policies) {
+	print_info_box(gettext('Create a policy to inspect its candidate members.'), 'info', false);
+} else {
+	$options = $policy === null ? ['' => gettext('Select a policy')] : [];
+	foreach ($sdwan['policies'] as $entry) {
+		$options[sdwan_ui_choice($entry['name'])] = $entry['name'];
+	}
+	$form = new Form(false);
+	$form->setAction('/sdwan/diagnostics.php')->setMethod('get');
+	$section = new Form_Section(gettext('Policy Lookup'));
+	$section->addInput(new Form_Select('policy', gettext('Policy'), $policy === null ? '' : sdwan_ui_choice($current), $options))
+	    ->setAttribute('required', 'required');
+	$form->add($section);
+	$form->addGlobal(new Form_Button('inspect', gettext('Inspect'), null, 'fa-solid fa-search'))->addClass('btn-primary');
+	print $form;
+}
+if ($policy !== null):
+	$sla = $slas[$policy['sla']];
 ?>
 <div class="panel panel-default">
-	<div class="panel-heading"><h2 class="panel-title"><?=gettext('Policy evaluation')?></h2></div>
-	<div class="panel-body">
-	<?php if (!$policies): ?>
-		<p><?=gettext('Create a policy to inspect its candidate members.')?></p>
-	<?php else: ?>
-		<form method="get" action="/sdwan/diagnostics.php" class="form-inline">
-			<div class="form-group">
-				<label for="policy"><?=gettext('Policy')?></label>
-				<select class="form-control" name="policy" id="policy" required>
-					<?php if ($policy === null): ?><option value="" selected><?=gettext('Select a policy')?></option><?php endif; ?>
-					<?php foreach ($sdwan['policies'] as $entry): ?>
-					<option value="<?=sdwan_ui_escape($entry['name'])?>"<?=$current === $entry['name'] ? ' selected' : ''?>><?=sdwan_ui_escape($entry['name'])?></option>
-					<?php endforeach; ?>
-				</select>
-			</div>
-			<button type="submit" class="btn btn-primary"><?=gettext('Inspect')?></button>
-		</form>
-	<?php endif; ?>
-	</div>
-	<?php if ($policy !== null):
-		$sla = $slas[$policy['sla']];
-	?>
+	<div class="panel-heading"><h2 class="panel-title"><?=gettext('Results')?></h2></div>
 	<div class="panel-body">
 		<dl class="dl-horizontal">
 			<dt><?=gettext('Performance SLA')?></dt><dd><?=sdwan_ui_escape($sla['name'])?></dd>
@@ -53,8 +50,7 @@ if ($requested !== '' && $policy === null) {
 		<?php if ($result === null) {
 			print_info_box(gettext('No current sample for this policy. Verify the observer service and gateway monitoring.'), 'warning', false);
 		} ?>
-	</div>
-	<div class="table-responsive"><table class="table table-striped table-hover table-condensed">
+	<div class="table-responsive"><table class="table table-striped table-hover table-condensed sortable-theme-bootstrap" data-sortable>
 		<thead><tr><th scope="col"><?=gettext('Member')?></th><th scope="col"><?=gettext('Gateway state')?></th>
 		<th scope="col"><?=gettext('RTT')?></th><th scope="col"><?=gettext('Loss')?></th><th scope="col"><?=gettext('Evaluation')?></th></tr></thead><tbody>
 		<?php foreach ($policy['members'] as $member):
@@ -69,9 +65,12 @@ if ($requested !== '' && $policy === null) {
 		<?php endforeach; ?>
 		</tbody>
 	</table></div>
-	<?php endif;
-	sdwan_ui_links([SDWAN_UI_EVENT_LOG => gettext('SD-WAN events'),
-	    '/status_logs.php?logfile=gateways' => gettext('Gateway logs'),
-	    '/diag_packet_capture.php' => gettext('Packet capture')]); ?>
+	</div>
 </div>
-<?php include('foot.inc'); ?>
+<?php endif;
+sdwan_ui_actions([
+	SDWAN_UI_EVENT_LOG => [gettext('System Logs'), 'fa-list'],
+	'/status_logs.php?logfile=gateways' => [gettext('Gateway Logs'), 'fa-list'],
+	'/diag_packet_capture.php' => [gettext('Packet Capture'), 'fa-magnifying-glass'],
+]);
+include('foot.inc');

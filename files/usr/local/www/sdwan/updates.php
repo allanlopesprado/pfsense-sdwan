@@ -29,25 +29,23 @@ if ($installed === null) {
 	print_info_box($messages[$comparison] ?? gettext('Unable to compare package versions.'),
 	    isset($messages[$comparison]) ? 'info' : 'warning', false);
 }
-?>
-<div class="panel panel-default">
-	<div class="panel-heading"><h2 class="panel-title"><?=gettext('Package version')?></h2></div>
-	<div class="panel-body">
-		<dl class="dl-horizontal">
-			<dt><?=gettext('Installed locally')?></dt><dd><?=sdwan_ui_escape($installed ?? gettext('Unknown'))?></dd>
-			<?php if ($release !== null): ?>
-			<dt><?=gettext('Published on GitHub')?></dt><dd><?=sdwan_ui_escape($release['version'])?></dd>
-			<dt><?=gettext('Release maturity')?></dt>
-			<dd><?=$release['maturity'] === 'experimental' ? gettext('Experimental') : gettext('Stable')?></dd>
-			<dt><?=gettext('Published SHA-256')?></dt><dd><code><?=implode('<wbr>', array_map('sdwan_ui_escape', str_split($release['sha256'], 8)))?></code></dd>
-			<?php endif; ?>
-		</dl>
-		<form method="post" action="/sdwan/updates.php">
-			<p><?=gettext('Check the release published on the main branch of the project over HTTPS. The pfSense Package Manager uses its own catalog.')?></p>
-			<button type="submit" name="check" value="github" class="btn btn-primary"><?=gettext('Check GitHub')?></button>
-			<a class="btn btn-default" href="https://github.com/allanlopesprado/pfsense-sdwan/blob/main/README.md" target="_blank" rel="noopener noreferrer"><?=gettext('Installation instructions')?></a>
-		</form>
-	</div>
-	<?php sdwan_ui_links(['/pkg_mgr_installed.php' => gettext('Installed packages')]); ?>
-</div>
-<?php include('foot.inc'); ?>
+$form = new Form(false);
+$form->setAction('/sdwan/updates.php');
+$section = new Form_Section(gettext('Package Version'));
+$section->addInput(new Form_StaticText(gettext('Installed Version'), sdwan_ui_escape($installed ?? gettext('Unknown'))));
+if ($release !== null) {
+	$section->addInput(new Form_StaticText(gettext('Published Version'), sdwan_ui_escape($release['version'])));
+	$section->addInput(new Form_StaticText(gettext('Release Maturity'),
+	    $release['maturity'] === 'experimental' ? gettext('Experimental') : gettext('Stable')));
+	$digest = '<code>' . implode('<wbr>', array_map('sdwan_ui_escape', str_split($release['sha256'], 8))) . '</code>';
+	$section->addInput(new Form_StaticText(gettext('SHA-256'), $digest));
+}
+$form->add($section);
+$form->addGlobal(new Form_Input('check', '', 'hidden', 'github'));
+$form->addGlobal(new Form_Button('check_release', gettext('Check GitHub'), null, 'fa-solid fa-arrows-rotate'))->addClass('btn-primary');
+$form->addGlobal(new Form_Button('instructions', gettext('Installation Instructions'),
+	'https://github.com/allanlopesprado/pfsense-sdwan/blob/main/README.md', 'fa-solid fa-arrow-up-right-from-square'))
+    ->setAttribute('target', '_blank')->setAttribute('rel', 'noopener noreferrer');
+print $form;
+sdwan_ui_actions(['/pkg_mgr_installed.php' => [gettext('Installed Packages'), 'fa-box-archive']]);
+include('foot.inc');

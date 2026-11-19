@@ -69,10 +69,12 @@ $sdwanRender = static function (): void {
 	}
 	$details = isAllowedPage('/sdwan/diagnostics.php');
 	?>
+	<div class="table-responsive">
 	<table class="table table-striped table-hover table-condensed">
 		<caption class="sr-only"><?=gettext('SD-WAN policy status')?></caption>
 		<thead><tr><th scope="col"><?=gettext('Policy')?></th>
-			<th scope="col"><?=$requests ? gettext('Path selection') : gettext('Recommended member')?></th></tr></thead>
+			<th scope="col"><?=gettext('Recommended member')?></th>
+			<th scope="col"><?=gettext('Status')?></th></tr></thead>
 		<tbody>
 		<?php foreach ($config['policies'] as $policy):
 			$name = $policy['name'];
@@ -82,20 +84,18 @@ $sdwanRender = static function (): void {
 			$total = count($policy['members']);
 			$current = count($candidates) === $total && !array_diff($policy['members'], array_keys($candidates));
 			$eligible = count(array_keys($candidates, 'Eligible', true));
-			$icon = match (true) {
-				!$current => 'fa-clock text-muted',
-				$eligible === 0 => 'fa-circle-xmark text-danger',
-				$eligible < $total => 'fa-triangle-exclamation text-warning',
-				default => 'fa-circle-check text-success',
+			$cell = match (true) {
+				!$current => 'bg-info',
+				$eligible === 0 => 'bg-danger',
+				$eligible < $total => 'bg-warning',
+				default => 'bg-success',
 			};
 		?>
 			<tr>
 				<th scope="row">
 					<?php if ($details): ?><a href="/sdwan/diagnostics.php?policy=<?=rawurlencode($name)?>"><?=$escape($name)?></a><?php else: ?><?=$escape($name)?><?php endif; ?>
-					<small class="sdwan-widget-detail"><i class="fa-solid <?=$icon?>" aria-hidden="true"></i>
-						<?=$current ? $escape(sprintf(gettext('%1$d of %2$d eligible'), $eligible, $total)) : gettext('Awaiting evaluation')?></small>
 				</th>
-				<td><?php if ($requests): ?><small class="sdwan-widget-detail"><?=gettext('Recommended member')?></small><?php endif; ?>
+				<td>
 					<?=$escape($current && $selected !== null ? $selected : gettext('No recommendation'))?>
 					<?php foreach ($requests[$name] ?? [] as $group => $target): ?>
 						<div class="sdwan-widget-request">
@@ -104,10 +104,12 @@ $sdwanRender = static function (): void {
 						</div>
 					<?php endforeach; ?>
 				</td>
+				<td class="<?=$cell?>"><strong><?=$current ? $escape(sprintf(gettext('%1$d of %2$d eligible'), $eligible, $total)) : gettext('Awaiting evaluation')?></strong></td>
 			</tr>
 		<?php endforeach; ?>
 		</tbody>
 	</table>
+	</div>
 	<?php if ($bindingError) {
 		$notice('fa-triangle-exclamation text-warning', gettext('Forwarding requests unavailable.'));
 	} ?>
@@ -125,7 +127,8 @@ $sdwanBodyId = 'sdwan-status-' . $widgetkey;
 <style>
 .sdwan-status-widget .table { width: 100%; table-layout: fixed; margin-bottom: 0; }
 .sdwan-status-widget th, .sdwan-status-widget td { white-space: normal; overflow-wrap: anywhere; }
-.sdwan-status-widget thead th:first-child { width: 42%; }
+.sdwan-status-widget .table-responsive { margin-bottom: 0; }
+.sdwan-status-widget thead th:first-child { width: 28%; }
 .sdwan-status-widget .sdwan-widget-detail { display: block; font-weight: normal; }
 .sdwan-status-widget .sdwan-widget-request { margin-top: .25em; }
 .sdwan-status-widget .sdwan-widget-note { padding: .4em .5em; margin: 0; }
