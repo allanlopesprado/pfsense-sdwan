@@ -1,6 +1,6 @@
 # SD-WAN para pfSense CE
 
-A versão **0.4.8** acompanha gateways e recomenda caminhos na WebGUI do pfSense. O pacote é **experimental** e tem como alvo o **pfSense CE 2.9.1**. O projeto é independente do pfSense e da Netgate.
+A versão **0.4.9** acompanha gateways e recomenda caminhos na WebGUI do pfSense. O pacote é **experimental** e tem como alvo o **pfSense CE 2.9.1**. O projeto é independente do pfSense e da Netgate.
 
 ## Como instalar pelo Diagnostics → Command Prompt
 
@@ -11,10 +11,10 @@ Use um clone de laboratório com acesso administrativo. O próprio firewall baix
 
 <!-- install-command -->
 ```sh
-d=$(mktemp -d /tmp/sdwan.XXXXXXXX) && (trap 'rm -rf "$d"' EXIT; p="$d/pfSense-pkg-SDWAN-0.4.8.pkg"; fetch -o "$p" 'https://raw.githubusercontent.com/allanlopesprado/pfsense-sdwan/0f1adeed2fc773ad570c0819f5f78c343591db6d/dist/pfSense-pkg-SDWAN-0.4.8.pkg' && sha256 -c f70ca9cf39b38796f83dce8fa7e0fd79676752d8d4c77ac1b779d2ab2be1f730 "$p" && pkg add "$p")
+d=$(mktemp -d /tmp/sdwan.XXXXXXXX) && (trap 'rm -rf "$d"' EXIT; p="$d/pfSense-pkg-SDWAN-0.4.9.pkg"; fetch -o "$p" 'https://raw.githubusercontent.com/allanlopesprado/pfsense-sdwan/1c1766706f609b7708f1b2641eaeb36bb9938e7e/dist/pfSense-pkg-SDWAN-0.4.9.pkg' && sha256 -c 734474526df5ebf6cfe3b670248b8888722a6087adc58614ea56a27321c2409d "$p" && pkg add "$p")
 ```
 
-3. No registro do pacote, o pfSense inicia o serviço ou reinicia a instância que já está rodando. Confira a versão e o estado do serviço com o comando abaixo. O resultado esperado inclui `pfSense-pkg-SDWAN-0.4.8` e a indicação de que o serviço está em execução.
+3. No registro do pacote, o pfSense inicia o serviço ou reinicia a instância que já está rodando. Confira a versão e o estado do serviço com o comando abaixo. O resultado esperado inclui `pfSense-pkg-SDWAN-0.4.9` e a indicação de que o serviço está em execução.
 
 ```sh
 pkg query '%n-%v' pfSense-pkg-SDWAN && /usr/local/etc/rc.d/sdwand.sh status
@@ -22,7 +22,7 @@ pkg query '%n-%v' pfSense-pkg-SDWAN && /usr/local/etc/rc.d/sdwand.sh status
 
 4. Recarregue a WebGUI e abra **Services → SD-WAN**. Se a saída indicar que o registro foi adiado porque o PHP-FPM estava parado, aguarde a WebGUI voltar e execute `/usr/local/bin/php -f /etc/rc.packages pfSense-pkg-SDWAN POST-INSTALL`. Confira de novo o menu e o serviço.
 
-[Pacote experimental 0.4.8](dist/pfSense-pkg-SDWAN-0.4.8.pkg) · [SHA-256](dist/pfSense-pkg-SDWAN-0.4.8.pkg.sha256) · [Command Prompt na documentação Netgate](https://docs.netgate.com/pfsense/en/latest/diagnostics/command-prompt.html)
+[Pacote experimental 0.4.9](dist/pfSense-pkg-SDWAN-0.4.9.pkg) · [SHA-256](dist/pfSense-pkg-SDWAN-0.4.9.pkg.sha256) · [Command Prompt na documentação Netgate](https://docs.netgate.com/pfsense/en/latest/diagnostics/command-prompt.html)
 
 ## Monitorar gateways e comparar caminhos
 
@@ -39,7 +39,7 @@ O serviço lê os sockets do monitor de gateways do pfSense. Uma amostra ausente
 
 ## Exibir o widget
 
-Em **Status → Dashboard**, clique em **+** e selecione **SD-WAN**. O widget mostra RTT, perda e estado por gateway. Quando há membros SD-WAN, a tabela mostra os gateways desses membros e indica as políticas que os recomendam. Na configuração inicial, a tabela mostra os gateways nativos do firewall. O título abre **Status** do pacote. Para retirar o widget, clique no **×**.
+Em **Status → Dashboard**, clique em **+** e selecione **SD-WAN**. O widget mostra nome e IP do gateway, RTT, variação de RTT (RTTsd), perda e estado. Quando há membros SD-WAN, a tabela mostra os gateways desses membros e indica as políticas que os recomendam. Na configuração inicial, a tabela mostra os gateways nativos do firewall. O título abre **Status** do pacote. Para retirar o widget, clique no **×**.
 
 ## Consultar eventos no log do pfSense
 
@@ -47,7 +47,7 @@ Abra **Status → System Logs → System → General** e filtre o campo **Proces
 
 ## Consultar versões
 
-A partir da **0.4.8**, abra **Services → SD-WAN → Updates**, clique em **Check GitHub** e depois em **Upgrade to …** quando houver uma versão nova publicada. O botão exige o privilégio nativo de instalação de pacotes. O firewall usa HTTPS e seu proxy configurado, verifica o SHA-256 e os dados do pacote, instala com `pkg` e confirma que o observador voltou. Se o botão ainda não existir, use o instalador acima uma vez para chegar à 0.4.8.
+A partir da **0.4.8**, abra **Services → SD-WAN → Updates**, clique em **Check GitHub** e depois em **Upgrade to …** quando houver uma versão nova publicada. O botão exige o privilégio nativo de instalação de pacotes. O firewall usa HTTPS e seu proxy configurado, verifica o SHA-256 e os dados do pacote, instala com `pkg` e confirma que o observador voltou. Se o botão ainda não existir, use o instalador acima uma vez.
 
 **System → Package Manager → Installed Packages** utiliza o catálogo do produto. Um pacote instalado diretamente de um arquivo pode ficar ausente dessa lista. Para distribuição e atualização pelo catálogo oficial, a Netgate precisa avaliar o port para inclusão na árvore de pacotes e na branch da versão desejada. [Gerenciador de pacotes](https://docs.netgate.com/pfsense/en/latest/packages/manager.html) · [Desenvolvimento e publicação de pacotes](https://docs.netgate.com/pfsense/en/latest/development/develop-packages.html)
 
@@ -74,6 +74,7 @@ test ! -e /usr/local/www/sdwan/status.php && test ! -e /usr/local/www/widgets/wi
 | 0.4.3 | Filtro nativo de logs para perfis delegados, permissões de encaminhamento uniformes e publicação com todas as baterias do Actions. [Notas](docs/releases/v0.4.3.md) |
 | 0.4.4 | Nova tentativa após rejeição da recarga do filtro, suporte de laboratório ao core CE 2.9.1 e testes de tráfego IPv6 com dois caminhos. [Notas](docs/releases/v0.4.4.md) |
 | 0.4.5 | Widget alinhado ao dashboard, validação de Monitor IP e ensaio com dpinger real. [Notas](docs/releases/v0.4.5.md) |
+| 0.4.9 | Tabela do widget alinhada ao monitoramento de gateways. [Notas](docs/releases/v0.4.9.md) |
 | 0.4.8 | Atualização do pacote pela aba Updates. [Notas](docs/releases/v0.4.8.md) |
 | 0.4.7 | Widget de monitoramento por gateway com RTT, perda e estado. [Notas](docs/releases/v0.4.7.md) |
 | 0.4.6 | Matriz de um a três enlaces, verificação de dependências físicas e destino protegido para VTI. [Notas](docs/releases/v0.4.6.md) · [Matriz de validação](docs/VALIDACAO.pt-BR.md) |
