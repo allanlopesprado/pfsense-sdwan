@@ -110,13 +110,32 @@ jexec "$peer" ifconfig "$peer_vti" inet "$inner_b/30" "$inner_a" up
 add_sas "$fw" "$req_a"
 add_sas "$peer" "$req_b"
 unset key_ab key_ba
-jexec "$fw" route -n change -host "$target" "$inner_b"
+# Re-add the host route so the kernel resolves it against the VTI. Wait
+# for one reply after the transition before measuring steady-state delivery.
+jexec "$fw" route -n delete -host "$target"
+route_added=no
+jexec "$fw" route -n add -host "$target" "$inner_b"
+route_added=yes
 test "$(interface_to "$fw" "$target")" = "$fw_vti"
 test "$(interface_to "$peer" "$inner_a")" = "$peer_vti"
+ready=no
+for attempt in 1 2 3; do
+    if jexec "$fw" ping -n -c 1 -t 2 -S "$inner_a" "$target" >"$work/esp-probe.out" 2>&1; then
+        ready=yes
+        break
+    fi
+done
+if [ "$ready" != yes ]; then
+    cat "$work/esp-probe.out" >&2
+    exit 1
+fi
 esp_fw=$(count "$fw" esp-in)
 esp_peer=$(count "$peer" esp-in)
 probe "$inner_a"
-all_replied
+if ! all_replied; then
+    cat "$work/esp-probe.out" >&2
+    exit 1
+fi
 test "$(count "$fw" esp-in)" -ge "$((esp_fw+3))"
 test "$(count "$peer" esp-in)" -ge "$((esp_peer+3))"
 test "$(count "$fw" clear-in)" -eq "$clear_fw"
