@@ -51,8 +51,16 @@ jobs:
           CXX: clang++-18
           CC_FOR_BUILD: clang-18
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -yq --no-install-recommends clang-18 fakeroot libarchive-dev \
+          # Use the signed Ubuntu archive over HTTPS when runner mirrors
+          # redirect binary downloads to unavailable HTTP endpoints.
+          sources="$RUNNER_TEMP/pkg-build-ubuntu.list"
+          for suite in noble noble-updates noble-security; do
+            printf 'deb [signed-by=/usr/share/keyrings/ubuntu-archive-keyring.gpg] https://mirrors.mit.edu/ubuntu/ %s main universe\n' "$suite"
+          done > "$sources"
+          apt_options=(-o "Dir::Etc::sourcelist=$sources" -o Dir::Etc::sourceparts=-
+                       -o Acquire::Retries=2 -o Acquire::https::Timeout=20)
+          sudo apt-get "${apt_options[@]}" -o APT::Update::Error-Mode=any update -qq
+          sudo apt-get "${apt_options[@]}" install -yq --no-install-recommends clang-18 fakeroot libarchive-dev \
             libssl-dev libsqlite3-dev libbsd-dev liblzma-dev liblua5.2-dev liblzo2-dev \
             libattr1-dev libacl1-dev zlib1g-dev libbz2-dev pkg-config m4
           mkdir "$RUNNER_TEMP/pkg-build"
