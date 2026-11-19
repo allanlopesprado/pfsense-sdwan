@@ -15,6 +15,8 @@ git diff --no-index pfsense-base/src/etc/inc/filter.inc sdwan-core-lab/src/etc/i
 
 The last command displays the diff and returns 1 when there are changes. The tool checks the original file's SHA-256, patches a copy, and generates two files under `sdwan-core-lab/src/etc/inc`. Incorporate both into the matching revision used by the image build. Before porting to another base, compare gateway inventory, rule generation, XML parsing, and filter reload behavior. Restoring the clone snapshot recovers its reference image. [Building away from the firewall](https://docs.netgate.com/pfsense/en/latest/development/compile-software.html) · [Image tests and rollback](../docs/LAB.md)
 
+Restart the SD-WAN service after changing the native adapter so its long-running PHP process loads the updated generator. Use a dedicated gateway group and verify that a fresh connection follows the policy while the system default route stays on the original WAN.
+
 ### CE 2.9.1 lab copy
 
 To prepare a copy off the appliance, use `--ce-291-lab` on a tree containing the original `src/etc/inc/filter.inc`. This mode requires SHA-256 `6acd8621e4f88660759c5656488d81f580b49f4c9848b19048ae6a2570e177b4`. The hook runs after the native decision that may omit unavailable gateways. The lab checked patch application and PHP syntax on the exact copy. Two-path traffic, filter reloads, and rollback still require validation on a clone before using the image.

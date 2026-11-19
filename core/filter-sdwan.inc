@@ -75,6 +75,10 @@ function filter_sdwan_rule_route(array $rule, array $routes): array|false|null {
 		return null;
 	}
 	$group = $match['group'] ?? null;
+	// The native XML parser represents even a single <group> as a list.
+	if (is_array($group) && array_keys($group) === [0]) {
+		$group = $group[0];
+	}
 	$allowed = $match['gateways']['item'] ?? null;
 	if (!is_string($group) || $group === '' || ($rule['gateway'] ?? null) !== $group ||
 	    !is_array($allowed) || !array_is_list($allowed) || count($allowed) < 2 ||

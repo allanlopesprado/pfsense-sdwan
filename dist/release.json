@@ -3,6 +3,6 @@
   "channel": "main",
   "maturity": "experimental",
   "package": "pfSense-pkg-SDWAN",
-  "version": "0.4.19",
-  "sha256": "d8fcddf460478b9b451a8e2322d6326abcc5a2cc05ce0f3ffcaa8fd3983b9eaa"
+  "version": "0.4.20",
+  "sha256": "31d3a4f1bae876f941ff7fce4b886a1fbcfbb10df6fc29fcb9acea708fd85a1b"
 }
