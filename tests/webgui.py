@@ -309,7 +309,7 @@ def run(php, classes, screenshot_dir=None):
             pages = {page: request(page, config=demo, snapshot=demo_snapshot)
                      for page in ("status", "diagnostics", "members", "updates")}
             pages["members-edit"] = request("members", get={"edit": "1"})
-            pages["updates"] = offered
+            pages["updates"] = offered.split("</html>", 1)[0] + "</html>"
 
         native_group = {"name": "PBR", "item": ["GW1|1|address", "GW2|2|address"]}
         rule = {"tracker": "50321", "interface": "lan", "gateway": "PBR", "ipprotocol": "inet", "type": "pass",

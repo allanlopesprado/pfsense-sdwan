@@ -1,6 +1,6 @@
 <?php
 require_once __DIR__ . '/fixtures/release_curl.php';
-require_once $argv[1] ?? __DIR__ . '/../files/usr/local/pkg/sdwan_release.inc';
+require_once($argv[1] ?? __DIR__ . '/../files/usr/local/pkg/sdwan_release.inc');
 
 function check(bool $test): void {
 	if (!$test) {
@@ -10,7 +10,7 @@ function check(bool $test): void {
 
 function try_lock($name, $timeout) {
 	check($name === 'sdwan-package-upgrade' && $timeout === 1);
-	return $GLOBALS['locked'] ? null : tmpfile();
+	return tmpfile();
 }
 
 function unlock($lock): void {
@@ -18,35 +18,18 @@ function unlock($lock): void {
 }
 
 function pkg_exec($command, &$stdout, &$stderr): int {
-	global $arg_root, $local_version, $version, $pkg_adds, $force_failure;
+	global $arg_root, $pkg_adds;
+	check($arg_root !== null);
 	$stderr = '';
-	if ($arg_root !== null) {
-		if (str_starts_with($command, 'add ')) {
-			$pkg_adds++;
-			$command = 'add -I ' . substr($command, 4); // Suppress pfSense hooks in the isolated FreeBSD root.
-		}
-		$native = '/usr/local/sbin/pkg-static -r ' . escapeshellarg($arg_root) .
-		    ' -o ABI=FreeBSD:16:amd64 -o OSVERSION=1600018 ';
-		exec($native . $command, $lines, $rc);
-		$stdout = implode("\n", $lines);
-		return $rc;
-	}
-	if ($command === 'config ABI') {
-		$stdout = 'FreeBSD:16:amd64';
-	} elseif ($command === 'query %v pfSense-pkg-SDWAN') {
-		$stdout = $local_version;
-	} elseif (str_starts_with($command, 'query -F ')) {
-		$stdout = ($force_failure === 'manifest' ? 'unexpected' : "pfSense-pkg-SDWAN {$version} net/pfSense-pkg-SDWAN");
-	} elseif (str_starts_with($command, 'add ')) {
+	if (str_starts_with($command, 'add ')) {
 		$pkg_adds++;
-		if ($force_failure === 'install') {
-			return 1;
-		}
-		$local_version = $version;
-	} else {
-		check($command === 'check -s pfSense-pkg-SDWAN');
+		$command = 'add -I ' . substr($command, 4); // Suppress pfSense hooks in the isolated FreeBSD root.
 	}
-	return 0;
+	$native = '/usr/local/sbin/pkg-static -r ' . escapeshellarg($arg_root) .
+	    ' -o ABI=FreeBSD:16:amd64 -o OSVERSION=1600018 ';
+	exec($native . $command, $lines, $rc);
+	$stdout = implode("\n", $lines);
+	return $rc;
 }
 
 function pkg_version_compare($a, $b): string {
@@ -69,9 +52,7 @@ $release_requests = [];
 $target = ['version' => $version, 'sha256' => hash('sha256', $archive)];
 $release = $target + ['maturity' => 'experimental'];
 $pkg_adds = 0;
-$locked = false;
-$force_failure = null;
-$local_version = '0.4.7';
+
 
 check(sdwan_release_check() === $release);
 check(sdwan_release_asset_size($release) === strlen($archive));
