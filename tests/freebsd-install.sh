@@ -38,13 +38,13 @@ test -n "$version"
 head -c 80 "$PWD/dist/$package-$version.pkg" > "$root/interrupted.pkg"
 
 # Cover both update channels and the previous patch level.
-for baseline in 0.2.0 0.3.0 0.4.0 0.4.1 0.4.2; do
+for baseline in 0.2.0 0.3.0 0.4.0 0.4.1 0.4.2 0.4.3; do
     test "$(run_pkg version -t "$baseline" "$version")" = '<'
     checksum=$(awk '{print $1}' "$PWD/dist/$package-$baseline.pkg.sha256")
     sha256 -c "$checksum" "$PWD/dist/$package-$baseline.pkg" || exit 1
     run_pkg add -I "$PWD/dist/$package-$baseline.pkg"
     test "$(run_pkg query '%v' "$package")" = "$baseline"
-    if [ "$baseline" = 0.4.0 ] || [ "$baseline" = 0.4.1 ] || [ "$baseline" = 0.4.2 ]; then
+    if [ "${baseline%.*}" = 0.4 ]; then
         php -n -r '
             require $argv[1];
             $release = sdwan_release_parse(file_get_contents($argv[2]));
@@ -77,7 +77,7 @@ for baseline in 0.2.0 0.3.0 0.4.0 0.4.1 0.4.2; do
     # Roll back by removing the new package first. Do not force pkg past ABI checks.
     run_pkg add -I "$PWD/dist/$package-$baseline.pkg"
     test "$(run_pkg query '%v' "$package")" = "$baseline"
-    if [ "$baseline" = 0.4.0 ] || [ "$baseline" = 0.4.1 ] || [ "$baseline" = 0.4.2 ]; then
+    if [ "${baseline%.*}" = 0.4 ]; then
         test -f "$dbroot/usr/local/pkg/sdwan_log.inc"
     else
         test ! -e "$dbroot/usr/local/pkg/sdwan_log.inc"
@@ -104,4 +104,4 @@ sh "$root/sdwand.sh" stop
 test -f "$root/invalidated"
 if sh "$root/sdwand.sh" status; then exit 1; fi
 echo "Verified FreeBSD service start, restart and stop with a fixture worker."
-echo "Verified checksum rejection, download failure, direct upgrades through 0.4.2 to $version, removal, rollback to each prior version and reinstall (hooks disabled)."
+echo "Verified checksum rejection, download failure, direct upgrades through 0.4.3 to $version, removal, rollback to each prior version and reinstall (hooks disabled)."
