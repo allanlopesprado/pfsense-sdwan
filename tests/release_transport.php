@@ -60,6 +60,11 @@ check(sdwan_release_asset_size($release) === strlen($archive));
 if ($arg_root !== null) {
 	// Under FreeBSD, every package command operates on the real isolated pkg database.
 	check(sdwan_release_installed() === $baseline);
+	$release_http[$package]['body'] = substr($archive, 0, 80);
+	$release_http[$package]['ok'] = false;
+	check(sdwan_release_upgrade($target) === 'download' && $pkg_adds === 0);
+	check(sdwan_release_installed() === $baseline);
+	$release_http = $index_http;
 	$release_http[$package]['body'] = str_repeat('x', strlen($archive));
 	check(sdwan_release_upgrade($target) === 'checksum' && $pkg_adds === 0);
 	check(sdwan_release_installed() === $baseline);
@@ -67,7 +72,7 @@ if ($arg_root !== null) {
 	check(sdwan_release_upgrade($target) === 'success' && $pkg_adds === 1);
 	check(sdwan_release_installed() === $version);
 	check(sdwan_release_upgrade($target) === 'not_newer' && $pkg_adds === 1);
-	echo "ok - verified WebGUI package command upgrades a real FreeBSD pkg database and rejects replay\n";
+	echo "ok - interrupted and corrupt WebGUI downloads preserve the installed package, and retry upgrades and rejects replay\n";
 	exit;
 }
 
