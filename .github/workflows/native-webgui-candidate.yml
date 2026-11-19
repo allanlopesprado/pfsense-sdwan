@@ -44,16 +44,29 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - name: Build with FreeBSD pkg
-        uses: vmactions/freebsd-vm@4441bea20b31bfa77329a5af583199362489567e
+      - uses: actions/checkout@v4
         with:
-          release: "15.0"
-          usesh: true
-          copyback: true
-          prepare: |
-            env ASSUME_ALWAYS_YES=yes pkg bootstrap
-            pkg install -y python311
-          run: python3.11 tools/build-lab-pkg.py --pkg /usr/local/sbin/pkg-static --output "$PWD/package-out"
+          repository: freebsd/pkg
+          ref: 337d510a47f8716fb9c644262ada3db8d7f85e05
+          path: freebsd-pkg
+          persist-credentials: false
+      - name: Build the FreeBSD pkg 2.9.3 Linux binary
+        env:
+          CC: clang-18
+          CXX: clang++-18
+          CC_FOR_BUILD: clang-18
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -yq --no-install-recommends clang-18 fakeroot libarchive-dev \
+            libssl-dev libsqlite3-dev libbsd-dev liblzma-dev liblua5.2-dev liblzo2-dev \
+            libattr1-dev libacl1-dev zlib1g-dev libbz2-dev pkg-config m4
+          mkdir "$RUNNER_TEMP/pkg-build"
+          cd "$RUNNER_TEMP/pkg-build"
+          "$GITHUB_WORKSPACE/freebsd-pkg/configure" --prefix="$RUNNER_TEMP/pkg-install" --with-libarchive.pc --with-openssl.pc
+          make -j"$(nproc)"
+          make install
+      - name: Create and verify the package
+        run: fakeroot python3 tools/build-lab-pkg.py --pkg "$RUNNER_TEMP/pkg-install/sbin/pkg" --output package-out
       - uses: actions/upload-artifact@v4
         with:
           name: native-webgui-package
