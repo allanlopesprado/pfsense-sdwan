@@ -1,0 +1,50 @@
+name: Access and VPN recovery labs
+on:
+  workflow_call:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  vpn:
+    name: ${{ matrix.protocol }} two-WAN recovery
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        protocol: [openvpn, wireguard]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install real VPN implementations and traffic capture
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends iproute2 openvpn wireguard-tools tcpdump
+          dpkg-query -W openvpn wireguard-tools
+      - name: Transfer data before outage, on backup link, and after return
+        run: sudo python3 -B -u tests/lab/vpn-recovery.py "${{ matrix.protocol }}"
+  access:
+    name: ${{ matrix.protocol }} address and gateway recovery
+    runs-on: ubuntu-24.04
+    timeout-minutes: 9
+    strategy:
+      fail-fast: false
+      matrix:
+        protocol: [dhcp, pppoe]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install DHCP and PPPoE implementations
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends iproute2 iputils-ping dnsmasq-base ppp pppoe busybox
+          dpkg-query -W dnsmasq-base ppp pppoe busybox
+      - name: Prepare PPPoE kernel driver
+        if: matrix.protocol == 'pppoe'
+        run: |
+          sudo modprobe pppoe
+          test -c /dev/ppp || sudo mknod /dev/ppp c 108 0
+      - name: Renegotiate the link and compare old and current monitor metadata
+        run: sudo python3 -B -u tests/lab/renew-dynamic-wan.py "${{ matrix.protocol }}"

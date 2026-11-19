@@ -8,6 +8,8 @@ permissions:
 jobs:
   ikev2:
     uses: ./.github/workflows/ikev2.yml
+  homologation:
+    uses: ./.github/workflows/homologation.yml
   offline:
     runs-on: ubuntu-24.04
     steps:
