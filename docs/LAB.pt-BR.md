@@ -10,7 +10,14 @@ Configure ao menos dois gateways com monitoramento habilitado, alvos distintos e
 
 ## Construção e instalação
 
-Use um builder FreeBSD/pfSense com a árvore de ports, dependências e ABI compatíveis com o appliance alvo. O diretório que contém o Makefile deste projeto é o port. Disponibilize-o como `net/pfSense-pkg-SDWAN` na árvore de trabalho do builder. Dentro desse diretório, execute:
+O diretório [dist](../dist/) contém o .pkg de laboratório e seu checksum. Para usar o artefato já construído, baixe os dois arquivos no mesmo diretório do clone e confira a integridade com o comando abaixo. Compare a saída com o hash publicado antes de usar `pkg add`.
+
+```sh
+sha256 -q pfSense-pkg-SDWAN-0.1.0.pkg
+cat pfSense-pkg-SDWAN-0.1.0.pkg.sha256
+```
+
+Para compilar o port, use um builder FreeBSD/pfSense com a árvore de ports, dependências e ABI compatíveis com o appliance alvo. O diretório que contém o Makefile deste projeto é o port. Disponibilize-o como `net/pfSense-pkg-SDWAN` na árvore de trabalho do builder. Dentro desse diretório, execute:
 
 ```sh
 make stage
@@ -81,3 +88,8 @@ O snapshot público examinado do gerador PF pode omitir regras de pacote durante
 - [VTI no pfSense](https://docs.netgate.com/pfsense/en/latest/vpn/ipsec/routed-vti.html)
 - [IPsec em HA, associação de VTI, DPD e VIP CARP](https://docs.netgate.com/pfsense/en/latest/highavailability/ipsec.html)
 - [Revisão de referência do gerador de regras PF](https://github.com/pfsense/pfsense/blob/9363ac5b8651a1c7a333180425ce7719070f95f9/src/etc/inc/filter.inc#L6098-L6162)
+
+
+## Reprodução do artefato experimental
+
+O script `tools/build-lab-pkg.py` lê os arquivos deste port, prepara o manifesto e chama `pkg create`. Ele confere o pacote resultante com `pkg info -F` e verifica a identidade, os hooks, os modos e os bytes de todos os arquivos. A compilação cruzada usada para o arquivo em dist empregou a CLI FreeBSD pkg 2.9.3 em Linux, com metadados de proprietário root:wheel. Para repetir a geração com essa CLI em um ambiente de empacotamento com a propriedade correta, execute `python3 tools/build-lab-pkg.py --pkg /caminho/para/pkg --output /tmp/sdwan-dist`. A validação do artefato não executa os hooks no appliance.
