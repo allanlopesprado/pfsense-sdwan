@@ -337,7 +337,7 @@ def run(php, classes, screenshot_dir=None):
         failed = {**policy, "selected": None, "reason": "No eligible member",
                   "eligible_count": 0, "path_status": "no_eligible",
                   "candidates": {"backup": "RTT exceeds the SLA", "01": "Gateway is down"}}
-        unsuitable = {**snapshot, "members": {"backup": {**sample, "rtt_ms": 1.25, "loss_pct": 0.1},
+        unsuitable = {**snapshot, "members": {"backup": {**sample, "rtt_ms": 25.25, "loss_pct": 0.1},
                                              "01": {**sample, "status": "down", "loss_pct": 100}},
                       "policies": {"VOICE": failed}}
         report = request("diagnostics", config=latency, snapshot=unsuitable)
@@ -345,7 +345,8 @@ def run(php, classes, screenshot_dir=None):
         assert "No eligible member" in report and "0 of 2" in report and ">Cost</th>" not in report
         assert len(decisions) == 2 and "RTT exceeds the SLA" in decisions[0] and "Gateway is down" in decisions[1]
         assert decisions[0].count('text-nowrap bg-warning') == 2 and 'text-nowrap bg-warning' not in decisions[1]
-        assert 'text-nowrap bg-warning' not in diagnostics, "Measurements equal to SLA limits must pass"
+        boundary = {**snapshot, "members": {"backup": {**sample, "rtt_ms": 25}, "01": sample}}
+        assert 'text-nowrap bg-warning' not in request("diagnostics", snapshot=boundary), "SLA limits are inclusive"
         for args, notice in [({"snapshot": {**snapshot, "generated_at": 1}}, "No current sample for this policy"),
                              ({"snapshot": snapshot, "service_state": "unregistered"}, "not registered")]:
             report = request("diagnostics", **args)
