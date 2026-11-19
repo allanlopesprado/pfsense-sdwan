@@ -338,17 +338,25 @@ EOF
         jexec "$firewall" pfctl -f "$work/ipv6.pf"
     }
     request6() {
-        printf '%s\n' "$2" | jexec "$client" nc -6 -n -N -w 3 "$1" 7
+        printf '%s\n' "$2" | jexec "$client" nc -6 -n -N -w 4 "$1" 7
+    }
+    return_via6() {
+        # Reinstall the prefix when changing interfaces so the next hop
+        # cannot retain the previous adjacency in the laboratory routing table.
+        jexec "$remote" route -n delete -inet6 2001:db8:10::/64
+        jexec "$remote" route -n add -inet6 2001:db8:10::/64 "$1"
+        returned=$(jexec "$remote" route -n get -inet6 2001:db8:10::11 | awk '/interface:/ {print $2}')
+        test "$returned" = "$2"
     }
     steer6 path-a
     test "$(request6 2001:db8:40::162 v6-wan-a)" = '2001:db8:10::11 v6-wan-a'
     jexec "$remote" pfctl -s labels | counter ingress-a
     steer6 path-b
-    jexec "$remote" route -n change -inet6 2001:db8:10::/64 2001:db8:30::1
+    return_via6 2001:db8:30::1 "$remote_b"
     test "$(request6 2001:db8:40::162 v6-wan-b)" = '2001:db8:10::11 v6-wan-b'
     jexec "$remote" pfctl -s labels | counter ingress-b
     steer6 no-member
-    jexec "$remote" route -n change -inet6 2001:db8:10::/64 2001:db8:20::1
+    return_via6 2001:db8:20::1 "$remote_a"
     if request6 2001:db8:40::162 v6-block >"$work/blocked6"; then
         echo 'The IPv6 no-member rule allowed a new flow' >&2
         exit 1
@@ -362,11 +370,11 @@ EOF
     cmp "$work/default6.before" "$work/default6.after"
     echo 'ok - IPv6 TCP crossed both WANs (including a link-local next hop), blocked without a path and recovered'
     steer6 path-c triple-
-    jexec "$remote" route -n change -inet6 2001:db8:10::/64 2001:db8:50::1
+    return_via6 2001:db8:50::1 "$remote_c"
     test "$(request6 2001:db8:40::162 v6-wan-c)" = '2001:db8:10::11 v6-wan-c'
     jexec "$remote" pfctl -s labels | counter ingress-c
     steer6 no-member triple-
-    jexec "$remote" route -n change -inet6 2001:db8:10::/64 2001:db8:20::1
+    return_via6 2001:db8:20::1 "$remote_a"
     if request6 2001:db8:40::162 v6-block-triple >"$work/blocked6-triple"; then
         echo 'The three-WAN IPv6 rule allowed a new flow without a path' >&2
         exit 1

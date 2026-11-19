@@ -43,6 +43,14 @@ Em uma VM FreeBSD 15.1, dois nós VNET compartilharam um VIP na LAN e outro na W
 
 Com pfsync ativo, o standby recebeu o estado TCP estabelecido com o mesmo ID e identificador de origem do PF. Após a perda dos enlaces do nó preferido, o mesmo socket completou outra transação com o mesmo estado e endereço WAN traduzido. Quando o nó preferido voltou a assumir os dois VIPs, o socket completou mais uma transação preservando o estado NAT. [Regressão no GitHub Actions](https://github.com/allanlopesprado/pfsense-sdwan/actions/runs/44503280903/job/135488666307)
 
+## Recuperação de VPN e WAN dinâmica
+
+OpenVPN e WireGuard transferiram 64 KiB com o conteúdo integral verificado nos dois sentidos, no caminho inicial, depois da interrupção da WAN A e depois do retorno. Durante a interrupção, o teste exigiu ausência de resposta pela VPN e de HTTP protegido em claro na captura das duas WANs. O laboratório escolheu a rota de acesso. O peer WireGuard confirmou o endereço de origem autenticado na WAN B. [OpenVPN](https://github.com/allanlopesprado/pfsense-sdwan/actions/runs/44517334352/job/135536646310) · [WireGuard](https://github.com/allanlopesprado/pfsense-sdwan/actions/runs/44517334352/job/135536646345)
+
+O DHCP renovou a concessão e adquiriu um endereço e um gateway diferentes após a liberação. O PPPoE encerrou a primeira sessão na perda de enlace e negociou outro par de endereços. O comparador do SD-WAN, alimentado com os dados observados nas sessões, rejeitou tanto o endereço de origem antigo quanto o gateway antigo. [DHCP](https://github.com/allanlopesprado/pfsense-sdwan/actions/runs/44517334352/job/135536646518) · [PPPoE](https://github.com/allanlopesprado/pfsense-sdwan/actions/runs/44517334352/job/135536646195)
+
+O Kea delegou dois prefixos /56 sucessivos ao mesmo cliente DHCPv6. Para cada concessão, o roteador anunciou um /64 e o cliente LAN alcançou o destino com um endereço desse prefixo. A saída deixou de funcionar durante a retirada da primeira rota. O teste aguardou a expiração do endereço antigo antes de comprovar a entrega pelo novo. [DHCPv6-PD e renumeração da LAN](https://github.com/allanlopesprado/pfsense-sdwan/actions/runs/44518652364/job/135541214456)
+
 ## Aceite em equipamento
 
 No CE 2.9.1, a atualização do 0.4.2 para o 0.4.3 executou os hooks reais. A verificação no equipamento confirmou integridade, registro de pacote e serviço, amostra atual e eventos no leitor nativo do log. A configuração do SD-WAN e as regras PF e NAT apresentaram os mesmos valores antes e depois. [Versão 0.4.3](https://github.com/allanlopesprado/pfsense-sdwan/releases/tag/v0.4.3)

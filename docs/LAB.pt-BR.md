@@ -124,18 +124,19 @@ O snapshot público examinado do gerador PF pode omitir regras de pacote durante
 
 ## Provas automatizadas e aceite nos clones
 
-O workflow [Access and VPN recovery labs](../.github/workflows/homologation.yml) executa dois pares de ensaios em namespaces isolados do Ubuntu. Para repetir em uma VM descartável com as dependências do workflow:
+O workflow [Access and VPN recovery labs](../.github/workflows/homologation.yml) executa cinco ensaios em namespaces isolados do Ubuntu. Para repetir em uma VM descartável com as dependências do workflow:
 
 ```sh
 sudo python3 -B -u tests/lab/vpn-recovery.py openvpn
 sudo python3 -B -u tests/lab/vpn-recovery.py wireguard
 sudo python3 -B -u tests/lab/renew-dynamic-wan.py dhcp
 sudo python3 -B -u tests/lab/renew-dynamic-wan.py pppoe
+sudo python3 -B -u tests/lab/ipv6-pd.py
 ```
 
 Nos ensaios VPN, mantenha a mesma rede protegida. Compare uma transferência verificada de 64 KiB nos dois sentidos e a captura em cada WAN, com separação do encaminhamento da rede de acesso e da recuperação do túnel. O controlador do ensaio escolhe a WAN e, para WireGuard, reaplica o endpoint de destino por essa rota. O peer deve aprender a origem atual por tráfego autenticado. Esses ensaios exercitam novos fluxos após a reconexão. A continuidade de um socket já aberto e a reação nativa do pfSense a uma troca de gateway exigem testes no clone. [OpenVPN e Multi-WAN](https://docs.netgate.com/pfsense/en/latest/vpn/openvpn/multi-wan.html) · [WireGuard e namespaces](https://www.wireguard.com/netns/)
 
-Nos ensaios de acesso, a renovação DHCP conserva a concessão e uma nova concessão troca o endereço e o próximo salto. O PPPoE estabelece a sessão, perde o enlace e negocia outro par de endereços. A checagem PHP alimenta o comparador de monitor com ambos os pares observados. No CE, repita com dpinger ativo e capture o endereço de origem do novo processo, o gateway instalado, a primeira amostra aceita e a primeira transação útil. Inclua IPv6-PD, rota anunciada na LAN e recuperação de clientes IPv6 em uma topologia com um provedor de prefixo delegado.
+Nos ensaios de acesso, a renovação DHCP conserva a concessão e uma nova concessão troca o endereço e o próximo salto. O PPPoE estabelece a sessão, perde o enlace e negocia outro par de endereços. A checagem PHP alimenta o comparador de monitor com ambos os pares observados. No CE, repita com dpinger ativo e capture o endereço de origem do novo processo, o gateway instalado, a primeira amostra aceita e a primeira transação útil. No ensaio IPv6-PD, o Kea entrega o prefixo, o roteador anuncia um /64 na LAN e o cliente IPv6 comprova conectividade usando esse prefixo. Após retirar a primeira delegação, o cliente perde o caminho antigo e volta a alcançar o destino usando o novo prefixo. Repita no CE com o cliente de acesso e o serviço Router Advertisement nativos. [Delegação de prefixos no Kea](https://kea.readthedocs.io/en/kea-2.3.3/arm/dhcp6-srv.html#subnet-and-prefix-delegation-pools)
 
 Para o aceite de HA e interoperabilidade, use dois clones CE 2.9.1 com console independente, com WAN A, WAN B, LAN e sincronização em segmentos isolados. Prepare um peer de referência e um FortiGate licenciado para as propostas escolhidas. Registre em cada par a posse dos VIPs, os estados PF, a negociação IKE/CHILD_SA e a primeira transação de aplicação durante a mesma falha. Use **uma sessão de gerência independente** do caminho que será interrompido. Registre também a sincronização XMLRPC, o roteamento dinâmico e a restauração do snapshot da imagem de laboratório. [Instalador oficial do CE](https://docs.netgate.com/pfsense/en/latest/install/download-installer-image.html) · [Limites da licença de avaliação FortiGate-VM](https://docs.fortinet.com/document/fortigate/7.2.10/administration-guide/441460) · [IPsec em HA](https://docs.netgate.com/pfsense/en/latest/highavailability/ipsec.html)
 

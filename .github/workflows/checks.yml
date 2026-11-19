@@ -111,7 +111,7 @@ jobs:
             SDWAN_REAL_DPINGER=1 SDWAN_RENDERED_RULES="$PWD/lab-rendered" sh tests/lab/freebsd-dataplane.sh
   publish:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main' && startsWith(github.event.head_commit.message, 'Release ')
-    needs: [offline, freebsd, ikev2]
+    needs: [offline, freebsd, ikev2, homologation]
     runs-on: ubuntu-24.04
     concurrency:
       group: sdwan-publish
