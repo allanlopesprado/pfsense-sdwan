@@ -94,7 +94,7 @@ $sdwanRender = static function (): void {
 		<caption class="sr-only"><?=gettext('SD-WAN link monitoring')?></caption>
 		<thead><tr>
 			<th scope="col"><?=gettext('Gateway')?></th>
-			<th scope="col" class="text-right sdwan-widget-metric"><?=gettext('RTT (ms)')?></th>
+			<th scope="col" class="text-right sdwan-widget-latency"><span class="text-nowrap"><?=gettext('RTT (ms)')?></span></th>
 			<th scope="col" class="text-right sdwan-widget-metric"><?=gettext('Loss')?></th>
 			<th scope="col" class="sdwan-widget-state"><?=gettext('Status')?></th>
 		</tr></thead>
@@ -157,8 +157,9 @@ $sdwanBodyId = 'sdwan-status-' . $widgetkey;
 .sdwan-status-widget .table-responsive .table td { white-space: normal; overflow-wrap: anywhere; }
 .sdwan-status-widget .table-responsive { margin-bottom: 0; }
 .sdwan-status-widget a { color: inherit; text-decoration: underline; }
-.sdwan-status-widget .sdwan-widget-metric { width: 4.8em; }
-.sdwan-status-widget .sdwan-widget-state { width: 6.5em; }
+.sdwan-status-widget .sdwan-widget-latency { width: 72px; }
+.sdwan-status-widget .sdwan-widget-metric { width: 52px; }
+.sdwan-status-widget .sdwan-widget-state { width: 108px; }
 .sdwan-status-widget .sdwan-widget-status { display: inline-flex; align-items: baseline; gap: .3em; }
 .sdwan-status-widget .sdwan-widget-status i { flex: none; }
 .sdwan-status-widget .sdwan-widget-detail { display: block; font-weight: normal; }

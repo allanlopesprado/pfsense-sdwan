@@ -157,6 +157,12 @@ def verify_dashboard_layout(core, output, widget, fragment):
                     }
                     const readouts=region.querySelectorAll('tbody th, tbody a, tbody td, .sdwan-widget-note, .sdwan-widget-note a');
                     const rows=region.querySelectorAll('tbody tr');
+                    const labels=region.querySelectorAll('.sdwan-widget-latency span, .sdwan-widget-status > span');
+                    const wrappedLabels=Array.from(labels).filter(el=>{
+                        const range=document.createRange();
+                        range.selectNodeContents(el);
+                        return range.getClientRects().length !== 1;
+                    }).length;
                     return {width:box.width,height:Math.ceil(box.height),viewport:innerWidth,
                             horizontalOverflow:Math.max(...nodes.map(e=>e.scrollWidth-e.clientWidth)),
                             background:getComputedStyle(document.body).backgroundColor,
@@ -164,7 +170,7 @@ def verify_dashboard_layout(core, output, widget, fragment):
                             neutralStatusCells:Array.from(rows).every(row=>Array.from(row.cells).every(c=>!c.className.includes('bg-'))),
                             gatewayStates:Array.from(rows).map(row=>row.lastElementChild.textContent.trim()),
                             latency:Array.from(rows).map(row=>row.querySelector('.sdwan-widget-rtt').textContent.trim()),
-                            timestamps:region.querySelectorAll('time').length,
+                            timestamps:region.querySelectorAll('time').length,wrappedLabels,
                             minimumReadoutContrast:Math.min(...Array.from(readouts,contrast)),
                             positiveTabindex:panel.querySelectorAll('[tabindex]:not([tabindex="-1"]):not([tabindex="0"])').length};
                 """
@@ -172,7 +178,7 @@ def verify_dashboard_layout(core, output, widget, fragment):
                 assert data["width"] == width and data["viewport"] == width and data["horizontalOverflow"] <= 1, data
                 assert data["rows"] == 3 and data["positiveTabindex"] == 0
                 assert data["neutralStatusCells"] and data["gatewayStates"] == ["Warning", "Online", "Down"]
-                assert data["latency"] == ["23.45", "9.8", "—"] and data["timestamps"] == 0
+                assert data["latency"] == ["23.45", "9.8", "—"] and data["timestamps"] == data["wrappedLabels"] == 0, data
                 assert data["minimumReadoutContrast"] >= 4.5, data
                 expected_bg = "rgb(245, 245, 245)" if theme == "light" else "rgb(33, 33, 33)"
                 assert data["background"] == expected_bg, data
