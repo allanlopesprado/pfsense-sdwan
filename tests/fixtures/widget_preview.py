@@ -157,12 +157,12 @@ def verify_dashboard_layout(core, output, widget, fragment):
                     }
                     const readouts=region.querySelectorAll('tbody th, tbody a, tbody td, .sdwan-widget-note, .sdwan-widget-note a');
                     const rows=region.querySelectorAll('tbody tr');
-                    const labels=region.querySelectorAll('.sdwan-widget-latency, .sdwan-widget-status, .sdwan-widget-rtt, .sdwan-widget-rttsd');
+                    const labels=region.querySelectorAll('.sdwan-widget-latency, .sdwan-widget-loss, .sdwan-widget-status, .sdwan-widget-rtt, .sdwan-widget-rttsd');
                     const wrappedLabels=Array.from(labels).filter(el=>{
                         const range=document.createRange();
                         range.selectNodeContents(el);
                         return range.getClientRects().length !== 1;
-                    }).length;
+                    }).map(el=>el.textContent.trim());
                     return {width:box.width,height:Math.ceil(box.height),viewport:innerWidth,
                             horizontalOverflow:Math.max(...nodes.map(e=>e.scrollWidth-e.clientWidth)),
                             background:getComputedStyle(document.body).backgroundColor,
@@ -183,7 +183,7 @@ def verify_dashboard_layout(core, output, widget, fragment):
                 assert data["gatewayStates"] == ["Warning", "Online", "Down"] and data["addressLines"] == 3, data
                 assert len(set(data["statusBackgrounds"])) == 3, data
                 assert all(a != b for a, b in zip(data["statusBackgrounds"], data["rowBackgrounds"])), data
-                assert data["latency"] == ["23.450ms", "9.800ms", "—"] and data["timestamps"] == data["wrappedLabels"] == 0, data
+                assert data["latency"] == ["23.450ms", "9.800ms", "—"] and data["timestamps"] == 0 and not data["wrappedLabels"], data
                 assert data["variation"] == ["11.400ms", "0.000ms", "—"], data
                 assert data["minimumReadoutContrast"] >= 4.5, data
                 expected_bg = "rgb(245, 245, 245)" if theme == "light" else "rgb(33, 33, 33)"
