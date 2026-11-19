@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<pfsensepkgs>
+	<package>
+		<name>SDWAN</name>
+		<descr>SD-WAN gateway health and policy evaluation.</descr>
+		<version>%%PKGVERSION%%</version>
+		<configurationfile>sdwan.xml</configurationfile>
+	</package>
+</pfsensepkgs>

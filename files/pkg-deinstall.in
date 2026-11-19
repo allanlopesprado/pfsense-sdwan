@@ -1,0 +1,14 @@
+#!/bin/sh
+[ -z "${PKG_ROOTDIR#/}" ] || exit 0
+case "$2" in
+DEINSTALL)
+	# Also stop during removal with an unavailable PHP-FPM service.
+	if [ -x /usr/local/etc/rc.d/sdwand.sh ]; then
+		/usr/local/etc/rc.d/sdwand.sh stop >/dev/null 2>&1 || :
+	fi
+	rm -f /var/run/sdwan-observer.json
+	;;
+POST-DEINSTALL) ;;
+*) exit 0 ;;
+esac
+exec /usr/local/bin/php -f /etc/rc.packages %%PORTNAME%% "$2"

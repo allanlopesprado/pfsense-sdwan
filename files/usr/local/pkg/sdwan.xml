@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<packagegui>
+	<name>sdwan</name>
+	<title>SD-WAN</title>
+	<include_file>/usr/local/pkg/sdwan.inc</include_file>
+	<menu>
+		<name>SD-WAN</name>
+		<section>Services</section>
+		<configfile>sdwan.xml</configfile>
+		<url>/sdwan/status.php</url>
+	</menu>
+	<service>
+		<name>sdwand</name>
+		<rcfile>sdwand.sh</rcfile>
+		<description>SD-WAN policy observer</description>
+		<custom_php_service_status_command>mwexec('/usr/local/etc/rc.d/sdwand.sh status', true) === 0</custom_php_service_status_command>
+	</service>
+	<custom_php_install_command>
+		mwexec('/usr/local/etc/rc.d/sdwand.sh start');
+	</custom_php_install_command>
+</packagegui>

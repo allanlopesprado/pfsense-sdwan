@@ -1,0 +1,5 @@
+#!/bin/sh
+[ "$2" = "POST-INSTALL" ] || exit 0
+# A staged image has no running WebGUI. pfSense registers packages at boot.
+[ -z "${PKG_ROOTDIR#/}" ] || exit 0
+exec /usr/local/bin/php -f /etc/rc.packages %%PORTNAME%% "$2"

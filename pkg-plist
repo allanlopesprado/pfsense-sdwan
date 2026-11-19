@@ -1,0 +1,14 @@
+/etc/inc/priv/sdwan.priv.inc
+etc/rc.d/sdwand.sh
+pkg/sdwan.inc
+pkg/sdwan.xml
+pkg/sdwan_engine.inc
+sbin/sdwand.php
+%%DATADIR%%/info.xml
+www/sdwan/diagnostics.php
+www/sdwan/editor.inc.php
+www/sdwan/members.php
+www/sdwan/policies.php
+www/sdwan/slas.php
+www/sdwan/status.php
+www/sdwan/ui.inc.php
