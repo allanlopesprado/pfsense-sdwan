@@ -12,7 +12,7 @@ import sys
 import tempfile
 import time
 from contextlib import ExitStack, contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 CHARON = "/usr/lib/ipsec/charon"
@@ -55,7 +55,7 @@ def inside(ns, *args):
     return ["ip", "netns", "exec", ns, *args]
 
 
-def create_network(stack, nodes, wire, paths):
+def create_network(stack, nodes, wire, paths, shared_selectors=False):
     for name in [*nodes, wire]:
         run(["ip", "netns", "add", name])
         stack.callback(run, ["ip", "netns", "del", name], check=False)
@@ -71,9 +71,17 @@ def create_network(stack, nodes, wire, paths):
             run(["ip", "-n", wire, "link", "set", tap, "up"])
             run(["ip", "-n", ns, "addr", "add", path.outer[idx] + "/30", "dev", end])
             run(["ip", "-n", ns, "link", "set", end, "up"])
+            if shared_selectors:
+                overlay = "xfrm" + path.name
+                run(["ip", "-n", ns, "link", "add", overlay, "type", "xfrm", "dev", end, "if_id", str(path.reqid)])
+                run(["ip", "-n", ns, "link", "set", overlay, "up"])
+                continue
             run(["ip", "-n", ns, "addr", "add", path.inner[idx] + "/32", "dev", "lo"])
             run(["ip", "-n", ns, "route", "add", path.inner[1-idx] + "/32", "via", path.outer[1-idx],
                  "dev", end, "src", path.inner[idx]])
+    if shared_selectors:
+        for idx, ns in enumerate(nodes):
+            run(["ip", "-n", ns, "addr", "add", paths[0].inner[idx] + "/32", "dev", "lo"])
 
 
 def guard(ns, idx, paths):
@@ -149,14 +157,22 @@ def no_clear(files, paths):
                 raise RuntimeError(f"Plaintext protected ICMP found in {filename.name}")
 
 
+def esp_packets(files, path, origin, spi):
+    match = (f"src {path.outer[origin]} and dst {path.outer[1-origin]} and ip proto 50 "
+             f"and ip[((ip[0] & 15) * 4):4] = 0x{spi}")
+    return packets(files[path.name], match)
+
+
 def assert_esp(files, p, sa):
     for idx, spi in enumerate((sa["out_spi"], sa["in_spi"])):
-        match = f"src {p.outer[idx]} and dst {p.outer[1-idx]} and ip proto 50 and ip[((ip[0] & 15) * 4):4] = 0x{spi}"
-        if packets(files[p.name], match) < 2:
+        if esp_packets(files, p, idx, spi) < 2:
             raise RuntimeError(f"Missing expected ESP traffic with SPI {spi} on {p.name}")
 
 
-def connection(p, idx):
+def connection(p, idx, shared_selectors):
+    local_ts = "0.0.0.0/0" if shared_selectors else f"{p.inner[idx]}/32"
+    remote_ts = "0.0.0.0/0" if shared_selectors else f"{p.inner[1-idx]}/32"
+    interface_ids = f"if_id_in = {p.reqid}\n                if_id_out = {p.reqid}" if shared_selectors else ""
     return f"""
     path-{p.name} {{
         version = 2
@@ -174,8 +190,9 @@ def connection(p, idx):
         }}
         children {{
             data-{p.name} {{
-                local_ts = {p.inner[idx]}/32
-                remote_ts = {p.inner[1-idx]}/32
+                local_ts = {local_ts}
+                remote_ts = {remote_ts}
+                {interface_ids}
                 reqid = {p.reqid}
                 esp_proposals = aes128gcm16-ecp256
                 start_action = none
@@ -187,7 +204,7 @@ def connection(p, idx):
 
 
 class Peer:
-    def __init__(self, ns, idx, work, keys, stack, paths):
+    def __init__(self, ns, idx, work, keys, stack, paths, shared_selectors=False):
         self.ns = ns
         directory = work / ns
         directory.mkdir(mode=0o700)
@@ -203,7 +220,7 @@ class Peer:
         secret = 0x{keys[p.name]}
     }}
 """)
-        (confdir / "swanctl.conf").write_text("connections {\n" + "".join(connection(p, idx) for p in paths)
+        (confdir / "swanctl.conf").write_text("connections {\n" + "".join(connection(p, idx, shared_selectors) for p in paths)
                                              + "}\nsecrets {\n" + "".join(secrets_body) + "}\n")
         (directory / "strongswan.conf").write_text("""charon {
     install_routes = no
@@ -361,10 +378,75 @@ def exercise(work, stack, paths):
     data_stage(work, wire, peers, paths, "restored")
 
 
+def exercise_shared_selectors(work, stack):
+    nodes = [f"ikeleft{os.getpid()}", f"ikeright{os.getpid()}"]
+    wire = f"ikewire{os.getpid()}"
+    paths = tuple(replace(p, inner=("10.241.250.1", "10.241.250.2")) for p in PATHS[:2])
+    primary, standby = paths
+    create_network(stack, nodes, wire, paths, shared_selectors=True)
+
+    def prefer(idx, path, overlay=True):
+        prefix = path.inner[1-idx] + "/32"
+        via = ["dev", "xfrm" + path.name] if overlay else ["via", path.outer[1-idx], "dev", "wan" + path.name]
+        run(["ip", "-n", nodes[idx], "route", "replace", prefix, *via, "src", path.inner[idx]])
+
+    for idx in range(2):
+        prefer(idx, primary, overlay=False)
+    with captures(work, wire, "shared-cleartext-control", paths) as files:
+        probe(nodes[0], 0, primary)
+    if packets(files[primary.name], inner_filter(primary)) != 4:
+        raise RuntimeError("Could not observe cleartext on the transit capture during the positive control")
+
+    keys = {p.name: secrets.token_hex(32) for p in paths}
+    peers = [Peer(ns, idx, work, keys, stack, paths, shared_selectors=True) for idx, ns in enumerate(nodes)]
+    negotiated = {}
+    for path in paths:
+        peers[0].control("--initiate", "--child", f"data-{path.name}", "--timeout", "10")
+        negotiated[path.name] = snapshot(peers, path)[0]
+        for peer in peers:
+            listing = peer.control("--list-sas", "--ike", f"path-{path.name}", "--child", f"data-{path.name}")
+            if len(re.findall(r"^\s+(?:local|remote)\s+0\.0\.0\.0/0\s*$", listing, re.M)) != 2:
+                raise RuntimeError(f"The {path.name} CHILD_SA did not negotiate both wildcard selectors")
+    for ns in nodes:
+        if run(["ip", "-n", ns, "route", "show", "default"]).stdout.strip():
+            raise RuntimeError("Wildcard selectors unexpectedly installed a default route in the lab")
+    print("ok - both tunnels negotiated 0.0.0.0/0 in both directions, with no default route installed", flush=True)
+
+    def verify_paths(stage, outbound, inbound):
+        prefer(0, outbound)
+        prefer(1, inbound)
+        with captures(work, wire, stage, paths) as traces:
+            probe(nodes[0], 0, primary)
+        no_clear(traces, paths)
+        for direction, expected in enumerate((outbound, inbound)):
+            key = ("out_spi", "in_spi")[direction]
+            for path in paths:
+                count = esp_packets(traces, path, direction, negotiated[path.name][key])
+                if count != (2 if path == expected else 0):
+                    raise RuntimeError(f"{stage}: unexpected ESP count {count} from peer {direction} on {path.name}")
+        print(f"ok - {stage}: outbound {outbound.name}, return {inbound.name} (ESP captures on both WANs)", flush=True)
+
+    verify_paths("aligned-primary", primary, primary)
+    verify_paths("mismatched-preferences", primary, standby)
+    verify_paths("aligned-standby", standby, standby)
+
+    peers[0].control("--terminate", "--ike", "path-b", "--timeout", "10")
+    wait_for("retirement of standby on both peers",
+             lambda: all(not peer.control("--list-sas", "--ike", "path-b").strip() for peer in peers))
+    with captures(work, wire, "shared-no-sa", paths) as files:
+        probe(nodes[0], 0, primary, expect=False)
+    no_clear(files, paths)
+    verify_paths("recovered-primary", primary, primary)
+    print("ok - a route through a withdrawn SA dropped protected traffic until both peers returned to A", flush=True)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--paths", type=int, choices=(1, 2, 3), default=2)
+    parser.add_argument("--shared-selectors", action="store_true", help="two tunnels with identical wildcard selectors")
     settings = parser.parse_args()
+    if settings.shared_selectors and settings.paths != 2:
+        parser.error("--shared-selectors requires exactly two paths")
     if sys.platform != "linux" or os.getuid() != 0:
         raise SystemExit("This test requires root in a disposable Ubuntu VM with network and mount namespaces.")
     if not Path(CHARON).is_file():
@@ -373,7 +455,10 @@ def main():
     with tempfile.TemporaryDirectory(prefix="sdwan-ike-") as directory:
         with ExitStack() as stack:
             try:
-                exercise(Path(directory), stack, PATHS[:settings.paths])
+                if settings.shared_selectors:
+                    exercise_shared_selectors(Path(directory), stack)
+                else:
+                    exercise(Path(directory), stack, PATHS[:settings.paths])
             except Exception:
                 for output in sorted(Path(directory).glob("*/daemon.log")):
                     print(output.parent.name, "\n", output.read_text()[-5000:], file=sys.stderr)

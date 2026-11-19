@@ -18,6 +18,12 @@ Each path negotiates an IKE SA and a CHILD_SA using a pair of identities and a r
 
 The lab exercises two Linux strongSwan peers with separate protected address sets. It measures negotiation, rekey, and path isolation. Switching the same flow across pfSense tunnels, CARP failover during renegotiation, and FortiOS interoperability require separate tests. The egress guard is specific to this nftables lab.
 
+## Two tunnels with the same selectors
+
+The shared-selector case negotiates `0.0.0.0/0` on both sides of both CHILD_SAs using separate Linux XFRM interface IDs. Both tunnels can reach the same protected host pair. The lab verifies that negotiation leaves the default routing table without a default route. Captures distinguish requests and replies by each tunnel's ESP SPI.
+
+The test starts with both peers using A. It then directs replies to B and verifies that requests stay on A with the same negotiated selectors. Aligning both peers on B restores symmetry. Removing B's SA while the route still points to it blocks the flow, with no cleartext observed. Both peers then return to A. This test isolates the effect of routing preferences. Validation of pfSense `reply-to`, FortiOS session policy, and end-to-end interoperability requires the two-firewall procedure. [strongSwan route-based VPNs](https://docs.strongswan.org/docs/5.9/features/routeBasedVpn.html) · [FortiGate acceptance](../../../docs/FORTIOS.md)
+
 ## Run the test
 
 On an Ubuntu 24.04 lab VM with root access, network and mount namespaces, Linux XFRM, and nftables, install the distribution packages and start the test from the repository root.
@@ -26,6 +32,7 @@ On an Ubuntu 24.04 lab VM with root access, network and mount namespaces, Linux 
 sudo apt-get update
 sudo apt-get install -y --no-install-recommends iproute2 iputils-ping nftables tcpdump strongswan-charon strongswan-swanctl libstrongswan-standard-plugins
 sudo python3 -B -u tests/lab/ikev2/run.py
+sudo python3 -B -u tests/lab/ikev2/run.py --shared-selectors
 ```
 
 After dependency installation, the lab runs without vendor images or external access. The script removes its processes, namespaces, test configurations and keys, and temporary captures. [IKEv2 tunnel checks workflow](../../../.github/workflows/ikev2.yml)
