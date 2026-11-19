@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """Check installed files, package registration, and dashboard menu references."""
+import hashlib
+import json
 from pathlib import Path
+import re
+import tarfile
 import subprocess
 import xml.etree.ElementTree as ET
 
@@ -30,6 +34,38 @@ def read_plist():
     return entries
 
 
+def check_distributed_package(installed):
+    version = re.search(r"^PORTVERSION=\s*(\S+)$", (ROOT / "Makefile").read_text(), re.M)[1]
+    path = ROOT / "dist" / f"pfSense-pkg-SDWAN-{version}.pkg"
+    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    checksum = path.with_suffix(".pkg.sha256").read_text().split()
+    if checksum != [digest, path.name]:
+        fail("Release artifact digest or filename differs from published checksum")
+    installer = (ROOT / "README.md").read_text().split("<!-- install-command -->", 1)[1].split("```")[1]
+    if f"sha256 -c {digest} " not in installer or not re.search(
+            r"https://raw\.githubusercontent\.com/allanlopesprado/pfsense-sdwan/[a-f0-9]{40}/dist/"
+            + re.escape(path.name) + "'", installer):
+        fail("The documented download must pin a commit, the current file and its digest")
+    with tarfile.open(path, "r:xz") as archive:
+        manifest = json.load(archive.extractfile("+MANIFEST"))
+        if manifest["version"] != version or manifest["name"] != "pfSense-pkg-SDWAN":
+            fail("Incorrect package identity")
+        contents = [m.name for m in archive.getmembers() if not m.name.startswith("+")]
+        if sorted(contents) != sorted("/" + str(p) for p in installed):
+            fail("Distributed package file list differs from port")
+        for name in contents:
+            expected = (FILES / name.lstrip("/")).read_bytes()
+            if name.endswith("/share/pfSense-pkg-SDWAN/info.xml"):
+                expected = expected.replace(b"%%PKGVERSION%%", version.encode())
+            if archive.extractfile(name).read() != expected:
+                fail("Distributed package contains stale source: " + name)
+        for phase in ("install", "deinstall"):
+            script = (FILES / f"pkg-{phase}.in").read_text().replace("%%PORTNAME%%", manifest["name"])
+            if manifest["scripts"].get(phase) != script.rstrip("\n"):
+                fail("Distributed package contains a stale lifecycle script: " + phase)
+    print("ok - pinned README command, checksum, package, hooks and source agree")
+
+
 def check_packaging():
     plist = read_plist()
     installed = {
@@ -41,6 +77,7 @@ def check_packaging():
     if plist != installed:
         fail(f"Missing from plist: {sorted(installed - plist)}\n"
              f"Missing source files: {sorted(plist - installed)}")
+    check_distributed_package(installed)
     manifest = ET.parse(FILES / DATA / "info.xml")
     filename = manifest.findtext(".//configurationfile") or manifest.findtext(".//config_file")
     if not filename:

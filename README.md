@@ -26,7 +26,7 @@ Use um clone de laboratório com **pfSense CE 2.9.1** e acesso administrativo. O
 d=$(mktemp -d /tmp/sdwan.XXXXXXXX) && (trap 'rm -rf "$d"' EXIT; p="$d/pfSense-pkg-SDWAN-0.1.1.pkg"; fetch -o "$p" 'https://raw.githubusercontent.com/allanlopesprado/pfsense-sdwan/e60b7476a1593db71cc84c43996b06c0284ea220/dist/pfSense-pkg-SDWAN-0.1.1.pkg' && sha256 -c 96b126f6215b7df122e66d9fbbd6cf57cd7641fae0a30dd194bb9fa6153e184c "$p" && pkg add "$p")
 ```
 
-3. Execute a linha abaixo. Confira a versão instalada e o estado do serviço. Se o download falhar, o hash divergir ou o serviço não iniciar, guarde a saída exibida para diagnóstico.
+3. Se você atualizou da versão 0.1.0, execute `/usr/local/etc/rc.d/sdwand.sh restart` para carregar o novo código do observador. Em seguida, confira a versão instalada e o estado do serviço: Se o download falhar, o hash divergir ou o serviço não iniciar, guarde a saída exibida para diagnóstico.
 
 ```sh
 pkg query '%n-%v' pfSense-pkg-SDWAN && /usr/local/etc/rc.d/sdwand.sh status
