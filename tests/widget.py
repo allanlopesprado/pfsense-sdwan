@@ -76,7 +76,7 @@ echo json_encode([http_response_code() ?: 200, $body, $sdwan_title_link,
     rules[0]["name"] = "Voice"
     rules.extend([dict(rules[0], name="BranchVPN"), dict(rules[0], name="Backups")])
     fixture["interfaces"]["opt3"] = {"enable": ""}
-    fixture["gateways/gateway_item"].append({"name": "GW_C", "gateway": "203.0.113.1", "interface": "opt3"})
+    fixture["gateways/gateway_item"].append({"name": "GW_C", "gateway": "203.0.113.254", "interface": "opt3"})
     settings["members"]["item"].append({"name": "c", "gateway": "GW_C", "cost": "30"})
     fixture["gateways/sdwan_bindings"] = {"item": [{"group": "PrivateForwardingGroup"}]}
     fixture["gateways/defaultgw4"] = "GW_B"
