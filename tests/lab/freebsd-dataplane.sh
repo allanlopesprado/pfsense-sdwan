@@ -263,7 +263,7 @@ if [ -n "${SDWAN_RENDERED_RULES:-}" ]; then
     expect_roundtrip 192.0.2.163 198.51.100.1 three-wan-control
     steer a triple-
     expect_roundtrip 192.0.2.162 198.51.100.1 three-wan-recovered
-# The independent incoming services must answer on the arriving WAN,
+    # The independent incoming services must answer on the arriving WAN,
     # despite the kernel default on A and a different steering decision.
     jexec "$client" inetd -p "$work/client-inetd.pid" "$work/inetd.conf"
     cat >"$work/port-forward.pf" <<EOF
