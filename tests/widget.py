@@ -66,6 +66,7 @@ echo json_encode([http_response_code() ?: 200, $body, $sdwan_title_link,
     status, body, link, _ = render("embed")
     assert status == 200 and link == "/sdwan/status.php" and "register_ajax" in body
     assert "GW_A" in body and "GW_B" in body and body.count("No data") == 2
+    assert "RTTsd" in body and ">192.0.2.1</strong>" in body
     assert "<time" not in body and "Last sample" not in body
 
     config = directory / "fixture.json"
@@ -78,6 +79,8 @@ echo json_encode([http_response_code() ?: 200, $body, $sdwan_title_link,
     fixture["gateways/gateway_item"].append({"name": "GW_C", "gateway": "203.0.113.1", "interface": "opt3"})
     settings["members"]["item"].append({"name": "c", "gateway": "GW_C", "cost": "30"})
     fixture["gateways/sdwan_bindings"] = {"item": [{"group": "PrivateForwardingGroup"}]}
+    fixture["gateways/defaultgw4"] = "GW_B"
+    fixture["gateways/gateway_item"][1]["monitor"] = "198.51.100.22"
     config.write_text(json.dumps(fixture))
     revision = package_value("sdwan_config_revision(sdwan_get_config())")
     runtime = directory / "snapshot.json"
@@ -100,10 +103,14 @@ echo json_encode([http_response_code() ?: 200, $body, $sdwan_title_link,
     runtime.write_text(json.dumps(snapshot))
     status, body, _, _ = render("ajax")
     assert status == 200 and "<script>" not in body
-    for label in ("GW_A", "GW_B", "GW_C", "RTT (ms)", ">23.45<", ">9.8<", "2%", "0%", "100%",
-                  "Warning", "Online", "Down", "Preferred:", "No eligible path:"):
+    for label in ("GW_A", "GW_B", "GW_C", ">RTT<", ">RTTsd<", "23.450ms", "9.800ms", "11.400ms",
+                  "0.000ms", "2.0%", "0.0%", "100.0%", "Warning", "Online", "Down", "Preferred:", "No eligible path:"):
         assert label in body, label
-    assert ">0</td>" not in body
+    assert "198.51.100.1</strong>" in body and "198.51.100.22" not in body
+    assert body.count("fa-globe") == 1 and "Configured default gateway" in body
+    assert 'class="sdwan-widget-rttsd">—</td>' in body and 'class="sdwan-widget-rtt">—</td>' in body
+    for state_class in ("bg-warning", "bg-success", "bg-danger"):
+        assert f'class="sdwan-widget-status {state_class}"' in body
     assert 'class="table table-striped table-hover table-condensed"' in body and 'scope="row"' in body
     assert all(label not in body for label in ("<time", "Last sample", "Requested gateway",
                                                "PrivateForwardingGroup", "PrivateGateway", "Forwarding requests"))
@@ -117,7 +124,7 @@ echo json_encode([http_response_code() ?: 200, $body, $sdwan_title_link,
         runtime.write_text(json.dumps(changed))
         stale = render("ajax")[1]
         assert stale.count("No data") == 3
-        assert ">23.45<" not in stale and "Preferred:" not in stale and "No eligible path:" not in stale
+        assert "23.450ms" not in stale and "Preferred:" not in stale and "No eligible path:" not in stale
 
     runtime.write_text(json.dumps(snapshot))
     fixture["gateways/gateway_item"][0]["monitor_disable"] = ""
@@ -125,8 +132,8 @@ echo json_encode([http_response_code() ?: 200, $body, $sdwan_title_link,
     del fixture["interfaces"]["opt3"]
     config.write_text(json.dumps(fixture))
     unavailable = render("ajax")[1]
-    assert "Unmonitored" in unavailable and unavailable.count(">Down</span>") == 2
-    assert all(label not in unavailable for label in (">23.45<", ">9.8<", "100%", "Preferred:"))
+    assert "Monitor off" in unavailable and unavailable.count(">Down</td>") == 2
+    assert all(label not in unavailable for label in ("23.450ms", "9.800ms", "100.0%", "Preferred:"))
 
     fixture["gateways/gateway_item"][0].pop("monitor_disable")
     fixture["gateways/gateway_item"][1].pop("force_down")
@@ -138,15 +145,25 @@ echo json_encode([http_response_code() ?: 200, $body, $sdwan_title_link,
               "gateways": {"GW_A": samples["a"], "GW_B": samples["b"]}}
     runtime.write_text(json.dumps(native))
     native_dashboard = render("ajax")[1]
-    assert "GW_A" in native_dashboard and "GW_B" in native_dashboard and ">23.45<" in native_dashboard
+    assert "GW_A" in native_dashboard and "GW_B" in native_dashboard and "23.450ms" in native_dashboard
     assert "GW_C" not in native_dashboard and "Preferred:" not in native_dashboard
     assert "<time" not in native_dashboard
     runtime.write_text(json.dumps(dict(native, gateways={"GW_A": dict(samples["a"], loss_pct=800)})))
-    assert ">23.45<" not in render("ajax")[1]
+    assert "23.450ms" not in render("ajax")[1]
     fixture["gateways/gateway_item"][0]["monitor"] = "192.0.2.2"
     config.write_text(json.dumps(fixture))
     runtime.write_text(json.dumps(native))
     assert render("ajax")[1].count("No data") == 2
+
+    fixture["gateways/gateway_item"][0]["gateway"] = "dynamic"
+    fixture["gateways/gateway_item"][1].update(gateway="dynamic", ipprotocol="inet6")
+    fixture["fixture_dynamic_targets"] = {"opt1": "192.0.2.200", "opt2": "fe80::1%opt2"}
+    config.write_text(json.dumps(fixture))
+    dynamic = render("ajax")[1]
+    assert "192.0.2.200</strong>" in dynamic and "fe80::1%opt2</strong>" in dynamic, dynamic
+    fixture.pop("fixture_dynamic_targets")
+    config.write_text(json.dumps(fixture))
+    assert 'class="sdwan-widget-address"' not in render("ajax")[1]
     config.write_text("{}")
     assert "No available gateways." in render("ajax")[1]
     config.write_text(json.dumps({"installedpackages/sdwan": {"version": "invalid"}}))

@@ -44,6 +44,7 @@ function mwexec($command, $quiet): int {
 
 $version = $argv[3] ?? '0.4.8';
 $arg_root = $argv[2] ?? null;
+$baseline = $argv[5] ?? null;
 $archive = $arg_root === null ? 'fixture archive' : file_get_contents($argv[4]);
 $index_http = fixture_release_http($version, $archive);
 [$index, $api, $package] = array_keys($index_http);
@@ -58,10 +59,10 @@ check(sdwan_release_check() === $release);
 check(sdwan_release_asset_size($release) === strlen($archive));
 if ($arg_root !== null) {
 	// Under FreeBSD, every package command operates on the real isolated pkg database.
-	check(sdwan_release_installed() === '0.4.7');
+	check(sdwan_release_installed() === $baseline);
 	$release_http[$package]['body'] = str_repeat('x', strlen($archive));
 	check(sdwan_release_upgrade($target) === 'checksum' && $pkg_adds === 0);
-	check(sdwan_release_installed() === '0.4.7');
+	check(sdwan_release_installed() === $baseline);
 	$release_http = $index_http;
 	check(sdwan_release_upgrade($target) === 'success' && $pkg_adds === 1);
 	check(sdwan_release_installed() === $version);

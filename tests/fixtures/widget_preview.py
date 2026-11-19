@@ -109,7 +109,7 @@ def verify_dashboard_layout(core, output, widget, fragment):
 
         metrics = []
         for theme in ("light", "dark"):
-            for width in (640, 360, 320):
+            for width in (640, 554, 360, 320):
                 call("/goog/cdp/execute", {"cmd": "Emulation.setDeviceMetricsOverride",
                      "params": {"width": width, "height": 800, "deviceScaleFactor": 1, "mobile": False}})
                 call("/url", {"url": f"http://127.0.0.1:{server.server_port}/{theme}.html"})
@@ -130,7 +130,7 @@ def verify_dashboard_layout(core, output, widget, fragment):
                     document.querySelector('.sdwan-widget-rtt').textContent='pending-test';
                     $.post(w.url,w.parms).done(html=>{
                         w.callback(html);
-                        done(document.querySelector('.sdwan-widget-rtt').textContent==='23.45');
+                        done(document.querySelector('.sdwan-widget-rtt').textContent==='23.450ms');
                     }).fail(()=>done(false));
                 """})
                 assert updated and js("return document.activeElement.getAttribute('href')") == expected[-1]
@@ -157,7 +157,7 @@ def verify_dashboard_layout(core, output, widget, fragment):
                     }
                     const readouts=region.querySelectorAll('tbody th, tbody a, tbody td, .sdwan-widget-note, .sdwan-widget-note a');
                     const rows=region.querySelectorAll('tbody tr');
-                    const labels=region.querySelectorAll('.sdwan-widget-latency span, .sdwan-widget-status > span');
+                    const labels=region.querySelectorAll('.sdwan-widget-latency, .sdwan-widget-status, .sdwan-widget-rtt, .sdwan-widget-rttsd');
                     const wrappedLabels=Array.from(labels).filter(el=>{
                         const range=document.createRange();
                         range.selectNodeContents(el);
@@ -167,9 +167,12 @@ def verify_dashboard_layout(core, output, widget, fragment):
                             horizontalOverflow:Math.max(...nodes.map(e=>e.scrollWidth-e.clientWidth)),
                             background:getComputedStyle(document.body).backgroundColor,
                             rows:rows.length,
-                            neutralStatusCells:Array.from(rows).every(row=>Array.from(row.cells).every(c=>!c.className.includes('bg-'))),
+                            statusBackgrounds:Array.from(rows).map(row=>getComputedStyle(row.lastElementChild).backgroundColor),
+                            rowBackgrounds:Array.from(rows).map(row=>getComputedStyle(row.firstElementChild).backgroundColor),
+                            addressLines:region.querySelectorAll('tbody .sdwan-widget-address').length,
                             gatewayStates:Array.from(rows).map(row=>row.lastElementChild.textContent.trim()),
                             latency:Array.from(rows).map(row=>row.querySelector('.sdwan-widget-rtt').textContent.trim()),
+                            variation:Array.from(rows).map(row=>row.querySelector('.sdwan-widget-rttsd').textContent.trim()),
                             timestamps:region.querySelectorAll('time').length,wrappedLabels,
                             minimumReadoutContrast:Math.min(...Array.from(readouts,contrast)),
                             positiveTabindex:panel.querySelectorAll('[tabindex]:not([tabindex="-1"]):not([tabindex="0"])').length};
@@ -177,8 +180,11 @@ def verify_dashboard_layout(core, output, widget, fragment):
                 data = js(layout_script)
                 assert data["width"] == width and data["viewport"] == width and data["horizontalOverflow"] <= 1, data
                 assert data["rows"] == 3 and data["positiveTabindex"] == 0
-                assert data["neutralStatusCells"] and data["gatewayStates"] == ["Warning", "Online", "Down"]
-                assert data["latency"] == ["23.45", "9.8", "—"] and data["timestamps"] == data["wrappedLabels"] == 0, data
+                assert data["gatewayStates"] == ["Warning", "Online", "Down"] and data["addressLines"] == 3, data
+                assert len(set(data["statusBackgrounds"])) == 3, data
+                assert all(a != b for a, b in zip(data["statusBackgrounds"], data["rowBackgrounds"])), data
+                assert data["latency"] == ["23.450ms", "9.800ms", "—"] and data["timestamps"] == data["wrappedLabels"] == 0, data
+                assert data["variation"] == ["11.400ms", "0.000ms", "—"], data
                 assert data["minimumReadoutContrast"] >= 4.5, data
                 expected_bg = "rgb(245, 245, 245)" if theme == "light" else "rgb(33, 33, 33)"
                 assert data["background"] == expected_bg, data
@@ -188,7 +194,8 @@ def verify_dashboard_layout(core, output, widget, fragment):
                 png = base64.b64decode(shot["data"], validate=True)
                 assert png[:8] == b"\x89PNG\r\n\x1a\n" and struct.unpack(">II", png[16:24]) == (width, data["height"])
                 (output / f"widget-{theme}-{width}.png").write_bytes(png)
-                js("""document.querySelector('tbody th').firstChild.textContent='X'.repeat(32);
+                js("""document.querySelector('.sdwan-widget-label').textContent='X'.repeat(32);
+                      document.querySelector('.sdwan-widget-address').textContent='2001:db8:abcd:abcd:abcd:abcd:abcd:abcd%vlan100';
                       document.querySelector('.sdwan-widget-detail').append('Y'.repeat(96));""")
                 stress = js(layout_script)["horizontalOverflow"]
                 assert stress <= 1, (theme, width, stress)
@@ -196,4 +203,4 @@ def verify_dashboard_layout(core, output, widget, fragment):
                                     longIdentifierOverflow=stress))
         (output / "widget-fragment.html").write_text(widget)
         (output / "metrics.json").write_text(json.dumps(metrics, indent=2) + "\n")
-        print("ok - six native theme/width screenshots, no horizontal overflow, keyboard navigation and AJAX focus")
+        print("ok - eight native theme/width screenshots, status contrast, keyboard navigation and AJAX focus")
