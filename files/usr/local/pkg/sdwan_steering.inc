@@ -15,6 +15,26 @@ function sdwan_steering_supported(): bool {
 	return function_exists('filter_sdwan_binding_api') && filter_sdwan_binding_api() === 1;
 }
 
+/* Native send_event() logs a rejected request but does not report it to its
+ * caller. The observer needs the queue's acknowledgement to decide when to retry. */
+function sdwan_steering_request_reload(): bool {
+	$address = g_get('event_address', 'unix:///var/run/check_reload_status');
+	if (!is_string($address) || !str_starts_with($address, 'unix:///')) {
+		return false;
+	}
+	$socket = @stream_socket_client($address, $errno, $error, 0.5);
+	if ($socket === false) {
+		return false;
+	}
+	try {
+		$request = 'filter reload';
+		return stream_set_timeout($socket, 0, 500000) &&
+		    @fwrite($socket, $request) === strlen($request) && @fgets($socket, 4) === "OK\n";
+	} finally {
+		fclose($socket);
+	}
+}
+
 function sdwan_steering_native(): array {
 	$paths = [
 		'groups' => 'gateways/gateway_group', 'rules' => 'filter/rule',

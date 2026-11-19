@@ -51,7 +51,8 @@ def render_harness(work, core):
         assert content.count(provider) == 1, source
         dest.write_text(content.replace(provider, str(work / "sdwan_steering.inc")))
     # Only the daemon's external native reload request is replaced.
-    (work / "filter.inc").write_text("<?php require_once(__DIR__.'/filter-sdwan.inc'); function filter_configure() {}")
+    (work / "filter.inc").write_text(
+        "<?php require_once(__DIR__.'/filter-sdwan.inc'); function is_platform_booting() { return true; }")
     (work / "Net").mkdir()
     (work / "Net/IPv6.php").touch()  # The IPv4 lab does not use PEAR IPv6.
 

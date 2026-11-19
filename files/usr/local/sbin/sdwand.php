@@ -113,8 +113,8 @@ function sdwan_observe_once(): void {
 					$invalid_bindings = true;
 					$snapshot['steering'] = [];
 				}
-				$signature = sdwan_steering_signature($snapshot['steering']);
-				$reload = ($prior['config_revision'] ?? null) !== $snapshot['config_revision'] ||
+				$signature = 'ack:' . $snapshot['config_revision'] . ':' . sdwan_steering_signature($snapshot['steering']);
+				$reload = $prior === null ||
 				    !is_file($receipt) || file_get_contents($receipt) !== $signature;
 			}
 		}
@@ -133,10 +133,12 @@ function sdwan_observe_once(): void {
 				unlink($temp);
 			}
 		}
-		if ($reload) {
-			/* Publish before enqueueing. A crash before the receipt retries on
-			 * the next sample. Native filter reload is asynchronous. */
-			filter_configure();
+		if ($reload && !is_platform_booting()) {
+			/* Publish before enqueueing. A rejected request or a crash before
+			 * the receipt leaves the next observation free to retry. */
+			if (!sdwan_steering_request_reload()) {
+				throw new RuntimeException('pfSense did not accept the filter reload request');
+			}
 			if (config_get_path('gateways/sdwan_bindings/item', [])) {
 				if (file_put_contents($receipt, $signature, LOCK_EX) !== strlen($signature)) {
 					throw new RuntimeException('Cannot record the filter reload request');
@@ -172,7 +174,7 @@ do {
 		$cause = match ($e->getMessage()) {
 			'Cannot refresh pfSense configuration' => 'config',
 			'Cannot create temporary snapshot', 'Cannot publish snapshot', 'Cannot open snapshot lock' => 'status',
-			'Cannot record the filter reload request' => 'reload',
+			'Cannot record the filter reload request', 'pfSense did not accept the filter reload request' => 'reload',
 			default => $e instanceof UnexpectedValueException ? 'config' : 'observation',
 		};
 		if ($e->getMessage() !== 'Another observation is running') {

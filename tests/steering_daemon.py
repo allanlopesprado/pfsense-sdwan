@@ -1,16 +1,19 @@
 #!/usr/bin/env python3
-"""Test the real --once publisher and native reload event boundary without PF."""
+"""Test the publisher against the pfSense reload service's Unix protocol."""
+from concurrent.futures import ThreadPoolExecutor
 import json
 from pathlib import Path
 import shutil
+import socket
 import sys
 import tempfile
+import time
 
 from daemon_integration import PKG, fixture, php, stage
 
 
 def run(binary):
-    with tempfile.TemporaryDirectory() as tmp:
+    with tempfile.TemporaryDirectory(prefix="sdwan-queue-", dir="/tmp") as tmp:
         work = Path(tmp)
         stage(work)
         daemon = work / "sdwand.php"
@@ -19,11 +22,12 @@ def run(binary):
         daemon.write_text(daemon.read_text().replace(installed, str(work / "sdwan_steering.inc")))
         for name in ("sdwan_preflight.inc", "sdwan_steering.inc"):
             shutil.copy(PKG / name, work)
-        events = work / "filter-events"
+        event_socket = work / "reload.sock"
         (work / "filter.inc").write_text(
             "<?php\nfunction filter_sdwan_binding_api(): int { return config_get_path('abi', 0); }\n"
-            "function filter_configure(): void { file_put_contents(" + json.dumps(str(events)) +
-            ", file_get_contents(" + json.dumps(str(work / "snapshot.json")) + ") . PHP_EOL, FILE_APPEND); }\n"
+            "function is_platform_booting(): bool { return config_get_path('booting', false); }\n"
+            "function g_get($key, $default) { return $key === 'event_address' ? "
+            + json.dumps("unix://" + str(event_socket)) + " : $default; }\n"
         )
         config = fixture(work)
         config["processes"] = {}
@@ -50,30 +54,84 @@ def run(binary):
         config["gateways/sdwan_bindings"] = {"item": [row]}
         config["gateways/sdwan_bindings/item"] = [row]
 
-        def observe():
+        snapshot = work / "snapshot.json"
+        receipt = work / "snapshot.json.forwarded"
+
+        def observe(fails=False):
             settings.write_text(json.dumps(config))
-            php(binary, *params, str(daemon), "--once")
+            try:
+                php(binary, *params, str(daemon), "--once")
+            except RuntimeError as error:
+                if not fails or "PHP failed (1): sdwand: Observation failed." not in str(error):
+                    raise
+            else:
+                assert not fails, "unconfirmed reload reported success"
             assert json.loads(settings.read_text()) == config
-            return json.loads((work / "snapshot.json").read_text())
+            return json.loads(snapshot.read_text())
 
         config["abi"] = 0
-        assert "steering" not in observe() and not events.exists()
+        assert "steering" not in observe() and not receipt.exists()
         config["abi"] = 1
-        denied = observe()
-        assert denied["steering"]["G"]["gateway"] is None
-        assert json.loads(events.read_text()) == denied, "event fired before snapshot publication"
-        observe()
-        assert len(events.read_text().splitlines()) == 1, "unchanged choice produced a filter reload"
-        (work / "snapshot.json").unlink()
-        observe()
-        assert len(events.read_text().splitlines()) == 2, "missing prior snapshot must reconcile"
-        config["gateways/sdwan_bindings"] = {"item": []}
-        config["gateways/sdwan_bindings/item"] = []
-        assert not observe()["steering"]
-        assert not (work / "snapshot.json.forwarded").exists()
-        observe()
-        assert len(events.read_text().splitlines()) == 3, "removed binding must reconcile once"
-        print("ok - stock stays passive, patched daemon publishes before queuing and deduplicates native reload requests")
+        config["booting"] = True
+        assert observe()["steering"]["G"]["gateway"] is None and not receipt.exists()
+        config["booting"] = False
+        assert observe(fails=True)["steering"]["G"]["gateway"] is None and not receipt.exists()
+
+        def reply(listener, response, delay):
+            connection, _ = listener.accept()
+            with connection:
+                connection.settimeout(3)
+                command = b"filter reload"
+                assert connection.recv(len(command), socket.MSG_WAITALL) == command
+                published = json.loads(snapshot.read_text())
+                if delay:
+                    time.sleep(delay)
+                if response is not None:
+                    connection.sendall(response)
+                return published
+
+        with socket.socket(socket.AF_UNIX) as listener, ThreadPoolExecutor(max_workers=1) as pool:
+            listener.settimeout(3)
+            listener.bind(str(event_socket))
+            listener.listen()
+
+            def exchange(response, *, fails=False, delay=0):
+                event = pool.submit(reply, listener, response, delay)
+                result = observe(fails)
+                assert event.result() == result, "event fired before snapshot publication"
+
+            for response, delay in [(b"ERROR\n", 0), (None, 0), (None, 0.75)]:
+                exchange(response, fails=True, delay=delay)
+                assert not receipt.exists()
+            exchange(b"OK\n")
+            original = receipt.read_text()
+            assert original.startswith("ack:")
+            observe()  # With no listener reply, a duplicate request would fail.
+            assert receipt.read_text() == original
+            receipt.write_text(original.rsplit(":", 1)[1])  # Receipt from v0.4.3.
+            exchange(b"OK\n")
+            assert receipt.read_text() == original
+            snapshot.unlink()
+            exchange(b"OK\n")
+            assert receipt.read_text() == original
+
+            # A revision can change without changing the selected route.
+            config["installedpackages/sdwan"]["slas"]["item"].append(
+                {"name": "unused", "latency_ms": "99", "loss_pct": "1"})
+            exchange(b"ERROR\n", fails=True)
+            assert receipt.read_text() == original
+            exchange(b"OK\n")
+            assert receipt.read_text() != original
+            assert receipt.read_text().rsplit(":", 1)[1] == original.rsplit(":", 1)[1]
+
+            config["gateways/sdwan_bindings"] = {"item": []}
+            config["gateways/sdwan_bindings/item"] = []
+            exchange(None, fails=True)
+            assert receipt.exists()
+            exchange(b"OK\n")
+            assert not receipt.exists() and not observe().get("steering")
+        print("ok - stock and boot stay passive; reloads recover from refusal, timeout, EOF and rejected acknowledgement")
+        print("ok - acknowledged requests are deduplicated; rejected revisions and unbinding retry")
 
 
 if __name__ == "__main__":
