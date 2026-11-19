@@ -1,0 +1,74 @@
+name: Native WebGUI candidate
+on:
+  push:
+    branches: [codex/pfsense-ce-291-build]
+permissions:
+  contents: read
+jobs:
+  webgui:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: pfsense/pfsense
+          ref: 9363ac5b8651a1c7a333180425ce7719070f95f9
+          path: pfsense-core-fixture
+          sparse-checkout: |
+            src/usr/local/www/css
+            src/usr/local/www/vendor/font-awesome
+            src/usr/local/www/vendor/bootstrap
+            src/usr/local/www/vendor/jquery
+            src/usr/local/www/vendor/jquery-ui
+            src/usr/local/www/classes
+            src/usr/local/www/csrf
+            src/usr/local/www/guiconfig.inc
+            src/usr/local/www/status_logs_common.inc
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - name: Verify native forms and dashboard
+        run: |
+          find files -type f \( -name '*.php' -o -name '*.inc' \) -exec php -l {} \;
+          python3 tests/webgui.py --classes pfsense-core-fixture/src/usr/local/www/classes --screenshots-dir preview-out/pages
+          python3 -B tests/widget.py php --visual-core pfsense-core-fixture --screenshots preview-out/dashboard
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-webgui-previews
+          path: preview-out/
+          if-no-files-found: error
+  package:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: freebsd/pkg
+          ref: 337d510a47f8716fb9c644262ada3db8d7f85e05
+          path: freebsd-pkg
+          persist-credentials: false
+      - name: Build the FreeBSD pkg 2.9.3 Linux binary
+        env:
+          CC: clang-18
+          CXX: clang++-18
+          CC_FOR_BUILD: clang-18
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -yq --no-install-recommends clang-18 fakeroot libarchive-dev \
+            libssl-dev libsqlite3-dev libbsd-dev liblzma-dev liblua5.2-dev liblzo2-dev \
+            libattr1-dev libacl1-dev zlib1g-dev libbz2-dev pkg-config m4
+          mkdir "$RUNNER_TEMP/pkg-build"
+          cd "$RUNNER_TEMP/pkg-build"
+          "$GITHUB_WORKSPACE/freebsd-pkg/configure" --prefix="$RUNNER_TEMP/pkg-install" --with-libarchive.pc --with-openssl.pc
+          make -j"$(nproc)"
+          make install
+      - name: Create and verify the package
+        run: fakeroot python3 tools/build-lab-pkg.py --pkg "$RUNNER_TEMP/pkg-install/sbin/pkg" --output package-out
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-webgui-package
+          path: package-out/
+          if-no-files-found: error
