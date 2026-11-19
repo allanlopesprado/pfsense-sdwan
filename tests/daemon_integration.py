@@ -133,6 +133,20 @@ def run(binary, require_unix):
         assert json.loads(snapshot.read_text())["config_revision"] == offline["config_revision"]
         print("ok - a concurrent worker or unreadable schema preserves the last snapshot, and retry succeeds")
 
+        snapshot.unlink()
+        snapshot.mkdir()
+        try:
+            php(binary, "-d", f"include_path={sandbox}", str(sandbox / "sdwand.php"), "--once")
+        except RuntimeError as exc:
+            assert "PHP failed (1)" in str(exc) and "Observation failed" in str(exc), str(exc)
+        else:
+            raise AssertionError("The observer reported success with a directory in place of its snapshot")
+        assert not list(snapshot.iterdir()) and not list(sandbox.glob(".sdwan-*"))
+        snapshot.rmdir()
+        php(binary, "-d", f"include_path={sandbox}", str(sandbox / "sdwand.php"), "--once")
+        assert json.loads(php(binary, "-r", read))["config_revision"] == offline["config_revision"]
+        print("ok - a failed snapshot replacement removes temporary files and recovers after storage is writable again")
+
         offline["generated_at"] -= 300
         snapshot.write_text(json.dumps(offline))
         assert json.loads(php(binary, "-r", read)) is None
