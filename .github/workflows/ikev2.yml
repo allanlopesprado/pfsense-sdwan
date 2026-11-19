@@ -6,7 +6,11 @@ permissions:
   contents: read
 jobs:
   strongswan:
-    name: Ubuntu IKEv2 negotiation and rekey
+    name: Ubuntu IKEv2 negotiation and rekey (${{ matrix.paths }} links)
+    strategy:
+      fail-fast: false
+      matrix:
+        paths: [1, 2, 3]
     runs-on: ubuntu-24.04
     timeout-minutes: 12
     steps:
@@ -21,5 +25,5 @@ jobs:
             strongswan-swanctl libstrongswan-standard-plugins
           uname -r
           dpkg-query -W strongswan-charon strongswan-swanctl nftables
-      - name: Negotiate both tunnels, rekey and withdraw one path
-        run: sudo python3 -B -u tests/lab/ikev2/run.py
+      - name: Negotiate, rekey, withdraw and restore tunnel paths
+        run: sudo python3 -B -u tests/lab/ikev2/run.py --paths ${{ matrix.paths }}

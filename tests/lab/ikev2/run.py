@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""Two isolated strongSwan peers and a passive two-link transit network."""
+"""Two isolated strongSwan peers and a passive one- to three-link transit network."""
 
+import argparse
 import json
 import os
 import re
@@ -46,6 +47,7 @@ class PathPair:
 PATHS = (
     PathPair("a", 101, ("192.0.2.1", "192.0.2.2"), ("10.241.1.1", "10.241.1.2")),
     PathPair("b", 102, ("198.51.100.1", "198.51.100.2"), ("10.241.2.1", "10.241.2.2")),
+    PathPair("c", 103, ("203.0.113.1", "203.0.113.2"), ("10.241.3.1", "10.241.3.2")),
 )
 
 
@@ -53,12 +55,12 @@ def inside(ns, *args):
     return ["ip", "netns", "exec", ns, *args]
 
 
-def create_network(stack, nodes, wire):
+def create_network(stack, nodes, wire, paths):
     for name in [*nodes, wire]:
         run(["ip", "netns", "add", name])
         stack.callback(run, ["ip", "netns", "del", name], check=False)
         run(["ip", "-n", name, "link", "set", "lo", "up"])
-    for path in PATHS:
+    for path in paths:
         switch = "br" + path.name
         run(["ip", "-n", wire, "link", "add", switch, "type", "bridge"])
         run(["ip", "-n", wire, "link", "set", switch, "up"])
@@ -74,13 +76,13 @@ def create_network(stack, nodes, wire):
                  "dev", end, "src", path.inner[idx]])
 
 
-def guard(ns, idx):
+def guard(ns, idx, paths):
     """Persistently refuse access to each protected host without that tunnel."""
     rules = ["table ip ike_lab {"]
-    for p in PATHS:
+    for p in paths:
         rules.append(f"counter clear_{p.name} {{ }}")
     rules.append("chain outbound { type filter hook output priority filter; policy accept;")
-    for p in PATHS:
+    for p in paths:
         flow = f"ip saddr {p.inner[idx]} ip daddr {p.inner[1-idx]}"
         rules += [f"{flow} ipsec out reqid {p.reqid} accept", f"{flow} counter name clear_{p.name} drop"]
     run(inside(ns, "nft", "-f", "-"), data="\n".join([*rules, "}", "}"]) + "\n")
@@ -112,10 +114,10 @@ def stop_process(process, sig):
 
 
 @contextmanager
-def captures(work, wire, stage):
+def captures(work, wire, stage, paths):
     files = {}
     with ExitStack() as stack:
-        for p in PATHS:
+        for p in paths:
             dev = f"tap{p.name}0"
             name = work / f"{stage}-{dev}.pcap"
             log = work / f"{stage}-{dev}.log"
@@ -140,8 +142,8 @@ def inner_filter(p):
     return f"icmp and host {p.inner[0]} and host {p.inner[1]}"
 
 
-def no_clear(files):
-    for p in PATHS:
+def no_clear(files, paths):
+    for p in paths:
         for filename in files.values():
             if packets(filename, inner_filter(p)):
                 raise RuntimeError(f"Plaintext protected ICMP found in {filename.name}")
@@ -185,7 +187,7 @@ def connection(p, idx):
 
 
 class Peer:
-    def __init__(self, ns, idx, work, keys, stack):
+    def __init__(self, ns, idx, work, keys, stack, paths):
         self.ns = ns
         directory = work / ns
         directory.mkdir(mode=0o700)
@@ -193,7 +195,7 @@ class Peer:
         confdir = directory / "swanctl"
         confdir.mkdir(mode=0o700)
         secrets_body = []
-        for p in PATHS:
+        for p in paths:
             secrets_body.append(f"""
     ike-{p.name} {{
         id-1 = @peer0-{p.name}.test
@@ -201,7 +203,7 @@ class Peer:
         secret = 0x{keys[p.name]}
     }}
 """)
-        (confdir / "swanctl.conf").write_text("connections {\n" + "".join(connection(p, idx) for p in PATHS)
+        (confdir / "swanctl.conf").write_text("connections {\n" + "".join(connection(p, idx) for p in paths)
                                              + "}\nsecrets {\n" + "".join(secrets_body) + "}\n")
         (directory / "strongswan.conf").write_text("""charon {
     install_routes = no
@@ -274,11 +276,11 @@ def rekeyed(peers, p, old, mode):
 
 def data_stage(work, wire, peers, paths, stage):
     before = {p.name: snapshot(peers, p) for p in paths}
-    with captures(work, wire, stage) as files:
+    with captures(work, wire, stage, paths) as files:
         for p in paths:
             probe(peers[0].ns, 0, p)
             probe(peers[1].ns, 1, p)
-    no_clear(files)
+    no_clear(files, paths)
     for p in paths:
         after = snapshot(peers, p)
         for old, new in zip(before[p.name], after):
@@ -290,61 +292,79 @@ def data_stage(work, wire, peers, paths, stage):
               f"{after[0]['in_bytes']}/{after[0]['out_bytes']}", flush=True)
 
 
-def exercise(work, stack):
+def exercise(work, stack, paths):
     suffix = str(os.getpid())
     nodes = [f"ikeleft{suffix}", f"ikeright{suffix}"]
     wire = "ikewire" + suffix
-    create_network(stack, nodes, wire)
-    with captures(work, wire, "control") as files:
-        for p in PATHS:
+    create_network(stack, nodes, wire, paths)
+    with captures(work, wire, "control", paths) as files:
+        for p in paths:
             probe(nodes[0], 0, p)
-    for p in PATHS:
+    for p in paths:
         if packets(files[p.name], inner_filter(p)) < 4:
             raise RuntimeError("Plaintext positive control failed on " + p.name)
-    print("ok - transit captures detected both plaintext controls before installing guards", flush=True)
+    print(f"ok - transit captures detected plaintext controls on all {len(paths)} links", flush=True)
     for idx, ns in enumerate(nodes):
-        guard(ns, idx)
-    keys = {p.name: secrets.token_hex(32) for p in PATHS}
-    peers = [Peer(ns, idx, work, keys, stack) for idx, ns in enumerate(nodes)]
-    with captures(work, wire, "negotiate") as files:
-        for p in PATHS:
+        guard(ns, idx, paths)
+    keys = {p.name: secrets.token_hex(32) for p in paths}
+    peers = [Peer(ns, idx, work, keys, stack, paths) for idx, ns in enumerate(nodes)]
+    with captures(work, wire, "negotiate", paths) as files:
+        for p in paths:
             peers[0].control("--initiate", "--child", "data-" + p.name, "--timeout", "10")
             snapshot(peers, p)
-    for p in PATHS:
+    for p in paths:
         for idx in range(2):
             ike = f"src {p.outer[idx]} and dst {p.outer[1-idx]} and udp port 500"
             if packets(files[p.name], ike) == 0:
                 raise RuntimeError("No bidirectional IKE exchange recorded on " + p.name)
-    data_stage(work, wire, peers, PATHS, "initial")
-    primary, secondary = PATHS
-    old_a, old_b = snapshot(peers, primary), snapshot(peers, secondary)
+    data_stage(work, wire, peers, paths, "initial")
+    primary, *alternates = paths
+    old_a = snapshot(peers, primary)
+    unaffected = {p.name: snapshot(peers, p)[0] for p in alternates}
     peers[0].control("--rekey", "--child", "data-a")
     wait_for("new ESP SPIs", lambda: rekeyed(peers, primary, old_a, "child"))
-    data_stage(work, wire, peers, PATHS, "after-child-rekey")
+    data_stage(work, wire, peers, paths, "after-child-rekey")
     before_ike = snapshot(peers, primary)
     peers[0].control("--rekey", "--ike", "path-a")
     wait_for("new IKE SPIs", lambda: rekeyed(peers, primary, before_ike, "ike"))
-    if any(snapshot(peers, secondary)[0][key] != old_b[0][key] for key in ("ike", "in_spi", "out_spi")):
-        raise RuntimeError("Rekey of A unexpectedly changed the independent association B")
-    data_stage(work, wire, peers, PATHS, "after-ike-rekey")
+    for p in alternates:
+        current = snapshot(peers, p)[0]
+        if any(current[key] != unaffected[p.name][key] for key in ("ike", "in_spi", "out_spi")):
+            raise RuntimeError("Rekey of A unexpectedly changed association " + p.name)
+    data_stage(work, wire, peers, paths, "after-ike-rekey")
 
-    peers[0].control("--terminate", "--ike", "path-a", "--timeout", "10")
-    wait_for("retirement of both peers' IKE and CHILD SAs on A",
-             lambda: all(not peer.control("--list-sas", "--ike", "path-a").strip() for peer in peers))
-    before = [guard_drops(ns, primary) for ns in nodes]
-    with captures(work, wire, "withdrawn") as files:
-        for idx, ns in enumerate(nodes):
-            probe(ns, idx, primary, expect=False)
-        probe(nodes[0], 0, secondary)
-    no_clear(files)
-    assert_esp(files, secondary, snapshot(peers, secondary)[0])
-    if not all(guard_drops(ns, primary) > count for ns, count in zip(nodes, before)):
-        raise RuntimeError("Missing no-policy drops at one or both ends")
-    print("ok - after A was removed, both guards dropped protected traffic, neither wire carried it "
-          "in cleartext, and B still delivered ESP traffic", flush=True)
+    for index, removed in enumerate(paths):
+        ike = "path-" + removed.name
+        peers[0].control("--terminate", "--ike", ike, "--timeout", "10")
+        wait_for("retirement of both peers' IKE and CHILD SAs on " + removed.name,
+                 lambda: all(not peer.control("--list-sas", "--ike", ike).strip() for peer in peers))
+        before = [guard_drops(ns, removed) for ns in nodes]
+        survivors = paths[index + 1:]
+        with captures(work, wire, "withdrawn-" + removed.name, paths) as files:
+            for idx, ns in enumerate(nodes):
+                probe(ns, idx, removed, expect=False)
+                # An ordinary underlay flow remains independent of SA changes.
+                run(inside(ns, "ping", "-n", "-c", "1", "-W", "1", removed.outer[1-idx]))
+            for p in survivors:
+                probe(nodes[0], 0, p)
+        no_clear(files, paths)
+        for p in survivors:
+            assert_esp(files, p, snapshot(peers, p)[0])
+        if not all(guard_drops(ns, removed) > count for ns, count in zip(nodes, before)):
+            raise RuntimeError("Missing no-policy drops at one or both ends")
+        print(f"ok - withdrawal of {removed.name}: no cleartext, underlay still reachable, "
+              f"remaining ESP paths {[p.name for p in survivors]}", flush=True)
+
+    for p in reversed(paths):
+        peers[0].control("--initiate", "--child", "data-" + p.name, "--timeout", "10")
+        snapshot(peers, p)
+    data_stage(work, wire, peers, paths, "restored")
 
 
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--paths", type=int, choices=(1, 2, 3), default=2)
+    settings = parser.parse_args()
     if sys.platform != "linux" or os.getuid() != 0:
         raise SystemExit("This test requires root in a disposable Ubuntu VM with network and mount namespaces.")
     if not Path(CHARON).is_file():
@@ -353,7 +373,7 @@ def main():
     with tempfile.TemporaryDirectory(prefix="sdwan-ike-") as directory:
         with ExitStack() as stack:
             try:
-                exercise(Path(directory), stack)
+                exercise(Path(directory), stack, PATHS[:settings.paths])
             except Exception:
                 for output in sorted(Path(directory).glob("*/daemon.log")):
                     print(output.parent.name, "\n", output.read_text()[-5000:], file=sys.stderr)

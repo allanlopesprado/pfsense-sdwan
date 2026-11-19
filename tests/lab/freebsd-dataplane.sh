@@ -63,6 +63,9 @@ wan_a=${base}a
 remote_a=${base}b
 pair "$firewall" 203.0.113.1/30 "$remote" 203.0.113.2/30
 wan_b=${base}a
+pair "$firewall" 192.0.2.129/30 "$remote" 192.0.2.130/30
+wan_c=${base}a
+remote_c=${base}b
 jexec "$remote" ifconfig lo0 inet 192.0.2.162/32 alias
 jexec "$remote" ifconfig lo0 inet 192.0.2.163/32 alias
 jexec "$client" route -n add default 192.0.2.1
@@ -89,6 +92,7 @@ cat >"$work/before.pf" <<EOF
 set state-policy if-bound
 nat on $wan_a inet from 192.0.2.0/25 to any -> ($wan_a)
 nat on $wan_b inet from 192.0.2.0/25 to any -> ($wan_b)
+nat on $wan_c inet from 192.0.2.0/25 to any -> ($wan_c)
 block all
 EOF
 cat >"$work/after.pf" <<EOF
@@ -106,7 +110,7 @@ load_rules() {
 load_rules
 baseline() {
     jexec "$firewall" pfctl -sn
-    jexec "$firewall" pfctl -sr | awk '!/label "(descr=)?(path-a|path-b|no-member)"/'
+    jexec "$firewall" pfctl -sr | awk '!/label "(descr=)?(path-a|path-b|path-c|no-member)"/'
     jexec "$firewall" route -n get default | awk '/gateway:|interface:/ {print}'
 }
 baseline >"$work/baseline"
@@ -115,6 +119,7 @@ steer() {
     case "$1" in
         a) outbound=$wan_a; next_hop=198.51.100.2; rule=path-a ;;
         b) outbound=$wan_b; next_hop=203.0.113.2; rule=path-b ;;
+        c) outbound=$wan_c; next_hop=192.0.2.130; rule=path-c ;;
         none) outbound=''; rule=no-member ;;
         *) return 1 ;;
     esac
@@ -123,9 +128,10 @@ steer() {
         # The integration job provides the real pfSense filter compiler output.
         # FreeBSD 15 supports ridentifier, so preserve the entire rule including
         # its tracker, labels, flags and order. Substitute only device names.
-        test -s "$SDWAN_RENDERED_RULES/$rule.pf"
-        sed -e 's/\$LABLAN/'"$lan"'/g' -e "s/labwana/$wan_a/g" -e "s/labwanb/$wan_b/g" \
-            "$SDWAN_RENDERED_RULES/$rule.pf" >>"$work/selected.pf"
+        ruleset="$SDWAN_RENDERED_RULES/${2:-}$rule.pf"
+        test -s "$ruleset"
+        sed -e 's/\$LABLAN/'"$lan"'/g' -e "s/labwana/$wan_a/g" -e "s/labwanb/$wan_b/g" -e "s/labwanc/$wan_c/g" \
+            "$ruleset" >>"$work/selected.pf"
     elif [ -n "$outbound" ]; then
         printf 'pass in quick on %s route-to (%s %s) inet proto tcp from 192.0.2.11 to 192.0.2.162 port 7 keep state label "path-%s"\n' \
             "$lan" "$outbound" "$next_hop" "$1" >>"$work/selected.pf"
@@ -232,6 +238,29 @@ cmp "$work/baseline" "$work/final"
 echo 'ok - baseline PF rules, NAT rules and kernel default route survived the path changes'
 
 if [ -n "${SDWAN_RENDERED_RULES:-}" ]; then
+    for path in a b c; do
+        steer "$path" triple-
+        case "$path" in
+            a) translated=198.51.100.1 ;;
+            b) translated=203.0.113.1 ;;
+            c) translated=192.0.2.129 ;;
+        esac
+        expect_roundtrip 192.0.2.162 "$translated" "three-wan-$path"
+        jexec "$firewall" pfctl -s labels | counter "path-$path"
+    done
+    steer none triple-
+    if request 192.0.2.162 three-wan-down >"$work/blocked-triple"; then
+        echo 'The three-WAN rule allowed a new flow without a path' >&2
+        exit 1
+    fi
+    test ! -s "$work/blocked-triple"
+    jexec "$firewall" pfctl -s labels | counter no-member
+    expect_roundtrip 192.0.2.163 198.51.100.1 three-wan-control
+    steer a triple-
+    expect_roundtrip 192.0.2.162 198.51.100.1 three-wan-recovered
+    baseline >"$work/triple-final"
+    cmp "$work/baseline" "$work/triple-final"
+
     for node in "$client" "$firewall" "$remote"; do
         jexec "$node" sysctl net.inet6.ip6.dad_count=0
     done
@@ -248,6 +277,8 @@ if [ -n "${SDWAN_RENDERED_RULES:-}" ]; then
     add6 "$firewall" "$wan_b" 2001:db8:30::1/64
     add6 "$remote" "$remote_b" 2001:db8:30::2/64
     add6 "$remote" "$remote_b" fe80::2/64
+    add6 "$firewall" "$wan_c" 2001:db8:50::1/64
+    add6 "$remote" "$remote_c" 2001:db8:50::2/64
     add6 "$remote" lo0 2001:db8:40::162/128
     add6 "$remote" lo0 2001:db8:40::163/128
     jexec "$firewall" sysctl net.inet6.ip6.forwarding=1
@@ -260,15 +291,17 @@ if [ -n "${SDWAN_RENDERED_RULES:-}" ]; then
     cat >"$work/remote6.pf" <<EOF
 pass in quick on $remote_a inet6 proto tcp from 2001:db8:10::11 to 2001:db8:40::162 port 7 no state label "ingress-a"
 pass in quick on $remote_b inet6 proto tcp from 2001:db8:10::11 to 2001:db8:40::162 port 7 no state label "ingress-b"
+pass in quick on $remote_c inet6 proto tcp from 2001:db8:10::11 to 2001:db8:40::162 port 7 no state label "ingress-c"
 pass all no state
 EOF
     jexec "$remote" pfctl -f "$work/remote6.pf"
     steer6() {
-        test -s "$SDWAN_RENDERED_RULES/ipv6-$1.pf"
+        ruleset="$SDWAN_RENDERED_RULES/${2:-}ipv6-$1.pf"
+        test -s "$ruleset"
         {
             printf 'set state-policy if-bound\nblock all\npass quick inet6 proto icmp6 no state\n'
-            sed -e 's/\$LABLAN/'"$lan"'/g' -e "s/labwana/$wan_a/g" -e "s/labwanb/$wan_b/g" \
-                "$SDWAN_RENDERED_RULES/ipv6-$1.pf"
+            sed -e 's/\$LABLAN/'"$lan"'/g' -e "s/labwana/$wan_a/g" -e "s/labwanb/$wan_b/g" -e "s/labwanc/$wan_c/g" \
+                "$ruleset"
             printf 'pass in quick on %s inet6 proto tcp from 2001:db8:10::11 to 2001:db8:40::/64 port 7\n' "$lan"
             printf 'pass out inet6 all\n'
         } >"$work/ipv6.pf"
@@ -299,12 +332,29 @@ EOF
     jexec "$firewall" route -n get -inet6 default | awk '/gateway:|interface:/ {print}' >"$work/default6.after"
     cmp "$work/default6.before" "$work/default6.after"
     echo 'ok - IPv6 TCP crossed both WANs (including a link-local next hop), blocked without a path and recovered'
+    steer6 path-c triple-
+    jexec "$remote" route -n change -inet6 2001:db8:10::/64 2001:db8:50::1
+    test "$(request6 2001:db8:40::162 v6-wan-c)" = '2001:db8:10::11 v6-wan-c'
+    jexec "$remote" pfctl -s labels | counter ingress-c
+    steer6 no-member triple-
+    jexec "$remote" route -n change -inet6 2001:db8:10::/64 2001:db8:20::1
+    if request6 2001:db8:40::162 v6-block-triple >"$work/blocked6-triple"; then
+        echo 'The three-WAN IPv6 rule allowed a new flow without a path' >&2
+        exit 1
+    fi
+    test ! -s "$work/blocked6-triple"
+    jexec "$firewall" pfctl -s labels | counter no-member
+    test "$(request6 2001:db8:40::163 v6-control-triple)" = '2001:db8:10::11 v6-control-triple'
+    steer6 path-a triple-
+    test "$(request6 2001:db8:40::162 v6-recovered-triple)" = '2001:db8:10::11 v6-recovered-triple'
+    echo 'ok - three-WAN IPv6 reached WAN C, blocked without a path and retained independent reachability'
     jexec "$remote" pfctl -f "$work/remote.pf"
     load_rules
 fi
 
 if [ "${SDWAN_REAL_DPINGER:-0}" = 1 ]; then
-    python3 -B "$repo/tests/lab/freebsd_dpinger.py" "$firewall" "$remote" "$remote_a" "${wan_b%?}b" "$work/remote.pf"
+    python3 -B "$repo/tests/lab/freebsd_dpinger.py" "$firewall" "$remote" \
+        "$remote_a" "${wan_b%?}b" "$remote_c" "$work/remote.pf"
 fi
 
 sh "$repo/tests/lab/freebsd-vti-no-sa.sh" "$firewall" "$remote" "$wan_a" "$remote_a" "$work"

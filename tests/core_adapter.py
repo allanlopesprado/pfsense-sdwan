@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compile the lab's three pf rules from real dpinger socket samples and a patched pfSense checkout."""
+"""Compile PF rules for every availability combination on two or three paths."""
 import argparse
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack
@@ -60,14 +60,23 @@ def render_harness(work, core):
         "return filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6) !== false; } }")
 
 
-def test_config(work, family):
+def test_config(work, family, links):
     config = fixture(work)
+    if links == 3:
+        config["gateways/gateway_item"].append({"name": "GW_C", "interface": "opt3"})
+        config["interfaces"]["opt3"] = {"enable": ""}
+        config["processes"]["GW_C"] = {"socket": str(work / "GW_C.sock")}
+        policy_config = config["installedpackages/sdwan"]
+        policy_config["members"]["item"].append({"name": "c", "gateway": "GW_C", "cost": "30"})
+        policy_config["policies"]["item"][0]["members"]["item"].append("c")
     if family == "inet6":
         client, target, other = "2001:db8:10::11", "2001:db8:40::162", "2001:db8:40::164"
-        uplinks = [("2001:db8:20::1", "2001:db8:20::2"), ("fe80::1", "fe80::2")]
+        uplinks = [("2001:db8:20::1", "2001:db8:20::2"), ("fe80::1", "fe80::2"),
+                   ("2001:db8:50::1", "2001:db8:50::2")]
     else:
         client, target, other = "192.0.2.11", "192.0.2.162", "192.0.2.164"
-        uplinks = [("198.51.100.1", "198.51.100.2"), ("203.0.113.1", "203.0.113.2")]
+        uplinks = [("198.51.100.1", "198.51.100.2"), ("203.0.113.1", "203.0.113.2"),
+                   ("192.0.2.129", "192.0.2.130")]
     rule = {"tracker": "41001", "type": "pass", "ipprotocol": family, "interface": "lan", "protocol": "tcp",
             "source": {"address": client}, "destination": {"address": target, "port": "7"},
             "gateway": "G", "descr": "path-a"}
@@ -75,11 +84,12 @@ def test_config(work, family):
     del guard["gateway"]
     second = dict(rule, tracker="41003", destination={"address": other, "port": "7"})
     second_guard = dict(guard, tracker="41004", destination=second["destination"])
+    group_members = [f"{gw['name']}|{tier}|" for tier, gw in enumerate(config["gateways/gateway_item"], 1)]
     config.update({"filter/rule": [rule, guard, second, second_guard],
-                   "gateways/gateway_group": [{"name": "G", "item": ["GW_A|1|", "GW_B|2|"]}],
+                   "gateways/gateway_group": [{"name": "G", "item": group_members}],
                    "fixture_sources": {}, "fixture_devices": {}, "reload_gateways": {}})
     config["interfaces"]["lan"] = {"enable": "", "if": "lablan"}
-    for gw, (source, hop), device in zip(config["gateways/gateway_item"], uplinks, ("labwana", "labwanb")):
+    for gw, (source, hop), device in zip(config["gateways/gateway_item"], uplinks, ("labwana", "labwanb", "labwanc")):
         interface, name = gw["interface"], gw["name"]
         gw["gateway"] = hop
         config["interfaces"][interface]["if"] = device
@@ -91,7 +101,7 @@ def test_config(work, family):
     return config
 
 
-def run(php, core, output, replay, family):
+def run(php, core, output, replay, family, links):
     with tempfile.TemporaryDirectory(prefix="sdwan-render-", dir="/tmp") as tmp, ExitStack() as stack:
         work = Path(tmp)
         render_harness(work, core)
@@ -103,7 +113,7 @@ def run(php, core, output, replay, family):
             code = daemon.read_text()
             assert code.count(call) == 1
             daemon.write_text(code.replace(call, "fopen($process['socket'], 'rb')"))
-        config = test_config(work, family)
+        config = test_config(work, family, links)
         bound_rule = config["filter/rule"][0]
         scoped_flow = f'{family} proto tcp from {bound_rule["source"]["address"]} to {bound_rule["destination"]["address"]} port 7'
         settings = work / "fixture.json"
@@ -136,7 +146,7 @@ def run(php, core, output, replay, family):
         def observe(losses, label):
             config["filter/rule"][0]["descr"] = label
             settings.write_text(json.dumps(config))
-            with ThreadPoolExecutor(max_workers=2) as pool:
+            with ThreadPoolExecutor(max_workers=links) as pool:
                 events = []
                 for name, loss in zip(config["processes"], losses):
                     frame = f"{name} 10000 1000 {loss}"
@@ -157,8 +167,14 @@ def run(php, core, output, replay, family):
             return f"{device} {address}"
 
         rules = {}
-        for label, choice, losses in [("path-a", "GW_A", (0, 0)), ("path-b", "GW_B", (100, 0)),
-                                      ("no-member", None, (100, 100))]:
+        gateway_names = list(config["processes"])
+        # Start each combination independently so availability assertions do
+        # not depend on the separate recovery hysteresis timer.
+        for mask in range(1 << links):
+            snapshot.unlink(missing_ok=True)
+            losses = [0 if mask & (1 << index) else 100 for index in range(links)]
+            choice = next((name for name, loss in zip(gateway_names, losses) if loss == 0), None)
+            label = f"path-{choice[-1].lower()}" if choice else "no-member"
             line = observe(losses, label)
             published = json.loads(snapshot.read_text())
             assert published["steering"]["G"]["gateway"] == choice, published
@@ -171,15 +187,16 @@ def run(php, core, output, replay, family):
             assert "\n" not in line and "$GW" not in line, line
             if choice:
                 assert f"route-to ({next_hop(choice)})" in normalized and "keep state" in normalized, line
-                tier = 1 if choice == "GW_A" else 2
+                tier = gateway_names.index(choice) + 1
                 assert f'label "gw={tier}:G"' in normalized, line
-                shutil.copy(snapshot, work / ("sample-a.json" if choice == "GW_A" else "sample-b.json"))
+                if choice in ("GW_A", "GW_B"):
+                    shutil.copy(snapshot, work / f"sample-{choice[-1].lower()}.json")
             else:
                 assert "route-to" not in line and "keep state" not in line and "flags any" in line, line
             rules[label] = line
         assert compile_rule("control") == "unchanged"
         transport = "file replay" if replay else "AF_UNIX"
-        print(f"ok - {family} observations ({transport}) and upstream PF renderer selected A, failed to B, then denied without a path")
+        print(f"ok - {family}, {links} links: observer ({transport}) and native PF renderer agreed across all {1 << links} availability combinations")
 
         def denied(reason):
             line = " ".join(compile_rule().split())
@@ -223,9 +240,8 @@ def run(php, core, output, replay, family):
         if output:
             output.mkdir(parents=True, exist_ok=True)
             for label, line in rules.items():
-                if family == "inet6":
-                    label = f"ipv6-{label}"
-                (output / f"{label}.pf").write_text(line + "\n")
+                prefix = ("triple-" if links == 3 else "") + ("ipv6-" if family == "inet6" else "")
+                (output / f"{prefix}{label}.pf").write_text(line + "\n")
 
 
 if __name__ == "__main__":
@@ -234,8 +250,11 @@ if __name__ == "__main__":
     parser.add_argument("--core", type=Path, required=True)
     parser.add_argument("--emit-dir", type=Path)
     parser.add_argument("--family", choices=("inet", "inet6", "both"), default="both")
+    parser.add_argument("--links", choices=("2", "3", "both"), default="both")
     parser.add_argument("--replay-lines", action="store_true", help="read dpinger frames from files for hosts that prohibit Unix sockets")
     args = parser.parse_args()
     families = ("inet", "inet6") if args.family == "both" else (args.family,)
+    link_counts = (2, 3) if args.links == "both" else (int(args.links),)
     for family in families:
-        run(args.php, args.core.resolve(), args.emit_dir, args.replay_lines, family)
+        for links in link_counts:
+            run(args.php, args.core.resolve(), args.emit_dir, args.replay_lines, family, links)
