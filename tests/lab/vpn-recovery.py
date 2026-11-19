@@ -17,6 +17,10 @@ from ikev2.run import PATHS, create_network, inside, packets, run, stop_process,
 ENDPOINT = "203.0.113.10"
 INNER = ("10.247.0.1", "10.247.0.2")
 HTTP_PORT = 18080
+DNS_PORT = 1053
+DNS_NAME = "probe.sdwan.test"
+BACKUP_MTU = 1280
+TUNNEL_MTU = 1200
 LINKS = PATHS[:2]
 
 
@@ -52,7 +56,7 @@ def openvpn(stack, work, nodes):
         config.write_text(
             f"dev tun0\ndisable-dco\nproto udp4\ntopology p2p\nifconfig {INNER[idx]} {INNER[peer]}\n"
             f"ca {work / 'ca.crt'}\ncert {cert}\nkey {key}\n"
-            "ping 1\nping-restart 4\npersist-key\npersist-tun\ntun-mtu 1350\nverb 3\n" + endpoint
+            f"ping 1\nping-restart 4\npersist-key\npersist-tun\ntun-mtu {TUNNEL_MTU}\nverb 3\n" + endpoint
         )
         start(stack, work, node, "openvpn-" + name, "openvpn", "--config", str(config))
     return "tun0", 11494
@@ -76,7 +80,7 @@ def wireguard(work, nodes):
         if idx == 0:
             args += ["endpoint", f"{ENDPOINT}:51820", "persistent-keepalive", "1"]
         run(args)
-        run(["ip", "-n", node, "link", "set", "wg0", "mtu", "1350", "up"])
+        run(["ip", "-n", node, "link", "set", "wg0", "mtu", str(TUNNEL_MTU), "up"])
     return "wg0", 51820, public[1]
 
 
@@ -89,7 +93,7 @@ def capture(work, wire, stage, port):
             pcap = work / f"{stage}-{dev}.pcap"
             name = f"{stage}-{dev}"
             process = start(stack, work, wire, name, "tcpdump", "--immediate-mode", "-p", "-U", "-nn", "-B", "4096", "-s", "128", "-i", dev,
-                            "-w", str(pcap), f"udp port {port} or tcp port {HTTP_PORT}")
+                            "-w", str(pcap), f"udp port {port} or udp port {DNS_PORT} or tcp port {HTTP_PORT}")
             wait_for(f"capture on {dev}", lambda: process.poll() is None and
                      "listening on" in (work / (name + ".log")).read_text(), 7)
             # Override the ordinary daemon cleanup so libpcap flushes cleanly.
@@ -117,6 +121,8 @@ def verify_trace(files, active, port):
         raise RuntimeError(f"No encrypted outer request on {active.name}: {trace[:1600]}")
     if not packets(path, f"udp src port {port} and dst host {local} and {peer}"):
         raise RuntimeError(f"No encrypted outer response on {active.name}: {trace[:1600]}")
+    if not packets(path, f"udp dst port {DNS_PORT} and src host {local} and dst host {ENDPOINT}"):
+        raise RuntimeError(f"No DNS request on {active.name}: {trace[:1600]}")
 
 
 def request(node, address, digest):
@@ -134,7 +140,19 @@ def exercise(args, work, stack):
     client, server = nodes
     wire = "vpnswitch" + suffix
     create_network(stack, nodes, wire, LINKS)
+    for node, device in ((client, "wanb"), (server, "wanb"), (wire, "tapb0"), (wire, "tapb1"), (wire, "brb")):
+        run(["ip", "-n", node, "link", "set", device, "mtu", str(BACKUP_MTU)])
     run(["ip", "-n", server, "addr", "add", ENDPOINT + "/32", "dev", "lo"])
+    dns = start(stack, work, server, "dns", "dnsmasq", "--no-daemon", "--conf-file=/dev/null",
+                "--no-resolv", "--no-hosts", "--bind-interfaces", f"--listen-address={ENDPOINT}",
+                f"--port={DNS_PORT}", f"--address=/{DNS_NAME}/{INNER[1]}")
+
+    def query_dns():
+        if dns.poll() is not None:
+            raise RuntimeError((work / "dns.log").read_text())
+        result = run(inside(client, "dig", "@" + ENDPOINT, "-p", str(DNS_PORT), "+short",
+                            "+time=1", "+tries=1", DNS_NAME, "A"), check=False, timeout=4)
+        return result.returncode == 0 and result.stdout.strip() == INNER[1]
 
     def choose(path):
         run(["ip", "-n", client, "route", "replace", ENDPOINT + "/32", "via", path.outer[1],
@@ -174,15 +192,17 @@ def exercise(args, work, stack):
             wait_for("first verified TCP transfer", lambda: request(client, INNER[1], digest), 24)
             elapsed = time.monotonic() - start_time
             wait_for("verified reverse TCP transfer", lambda: request(server, INNER[0], digest), 10)
+            wait_for("DNS response to the VPN node's local resolver query", query_dns, 10)
         verify_trace(files, path, port)
-        print(f"ok - {args.protocol} {stage}: WAN {path.name}, 64 KiB in both directions, "
-              f"first response verified in {elapsed:.2f}s including capture setup")
+        underlay_mtu = BACKUP_MTU if path.name == "b" else 1500
+        print(f"ok - {args.protocol} {stage}: WAN {path.name} MTU {underlay_mtu}, DNS and 64 KiB in both directions, "
+              f"first tunnel response in {elapsed:.2f}s including capture setup")
 
     establish(LINKS[0], "initial")
     link(LINKS[0], "down")
     with capture(work, wire, "no-link", port) as files:
-        if request(client, INNER[1], digest) or request(server, INNER[0], digest):
-            raise RuntimeError("Application unexpectedly reached an offline peer")
+        if request(client, INNER[1], digest) or request(server, INNER[0], digest) or query_dns():
+            raise RuntimeError("Application or DNS unexpectedly reached an offline peer")
     verify_trace(files, None, port)
     reselect(LINKS[1])
     establish(LINKS[1], "failover")

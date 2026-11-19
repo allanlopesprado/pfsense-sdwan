@@ -20,8 +20,8 @@ jobs:
       - name: Install real VPN implementations and traffic capture
         run: |
           bash .github/scripts/ubuntu-archive.sh
-          sudo apt-get install -y --no-install-recommends iproute2 openvpn wireguard-tools tcpdump
-          dpkg-query -W openvpn wireguard-tools
+          sudo apt-get install -y --no-install-recommends iproute2 openvpn wireguard-tools tcpdump dnsmasq-base bind9-dnsutils
+          dpkg-query -W openvpn wireguard-tools dnsmasq-base bind9-dnsutils
       - name: Transfer data before outage, on backup link, and after return
         run: sudo python3 -B -u tests/lab/vpn-recovery.py "${{ matrix.protocol }}"
   access:
