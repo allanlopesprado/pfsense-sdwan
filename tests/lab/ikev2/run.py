@@ -1,0 +1,364 @@
+#!/usr/bin/env python3
+"""Two isolated strongSwan peers and a passive two-link transit network."""
+
+import json
+import os
+import re
+import secrets
+import signal
+import subprocess
+import sys
+import tempfile
+import time
+from contextlib import ExitStack, contextmanager
+from dataclasses import dataclass
+from pathlib import Path
+
+CHARON = "/usr/lib/ipsec/charon"
+os.environ["LC_ALL"] = "C"
+
+
+def run(args, *, data=None, check=True, timeout=20):
+    result = subprocess.run(args, input=data, text=True, capture_output=True, timeout=timeout)
+    if check and result.returncode:
+        raise RuntimeError(f"{' '.join(args)} returned {result.returncode}: {result.stderr.strip()} {result.stdout.strip()}")
+    return result
+
+
+def wait_for(label, fn, timeout=20):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        value = fn()
+        if value:
+            return value
+        time.sleep(0.25)
+    raise RuntimeError(f"Timed out waiting for {label}")
+
+
+@dataclass(frozen=True)
+class PathPair:
+    name: str
+    reqid: int
+    outer: tuple
+    inner: tuple
+
+
+PATHS = (
+    PathPair("a", 101, ("192.0.2.1", "192.0.2.2"), ("10.241.1.1", "10.241.1.2")),
+    PathPair("b", 102, ("198.51.100.1", "198.51.100.2"), ("10.241.2.1", "10.241.2.2")),
+)
+
+
+def inside(ns, *args):
+    return ["ip", "netns", "exec", ns, *args]
+
+
+def create_network(stack, nodes, wire):
+    for name in [*nodes, wire]:
+        run(["ip", "netns", "add", name])
+        stack.callback(run, ["ip", "netns", "del", name], check=False)
+        run(["ip", "-n", name, "link", "set", "lo", "up"])
+    for path in PATHS:
+        switch = "br" + path.name
+        run(["ip", "-n", wire, "link", "add", switch, "type", "bridge"])
+        run(["ip", "-n", wire, "link", "set", switch, "up"])
+        for idx, ns in enumerate(nodes):
+            end, tap = "wan" + path.name, f"tap{path.name}{idx}"
+            run(["ip", "-n", ns, "link", "add", end, "type", "veth", "peer", "name", tap, "netns", wire])
+            run(["ip", "-n", wire, "link", "set", tap, "master", switch])
+            run(["ip", "-n", wire, "link", "set", tap, "up"])
+            run(["ip", "-n", ns, "addr", "add", path.outer[idx] + "/30", "dev", end])
+            run(["ip", "-n", ns, "link", "set", end, "up"])
+            run(["ip", "-n", ns, "addr", "add", path.inner[idx] + "/32", "dev", "lo"])
+            run(["ip", "-n", ns, "route", "add", path.inner[1-idx] + "/32", "via", path.outer[1-idx],
+                 "dev", end, "src", path.inner[idx]])
+
+
+def guard(ns, idx):
+    """Persistently refuse access to each protected host without that tunnel."""
+    rules = ["table ip ike_lab {"]
+    for p in PATHS:
+        rules.append(f"counter clear_{p.name} {{ }}")
+    rules.append("chain outbound { type filter hook output priority filter; policy accept;")
+    for p in PATHS:
+        flow = f"ip saddr {p.inner[idx]} ip daddr {p.inner[1-idx]}"
+        rules += [f"{flow} ipsec out reqid {p.reqid} accept", f"{flow} counter name clear_{p.name} drop"]
+    run(inside(ns, "nft", "-f", "-"), data="\n".join([*rules, "}", "}"]) + "\n")
+
+
+def guard_drops(ns, path):
+    counters = json.loads(run(inside(ns, "nft", "-j", "list", "counter", "ip", "ike_lab",
+                                     "clear_" + path.name)).stdout)["nftables"]
+    return next(item["counter"]["packets"] for item in counters if "counter" in item)
+
+
+def probe(ns, idx, p, expect=True):
+    result = run(inside(ns, "ping", "-n", "-I", p.inner[idx], "-c", "2", "-W", "1",
+                        "-w", "4", p.inner[1-idx]), check=False)
+    if expect and (result.returncode or "0% packet loss" not in result.stdout or "2 received" not in result.stdout):
+        raise RuntimeError(f"Expected both replies on {p.name}: {result.stdout} {result.stderr}")
+    if not expect and (result.returncode != 1 or "0 received" not in result.stdout):
+        raise RuntimeError(f"Expected zero replies on {p.name}: {result.stdout} {result.stderr}")
+
+
+def stop_process(process, sig):
+    if process.poll() is None:
+        process.send_signal(sig)
+        try:
+            process.wait(timeout=8)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait()
+
+
+@contextmanager
+def captures(work, wire, stage):
+    files = {}
+    with ExitStack() as stack:
+        for p in PATHS:
+            dev = f"tap{p.name}0"
+            name = work / f"{stage}-{dev}.pcap"
+            log = work / f"{stage}-{dev}.log"
+            err = stack.enter_context(log.open("w"))
+            process = subprocess.Popen(inside(wire, "tcpdump", "-p", "-U", "-nn", "-i", dev, "-w", str(name),
+                                              "icmp or esp or udp port 500 or udp port 4500"),
+                                       stdout=subprocess.DEVNULL, stderr=err)
+            stack.callback(stop_process, process, signal.SIGINT)
+            wait_for(f"capture {dev}", lambda: "listening on" in log.read_text() and process.poll() is None, 6)
+            files[p.name] = name
+        yield files
+        # Allow the packet socket to deliver its last buffered frame to libpcap.
+        time.sleep(1.1)
+
+
+def packets(pcap, expression):
+    output = run(["tcpdump", "-tnnr", str(pcap), expression]).stdout.strip()
+    return len(output.splitlines()) if output else 0
+
+
+def inner_filter(p):
+    return f"icmp and host {p.inner[0]} and host {p.inner[1]}"
+
+
+def no_clear(files):
+    for p in PATHS:
+        for filename in files.values():
+            if packets(filename, inner_filter(p)):
+                raise RuntimeError(f"Plaintext protected ICMP found in {filename.name}")
+
+
+def assert_esp(files, p, sa):
+    for idx, spi in enumerate((sa["out_spi"], sa["in_spi"])):
+        match = f"src {p.outer[idx]} and dst {p.outer[1-idx]} and ip proto 50 and ip[((ip[0] & 15) * 4):4] = 0x{spi}"
+        if packets(files[p.name], match) < 2:
+            raise RuntimeError(f"Missing expected ESP traffic with SPI {spi} on {p.name}")
+
+
+def connection(p, idx):
+    return f"""
+    path-{p.name} {{
+        version = 2
+        local_addrs = {p.outer[idx]}
+        remote_addrs = {p.outer[1-idx]}
+        mobike = no
+        proposals = aes128gcm16-prfsha256-ecp256
+        local {{
+            auth = psk
+            id = @peer{idx}-{p.name}.test
+        }}
+        remote {{
+            auth = psk
+            id = @peer{1-idx}-{p.name}.test
+        }}
+        children {{
+            data-{p.name} {{
+                local_ts = {p.inner[idx]}/32
+                remote_ts = {p.inner[1-idx]}/32
+                reqid = {p.reqid}
+                esp_proposals = aes128gcm16-ecp256
+                start_action = none
+                close_action = none
+            }}
+        }}
+    }}
+"""
+
+
+class Peer:
+    def __init__(self, ns, idx, work, keys, stack):
+        self.ns = ns
+        directory = work / ns
+        directory.mkdir(mode=0o700)
+        (directory / "run").mkdir()
+        confdir = directory / "swanctl"
+        confdir.mkdir(mode=0o700)
+        secrets_body = []
+        for p in PATHS:
+            secrets_body.append(f"""
+    ike-{p.name} {{
+        id-1 = @peer0-{p.name}.test
+        id-2 = @peer1-{p.name}.test
+        secret = 0x{keys[p.name]}
+    }}
+""")
+        (confdir / "swanctl.conf").write_text("connections {\n" + "".join(connection(p, idx) for p in PATHS)
+                                             + "}\nsecrets {\n" + "".join(secrets_body) + "}\n")
+        (directory / "strongswan.conf").write_text("""charon {
+    install_routes = no
+    load_modular = yes
+    filelog {
+        stdout {
+            default = 1
+            flush_line = yes
+        }
+    }
+    plugins {
+        include /etc/strongswan.d/charon/*.conf
+    }
+}
+""")
+        self.log = directory / "daemon.log"
+        output = stack.enter_context(self.log.open("w"))
+        # Keep distro-provided PID and VICI socket paths private to this process.
+        # Binding /run also covers /var/run, a symlink on Ubuntu.
+        launch = ('mount --bind "$1/run" /run && mount --bind "$1/strongswan.conf" /etc/strongswan.conf '
+                  '&& mount --bind "$1/swanctl" /etc/swanctl && exec /usr/lib/ipsec/charon')
+        self.process = subprocess.Popen(inside(ns, "unshare", "--mount", "--propagation", "private",
+                                              "sh", "-ec", launch, "ike-lab", str(directory)),
+                                       stdout=output, stderr=subprocess.STDOUT)
+        stack.callback(stop_process, self.process, signal.SIGTERM)
+        wait_for("private VICI socket on " + ns, lambda: (directory / "run/charon.vici").is_socket()
+                 and self.process.poll() is None, 12)
+        self.control("--load-conns")
+        self.control("--load-creds", "--noprompt")
+
+    def control(self, *args):
+        return run(["nsenter", "-t", str(self.process.pid), "-m", "-n", "--", "swanctl", *args]).stdout
+
+    def status(self, p):
+        output = self.control("--list-sas", "--ike", f"path-{p.name}", "--child", f"data-{p.name}")
+        ike = re.search(rf"^path-{p.name}: #\d+, ESTABLISHED, IKEv2, ([0-9a-f]+)_i\*? ([0-9a-f]+)_r", output, re.M)
+        child = re.findall(rf"^\s*data-{p.name}: #\d+, reqid {p.reqid}, INSTALLED, TUNNEL, ESP:AES_GCM_16-128", output, re.M)
+        directions = re.findall(r"^\s*(in|out)\s+([0-9a-f]+),\s+(\d+) bytes,", output, re.M)
+        if not ike or len(child) != 1 or len(directions) != 2:
+            return None
+        data = {"ike": ike.groups()}
+        for direction, spi, count in directions:
+            data[direction + "_spi"] = spi
+            data[direction + "_bytes"] = int(count)
+        return data if "in_spi" in data and "out_spi" in data else None
+
+
+def pair_status(peers, path):
+    pair = [peer.status(path) for peer in peers]
+    if not all(pair):
+        return None
+    a, b = pair
+    if a["ike"] != b["ike"] or a["out_spi"] != b["in_spi"] or a["in_spi"] != b["out_spi"]:
+        return None
+    return pair
+
+
+def snapshot(peers, p):
+    return wait_for("matching negotiated SPIs on " + p.name, lambda: pair_status(peers, p))
+
+
+def rekeyed(peers, p, old, mode):
+    pair = pair_status(peers, p)
+    if pair:
+        fields = ("in_spi", "out_spi") if mode == "child" else ("ike",)
+        if all(pair[0][key] != old[0][key] for key in fields):
+            return pair
+    return None
+
+
+def data_stage(work, wire, peers, paths, stage):
+    before = {p.name: snapshot(peers, p) for p in paths}
+    with captures(work, wire, stage) as files:
+        for p in paths:
+            probe(peers[0].ns, 0, p)
+            probe(peers[1].ns, 1, p)
+    no_clear(files)
+    for p in paths:
+        after = snapshot(peers, p)
+        for old, new in zip(before[p.name], after):
+            if any(new[k] <= old[k] for k in ("in_bytes", "out_bytes")):
+                raise RuntimeError(f"Negotiated CHILD_SA byte counters did not increase on {p.name}")
+        assert_esp(files, p, after[0])
+        print(f"ok - {stage}: {p.name} received replies in both directions; ESP SPIs "
+              f"{after[0]['in_spi']}/{after[0]['out_spi']}; protected bytes in/out "
+              f"{after[0]['in_bytes']}/{after[0]['out_bytes']}", flush=True)
+
+
+def exercise(work, stack):
+    suffix = str(os.getpid())
+    nodes = [f"ikeleft{suffix}", f"ikeright{suffix}"]
+    wire = "ikewire" + suffix
+    create_network(stack, nodes, wire)
+    with captures(work, wire, "control") as files:
+        for p in PATHS:
+            probe(nodes[0], 0, p)
+    for p in PATHS:
+        if packets(files[p.name], inner_filter(p)) < 4:
+            raise RuntimeError("Plaintext positive control failed on " + p.name)
+    print("ok - transit captures detected both plaintext controls before installing guards", flush=True)
+    for idx, ns in enumerate(nodes):
+        guard(ns, idx)
+    keys = {p.name: secrets.token_hex(32) for p in PATHS}
+    peers = [Peer(ns, idx, work, keys, stack) for idx, ns in enumerate(nodes)]
+    with captures(work, wire, "negotiate") as files:
+        for p in PATHS:
+            peers[0].control("--initiate", "--child", "data-" + p.name, "--timeout", "10")
+            snapshot(peers, p)
+    for p in PATHS:
+        for idx in range(2):
+            ike = f"src {p.outer[idx]} and dst {p.outer[1-idx]} and udp port 500"
+            if packets(files[p.name], ike) == 0:
+                raise RuntimeError("No bidirectional IKE exchange recorded on " + p.name)
+    data_stage(work, wire, peers, PATHS, "initial")
+    primary, secondary = PATHS
+    old_a, old_b = snapshot(peers, primary), snapshot(peers, secondary)
+    peers[0].control("--rekey", "--child", "data-a")
+    wait_for("new ESP SPIs", lambda: rekeyed(peers, primary, old_a, "child"))
+    data_stage(work, wire, peers, PATHS, "after-child-rekey")
+    before_ike = snapshot(peers, primary)
+    peers[0].control("--rekey", "--ike", "path-a")
+    wait_for("new IKE SPIs", lambda: rekeyed(peers, primary, before_ike, "ike"))
+    if any(snapshot(peers, secondary)[0][key] != old_b[0][key] for key in ("ike", "in_spi", "out_spi")):
+        raise RuntimeError("Rekey of A unexpectedly changed the independent association B")
+    data_stage(work, wire, peers, PATHS, "after-ike-rekey")
+
+    peers[0].control("--terminate", "--ike", "path-a", "--timeout", "10")
+    wait_for("retirement of both peers' IKE and CHILD SAs on A",
+             lambda: all(not peer.control("--list-sas", "--ike", "path-a").strip() for peer in peers))
+    before = [guard_drops(ns, primary) for ns in nodes]
+    with captures(work, wire, "withdrawn") as files:
+        for idx, ns in enumerate(nodes):
+            probe(ns, idx, primary, expect=False)
+        probe(nodes[0], 0, secondary)
+    no_clear(files)
+    assert_esp(files, secondary, snapshot(peers, secondary)[0])
+    if not all(guard_drops(ns, primary) > count for ns, count in zip(nodes, before)):
+        raise RuntimeError("Missing no-policy drops at one or both ends")
+    print("ok - after A was removed, both guards dropped protected traffic, neither wire carried it "
+          "in cleartext, and B still delivered ESP traffic", flush=True)
+
+
+def main():
+    if sys.platform != "linux" or os.getuid() != 0:
+        raise SystemExit("This test requires root in a disposable Ubuntu VM with network and mount namespaces.")
+    if not Path(CHARON).is_file():
+        raise SystemExit("Install the Ubuntu strongswan-charon and strongswan-swanctl packages first.")
+    os.umask(0o077)
+    with tempfile.TemporaryDirectory(prefix="sdwan-ike-") as directory:
+        with ExitStack() as stack:
+            try:
+                exercise(Path(directory), stack)
+            except Exception:
+                for output in sorted(Path(directory).glob("*/daemon.log")):
+                    print(output.parent.name, "\n", output.read_text()[-5000:], file=sys.stderr)
+                raise
+
+
+if __name__ == "__main__":
+    main()

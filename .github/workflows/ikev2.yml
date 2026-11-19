@@ -1,0 +1,26 @@
+name: IKEv2 tunnel checks
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  strongswan:
+    name: Ubuntu IKEv2 negotiation and rekey
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install Ubuntu networking and strongSwan packages
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            iproute2 iputils-ping nftables tcpdump strongswan-charon \
+            strongswan-swanctl libstrongswan-standard-plugins
+          uname -r
+          dpkg-query -W strongswan-charon strongswan-swanctl nftables
+      - name: Negotiate both tunnels, rekey and withdraw one path
+        run: sudo python3 -B -u tests/lab/ikev2/run.py
