@@ -6,6 +6,7 @@ PHP_BIN=${PHP_BIN:-php}
 "$PHP_BIN" -v
 python3 tests/check_port.py
 python3 tools/update-release-index.py --check
+python3 -B tests/release_notes.py
 python3 -B tests/package_lifecycle.py "$PHP_BIN"
 python3 -B tests/lab/test_observe_path.py
 find files tests -type f \( -name '*.php' -o -name '*.inc' \) -print0 |

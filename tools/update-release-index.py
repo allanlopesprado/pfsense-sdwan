@@ -5,6 +5,7 @@ import hashlib
 import json
 from pathlib import Path
 import re
+import subprocess
 import tarfile
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -35,9 +36,44 @@ def index_contents():
     return json.dumps(release, indent=2) + "\n"
 
 
+def readme_with_installer(release, artifact_commit):
+    if not re.fullmatch(r"[a-f0-9]{40}", artifact_commit):
+        raise SystemExit("Expected the full Git commit containing the package")
+    filename = f"{PACKAGE}-{release['version']}.pkg"
+    artifact = f"dist/{filename}"
+
+    def git_output(*arguments):
+        process = subprocess.run(["git", *arguments], cwd=ROOT, capture_output=True, text=True)
+        if process.returncode:
+            raise SystemExit(f"Cannot verify Git artifact {artifact} at {artifact_commit}")
+        return process.stdout.strip()
+
+    if git_output("cat-file", "-t", artifact_commit) != "commit":
+        raise SystemExit("The installer must pin a Git commit")
+    committed = git_output("rev-parse", "--verify", f"{artifact_commit}:{artifact}")
+    if committed != git_output("hash-object", "--no-filters", artifact):
+        raise SystemExit("The pinned Git commit contains different package bytes")
+    url = f"https://raw.githubusercontent.com/allanlopesprado/pfsense-sdwan/{artifact_commit}/{artifact}"
+    command = (
+        "d=$(mktemp -d /tmp/sdwan.XXXXXXXX) && "
+        f"(trap 'rm -rf \"$d\"' EXIT; p=\"$d/{filename}\"; "
+        f"fetch -o \"$p\" '{url}' && sha256 -c {release['sha256']} \"$p\" && pkg add \"$p\")"
+    )
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    marker = "<!-- install-command -->\n```sh\n"
+    content, count = re.subn(
+        re.escape(marker) + r".*?\n```", lambda _: marker + command + "\n```", readme, flags=re.S
+    )
+    if count != 1:
+        raise SystemExit("Expected exactly one marked README install command")
+    return content
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--check", action="store_true", help="verify without writing")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--check", action="store_true", help="verify without writing")
+    mode.add_argument("--artifact-commit", help="also refresh the README installer using this committed package")
     args = parser.parse_args()
     index = ROOT / "dist/release.json"
     expected = index_contents()
@@ -46,4 +82,7 @@ if __name__ == "__main__":
             raise SystemExit("GitHub release index differs from the distributed package")
         print("ok - GitHub release index, artifact and checksum agree")
     else:
-        index.write_text(expected)
+        readme = readme_with_installer(json.loads(expected), args.artifact_commit) if args.artifact_commit else None
+        index.write_text(expected, encoding="utf-8")
+        if readme is not None:
+            (ROOT / "README.md").write_text(readme, encoding="utf-8")

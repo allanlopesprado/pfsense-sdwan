@@ -42,12 +42,7 @@ O arquivo de pré-lançamento também pode ser reproduzido com Python 3.9+, a fe
 fakeroot python3 tools/build-lab-pkg.py --output ./dist
 ```
 
-Depois de produzir o pacote e seu arquivo `.sha256`, gere o índice consultado pela aba **Updates**. As versões a partir de 0.4.0 consultam o canal `main`. A maturidade atual é `experimental`. A versão 0.3.0 continua consultando o índice próprio de laboratório. A verificação confere nome e versão do manifesto, arquivo e SHA-256. Publique o índice e o pacote na mesma revisão. No README de distribuição, fixe a URL do pacote nesse commit e atualize seu SHA-256. A WebGUI da 0.4.8 só oferece a instalação depois que o GitHub publica a release com o mesmo SHA-256 e a tag aponta para o arquivo correspondente.
-
-```sh
-python3 tools/update-release-index.py
-python3 tools/update-release-index.py --check
-```
+Depois de empacotar, siga o [fluxo de versionamento e publicação](VERSIONAMENTO.pt-BR.md#preparar-uma-release) para gerar o índice consultado pela aba **Updates** e o comando fixado do README. A WebGUI a partir da 0.4.8 oferece a instalação quando a release é publicada e o SHA-256 do arquivo na tag corresponde ao índice.
 
 O empacotador inclui o conteúdo listado em `pkg-plist`, preenche o manifesto e os hooks e compara os bytes, modos e proprietários do arquivo final com o conteúdo esperado antes de imprimir o SHA-256. O port declara `NO_ARCH`. A ABI no pacote é `FreeBSD:16:*`; confirme a família e o major com `pkg config ABI` no alvo. O ensaio de extração em uma raiz temporária utiliza scripts desativados. A validação dos hooks, WebGUI, serviço e HA exige uma instalação real em clone.
 

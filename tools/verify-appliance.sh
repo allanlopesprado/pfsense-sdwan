@@ -25,7 +25,6 @@ require_once("/usr/local/pkg/sdwan_engine.inc");
 $expected = [
     "package" => static fn($row) => strtolower($row["name"] ?? "") === "sdwan",
     "menu" => static fn($row) => ltrim($row["url"] ?? "", "/") === "sdwan/status.php",
-    "service" => static fn($row) => ($row["name"] ?? "") === "sdwand",
 ];
 foreach ($expected as $entry => $match) {
     $rows = config_get_path("installedpackages/" . $entry, []);
@@ -33,6 +32,15 @@ foreach ($expected as $entry => $match) {
         fwrite(STDERR, "Missing SD-WAN " . $entry . " registration.\n");
         exit(1);
     }
+}
+
+$service_name = version_compare($argv[1], "0.4.12", "<") ? "sdwand" : "sdwan";
+$services = config_get_path("installedpackages/service", []);
+$registered = array_values(array_filter((array)$services, static fn($row) =>
+    is_array($row) && ($row["rcfile"] ?? "") === "sdwand.sh"));
+if (count($registered) !== 1 || ($registered[0]["name"] ?? "") !== $service_name) {
+    fwrite(STDERR, "Expected one registered SD-WAN service named " . $service_name . ".\n");
+    exit(1);
 }
 
 try {
@@ -57,4 +65,4 @@ if (is_readable("/var/log/system.log")) {
     $events = array_filter($rows, static fn($row) => ($row["process"] ?? null) === "sdwan");
     printf("SD-WAN events in recent native System Logs rows: %d.\n", count($events));
 }
-'
+' -- "$installed"

@@ -1,107 +1,57 @@
 # SD-WAN para pfSense CE
 
-A versão **0.4.13** acompanha gateways e recomenda caminhos na WebGUI do pfSense. O pacote é **experimental** e tem como alvo o **pfSense CE 2.9.1**. O projeto é independente do pfSense e da Netgate.
+Pacote experimental para monitorar links, comparar gateways por SLA e acompanhar as recomendações de caminho na WebGUI do **pfSense CE 2.9.1**. Projeto independente da Netgate.
+
+[Baixar a release mais recente](https://github.com/allanlopesprado/pfsense-sdwan/releases/latest) · [Instalação](#como-instalar-pelo-diagnostics--command-prompt) · [Histórico](CHANGELOG.md) · [Resultados de laboratório](docs/RESULTADOS.pt-BR.md)
+
+[![Testes do pacote](https://github.com/allanlopesprado/pfsense-sdwan/actions/workflows/checks.yml/badge.svg?branch=main)](https://github.com/allanlopesprado/pfsense-sdwan/actions/workflows/checks.yml)
+
+## O que o pacote faz
+
+- **Dashboard** mostra IP, latência, variação do RTT, perda e estado por gateway.
+- **Políticas** classificam os caminhos por latência, perda e custo. **Diagnostics** explica a avaliação de cada candidato.
+- **Status → Services** registra o serviço `sdwan` com controles nativos. Seus eventos aparecem em **Status → System Logs**, no log Geral.
+- **Updates** consulta o GitHub, verifica o SHA-256 e instala a versão publicada pela WebGUI.
+
+![Widget SD-WAN com métricas e estado de três gateways no tema claro](https://github.com/allanlopesprado/pfsense-sdwan/releases/latest/download/widget-light-554.png)
+
+[Widget no tema escuro](https://github.com/allanlopesprado/pfsense-sdwan/releases/latest/download/widget-dark-554.png) · [Tela Status](https://github.com/allanlopesprado/pfsense-sdwan/releases/latest/download/status-pfSense.png) · [Tela Updates](https://github.com/allanlopesprado/pfsense-sdwan/releases/latest/download/updates-pfSense.png)
+
+| Ambiente | Uso |
+| --- | --- |
+| **pfSense CE 2.9.1 padrão** | Monitoramento de gateways, avaliação de SLAs e recomendação de caminho. |
+| **pfSense CE 2.9.1 com o core de laboratório** | Ensaio de encaminhamento por política com o [adaptador do core](core/README.md) e um grupo nativo dedicado. |
 
 ## Como instalar pelo Diagnostics → Command Prompt
 
-Use um clone de laboratório com acesso administrativo. O próprio firewall baixa o pacote por HTTPS. O instalador cuida apenas dos arquivos do pacote. A integração avançada depende do suporte correspondente no core do clone. O binário publicado no GitHub é um pacote local de laboratório sem assinatura de repositório.
-
-1. Abra **Diagnostics → Command Prompt**. No campo **Execute Shell Command**, execute `cat /etc/version && pkg config ABI`. Confira a versão do pfSense e a compatibilidade com o pacote produzido para `FreeBSD:16:*`.
-2. Cole a linha abaixo no mesmo campo e clique em **Execute**. Ela baixa o arquivo de uma revisão fixa em uma pasta temporária privada, confere o SHA-256 e instala o pacote se a verificação passar. A pasta é removida ao terminar.
+1. Em um clone de laboratório, abra **Diagnostics → Command Prompt** com acesso administrativo. Use `cat /etc/version && pkg config ABI` para conferir o **CE 2.9.1** e o ABI **FreeBSD:16:amd64**.
+2. Execute a linha abaixo. Ela baixa o pacote de uma revisão fixa em um diretório temporário, valida seu SHA-256 e instala com `pkg`.
 
 <!-- install-command -->
 ```sh
 d=$(mktemp -d /tmp/sdwan.XXXXXXXX) && (trap 'rm -rf "$d"' EXIT; p="$d/pfSense-pkg-SDWAN-0.4.13.pkg"; fetch -o "$p" 'https://raw.githubusercontent.com/allanlopesprado/pfsense-sdwan/0b563428ac08461f3285ee04eb2935652dbd4db3/dist/pfSense-pkg-SDWAN-0.4.13.pkg' && sha256 -c 76f50190263f249f21f72102ee24c9aa1229be3116abb392b4734e4e51b35e0e "$p" && pkg add "$p")
 ```
 
-3. No registro do pacote, o pfSense inicia o serviço ou reinicia a instância que já está rodando. Confira a versão e o estado do serviço com o comando abaixo. O resultado esperado inclui `pfSense-pkg-SDWAN-0.4.13` e a indicação de que o serviço está em execução.
+3. Abra **Services → SD-WAN**. Confira o serviço em **Status → Services** e a versão instalada em **SD-WAN → Updates**.
 
-```sh
-pkg query '%n-%v' pfSense-pkg-SDWAN && /usr/local/etc/rc.d/sdwand.sh status
-```
+Se o registro da WebGUI for adiado durante a instalação, aguarde o PHP-FPM voltar e execute `/usr/local/bin/php -f /etc/rc.packages pfSense-pkg-SDWAN POST-INSTALL`. [Instalação e verificação em laboratório](docs/LAB.pt-BR.md#construção-e-instalação)
 
-4. Recarregue a WebGUI e abra **Services → SD-WAN**. Se a saída indicar que o registro foi adiado porque o PHP-FPM estava parado, aguarde a WebGUI voltar e execute `/usr/local/bin/php -f /etc/rc.packages pfSense-pkg-SDWAN POST-INSTALL`. Confira de novo o menu e o serviço.
+## Configurar e atualizar
 
-[Pacote experimental 0.4.13](dist/pfSense-pkg-SDWAN-0.4.13.pkg) · [SHA-256](dist/pfSense-pkg-SDWAN-0.4.13.pkg.sha256) · [Command Prompt na documentação Netgate](https://docs.netgate.com/pfsense/en/latest/diagnostics/command-prompt.html)
+1. Confirme as medições em **Status → Gateways** e adicione os links em **Services → SD-WAN → Members**.
+2. Defina os limites de RTT e perda em **Performance SLAs** e associe os links a uma política em **Policies**.
+3. Acompanhe o resultado em **Status** e **Diagnostics**. Em **Status → Dashboard**, use **+ → SD-WAN** para exibir o widget.
 
-## Monitorar gateways e comparar caminhos
+Para atualizar uma instalação a partir da **0.4.8**, abra **SD-WAN → Updates**, clique em **Check GitHub** e selecione **Upgrade to …** quando houver versão disponível. A ação usa o privilégio nativo de instalação de pacotes.
 
-1. Em **Status → Gateways**, confirme que o gateway tem monitoramento ativo e métricas recentes. Em **Services → SD-WAN → Members**, cadastre esse gateway e seu custo.
-2. Em **Performance SLAs**, defina os limites de tempo de ida e volta (RTT) e perda. Em **Policies**, selecione o SLA e o membro. **Um membro** permite acompanhar o SLA de um único link. Se ele falhar, a política fica sem alternativa.
-3. Para comparar caminhos, cadastre **dois ou mais gateways** e inclua-os na mesma política. Use a mesma família IP e destinos de monitoramento que representem o serviço avaliado. Selecione menor custo ou menor RTT. Um empate preserva a ordem dos candidatos.
-4. Em **Status**, confira as medições e a recomendação. **Diagnostics** mostra a avaliação de cada candidato. No clone, introduza perda controlada no caminho preferido e acompanhe o resultado após a janela de medição do dpinger.
+[Logs e severidade no pfSense](https://docs.netgate.com/pfsense/en/latest/monitoring/logs/settings.html) · [Remoção e retorno de versão](docs/LAB.pt-BR.md#remoção-e-retorno-à-versão-anterior)
 
-O serviço lê os sockets do monitor de gateways do pfSense. Uma amostra ausente ou inválida torna o membro inelegível. O editor salva as configurações em uma seção própria de `config.xml`. O último resultado é publicado atomicamente em `/var/run` e expira em 30 segundos.
+## Desenvolvimento e validação
 
-**A instalação começa em observação.** No firewall padrão, a recomendação indica qual caminho atenderia ao SLA. O encaminhamento experimental requer um clone com a integração correspondente compilada no core. Instalar o arquivo `.pkg` não aplica o patch ao sistema. A configuração de IPsec, a rota padrão, o failover CARP e a sincronização entre nós são administrados pelo pfSense. Em **Services → SD-WAN → Forwarding**, veja a prévia de uma política com um grupo nativo dedicado. O botão **Bind policy to this group** depende do suporte do core, dos privilégios e dos resultados de validação. Para comparar WANs e túneis VTI e testar o retorno de cada fluxo, consulte a matriz de integração. [Encaminhamento, assimetria, HA e IPsec](docs/INTEGRACAO.pt-BR.md)
+- [Versionamento e publicação](docs/VERSIONAMENTO.pt-BR.md)
+- [Matriz de cenários e testes](docs/VALIDACAO.pt-BR.md)
+- [Resultados e evidências de laboratório](docs/RESULTADOS.pt-BR.md)
+- [Integração com IPsec, CARP, NAT e rotas](docs/INTEGRACAO.pt-BR.md)
+- [Interoperabilidade com FortiOS](docs/FORTIOS.pt-BR.md)
 
-[Preparar o core de laboratório](core/README.md) · [Interoperabilidade com FortiOS e plano de testes](docs/FORTIOS.pt-BR.md)
-
-## Exibir o widget
-
-Em **Status → Dashboard**, clique em **+** e selecione **SD-WAN**. O widget mostra nome e IP do gateway, RTT, variação de RTT (RTTsd), perda e estado. Quando há membros SD-WAN, a tabela mostra os gateways desses membros e indica as políticas que os recomendam. Na configuração inicial, a tabela mostra os gateways nativos do firewall. O título abre **Status** do pacote. Para retirar o widget, clique no **×**.
-
-## Consultar eventos no log do pfSense
-
-Abra **Status → System Logs → System → General** e filtre o campo **Process** por `sdwan`. O botão **System Logs** nas abas **Status** e **Diagnostics** aplica esse filtro. Os eventos registram início e parada do serviço, alterações na recomendação de caminhos, falhas e recuperação da coleta. A exibição segue a severidade configurada no pfSense. [Configurações de log do pfSense](https://docs.netgate.com/pfsense/en/latest/monitoring/logs/settings.html)
-
-## Consultar versões
-
-A partir da **0.4.8**, abra **Services → SD-WAN → Updates**, clique em **Check GitHub** e depois em **Upgrade to …** quando houver uma versão nova publicada. O botão exige o privilégio nativo de instalação de pacotes. O firewall usa HTTPS e seu proxy configurado, verifica o SHA-256 e os dados do pacote, instala com `pkg` e confirma que o observador voltou. Se o botão ainda não existir, use o instalador acima uma vez.
-
-**System → Package Manager → Installed Packages** utiliza o catálogo do produto. Um pacote instalado diretamente de um arquivo pode ficar ausente dessa lista. Para distribuição e atualização pelo catálogo oficial, a Netgate precisa avaliar o port para inclusão na árvore de pacotes e na branch da versão desejada. [Gerenciador de pacotes](https://docs.netgate.com/pfsense/en/latest/packages/manager.html) · [Desenvolvimento e publicação de pacotes](https://docs.netgate.com/pfsense/en/latest/development/develop-packages.html)
-
-## Remover o pacote
-
-Para retirar o pacote do clone, abra **Services → SD-WAN → Forwarding → Configured bindings**, use **Remove binding** em cada grupo vinculado e confira o caminho de uma nova conexão. Em **Diagnostics → Command Prompt**, execute o comando abaixo. Na desinstalação, o pacote solicita a parada do serviço e remove o arquivo de amostras. [Remoção e retorno à versão anterior](docs/LAB.pt-BR.md#remoção-e-retorno-à-versão-anterior)
-
-```sh
-pkg delete -y pfSense-pkg-SDWAN
-```
-
-Recarregue a WebGUI e confirme que o menu e o widget deixaram de estar disponíveis. No Command Prompt, execute os comandos abaixo. Após a remoção, a consulta do pacote retorna um código diferente de zero, a busca do processo fica vazia e a verificação final imprime a confirmação de remoção dos arquivos.
-
-```sh
-pkg info -e pfSense-pkg-SDWAN; echo "pkg info retornou $?"
-pgrep -lf '/usr/local/sbin/[s]dwand\.php'
-test ! -e /usr/local/www/sdwan/status.php && test ! -e /usr/local/www/widgets/widgets/sdwan.widget.php && test ! -e /var/run/sdwan-observer.json && test ! -e /var/run/sdwan-observer.json.events && echo "Arquivos removidos"
-```
-
-## Histórico de publicação
-
-| Versão | Distribuição e recursos |
-|---|---|
-| 0.4.3 | Filtro nativo de logs para perfis delegados, permissões de encaminhamento uniformes e publicação com todas as baterias do Actions. [Notas](docs/releases/v0.4.3.md) |
-| 0.4.4 | Nova tentativa após rejeição da recarga do filtro, suporte de laboratório ao core CE 2.9.1 e testes de tráfego IPv6 com dois caminhos. [Notas](docs/releases/v0.4.4.md) |
-| 0.4.5 | Widget alinhado ao dashboard, validação de Monitor IP e ensaio com dpinger real. [Notas](docs/releases/v0.4.5.md) |
-| 0.4.13 | Controles nativos de serviço na barra do SD-WAN. [Notas](docs/releases/v0.4.13.md) |
-| 0.4.12 | Nome sdwan e atalhos nativos em Status → Services. [Notas](docs/releases/v0.4.12.md) |
-| 0.4.11 | Correção do foco inicial em System Logs. [Notas](docs/releases/v0.4.11.md) |
-| 0.4.10 | Remoção do atalho Installed Packages na aba Updates. [Notas](docs/releases/v0.4.10.md) |
-| 0.4.9 | Tabela do widget alinhada ao monitoramento de gateways. [Notas](docs/releases/v0.4.9.md) |
-| 0.4.8 | Atualização do pacote pela aba Updates. [Notas](docs/releases/v0.4.8.md) |
-| 0.4.7 | Widget de monitoramento por gateway com RTT, perda e estado. [Notas](docs/releases/v0.4.7.md) |
-| 0.4.6 | Matriz de um a três enlaces, verificação de dependências físicas e destino protegido para VTI. [Notas](docs/releases/v0.4.6.md) · [Matriz de validação](docs/VALIDACAO.pt-BR.md) |
-| 0.4.2 | Tabelas, edição, diagnósticos e botões seguindo os componentes nativos do pfSense CE 2.9.1. [Notas](docs/releases/v0.4.2.md) |
-| 0.4.1 | Publicação no GitHub Releases. O serviço mantém a conexão com o syslog para preservar eventos consecutivos durante uma pausa do leitor. |
-| 0.4.0 | Pacote experimental disponibilizado em `main`. Revisão da WebGUI e do widget, eventos SD-WAN no log geral do pfSense e consulta de versão com indicação de maturidade. |
-| 0.3.0 | Versão de laboratório com prévia na instalação padrão e encaminhamento opcional em imagem com a ABI do core. [Revisão publicada](https://github.com/allanlopesprado/pfsense-sdwan/tree/439f140540b5493408c15f89d90a13f316993ab1) |
-| 0.2.0 | Observação da saúde dos gateways, SLAs e recomendação de caminhos. [Revisão publicada](https://github.com/allanlopesprado/pfsense-sdwan/tree/ef7d32da3a09cd5d33867eccae07588276e0cb4b) |
-
-## Evidências de laboratório
-
-Veja os resultados da troca de WAN, do tráfego de retorno com NAT, da transferência do VIP e dos testes de túnel, com links para os jobs e as limitações do ambiente. [Resultados de laboratório](docs/RESULTADOS.pt-BR.md)
-
-## Verificação de desenvolvimento
-
-Execute a suíte com PHP CLI 8.2 ou superior, Python 3 e uma shell POSIX.
-
-```sh
-sh tests/run.sh
-```
-
-A suíte verifica o port, a correspondência entre pacote e código, o índice de versão do GitHub, a interface e o motor com dados controlados. O roteiro de homologação detalha o que medir em um clone real, inclusive instalação, atualização, remoção e comportamento durante falhas. [Roteiro de laboratório e construção do port](docs/LAB.pt-BR.md)
-
-O workflow **Build pfSense package** constrói duas vezes e compara os pacotes antes de disponibilizar o artefato. Ele roda nas branches `build/**` ou manualmente no GitHub Actions. A publicação em `main` espera a WebGUI, FreeBSD e IKEv2.
-
-Após instalar no appliance, use [`verify-appliance.sh`](tools/verify-appliance.sh) com a versão esperada. Execute o script no pfSense. Ele confere integridade, registros da WebGUI, serviço e amostra atual em modo de leitura.
+Execute `sh tests/run.sh` com PHP CLI 8.2+, Python 3 e uma shell POSIX. Após instalar, use [`verify-appliance.sh`](tools/verify-appliance.sh) com a versão esperada para conferir o pacote, os registros da WebGUI, o serviço e a amostra atual.
