@@ -87,6 +87,11 @@ function sdwan_can_view_forwarding(): bool {
 	    isAllowedPage('/system_gateway_groups.php');
 }
 
+function sdwan_can_edit_forwarding(): bool {
+	return sdwan_can_view_forwarding() && isAllowedPage('/firewall_rules_edit.php') &&
+	    isAllowedPage('/system_gateway_groups_edit.php');
+}
+
 /* Only report a VTI transport when its Phase 1 names an assigned interface.
  * A gateway group, VIP or unrecognized tunnel has no known single transport. */
 function sdwan_vti_transports(array $interfaces, array $phases1, array $phases2): array {
@@ -286,7 +291,7 @@ function sdwan_validate_config(array $config, ?array $gateways, array $previous 
 	return [];
 }
 
-function sdwan_save_config(array $candidate, string $expected_revision): array {
+function sdwan_save_config(array $candidate, string $expected_revision, bool $allow_forwarding_changes = false): array {
 	require_once('config.inc');
 	/* Serialize competing WebGUI package edits; write_config() owns the XML lock. */
 	$lock = try_lock('sdwan-settings', 5);
@@ -308,19 +313,22 @@ function sdwan_save_config(array $candidate, string $expected_revision): array {
 		if ($current === $candidate) {
 			return [];
 		}
+		$binding_rows = null;
 		if (config_get_path('gateways/sdwan_bindings/item', [])) {
 			require_once(__DIR__ . '/sdwan_steering.inc');
-			foreach (sdwan_steering_bindings() as $binding) {
-				$policy = $binding['policy'];
-				if (sdwan_steering_policy_revision($candidate, $policy) !== sdwan_steering_policy_revision($current, $policy)) {
-					return ['Roll back the active forwarding binding before changing its policy, SLA, or member definitions.'];
-				}
+			try {
+				$update = sdwan_steering_policy_edit($current, $candidate, $allow_forwarding_changes);
+			} catch (UnexpectedValueException $error) {
+				return [$error->getMessage()];
 			}
+			if ($update['errors']) {
+				return $update['errors'];
+			}
+			$binding_rows = $update['rows'];
 		}
-		if (!is_array(config_set_path(SDWAN_CONFIG_PATH, sdwan_encode_config($candidate)))) {
-			return ['Cannot update the SD-WAN section in the pfSense configuration.'];
-		}
-		if (!is_array(write_config('Updated SD-WAN observer settings'))) {
+		if (!is_array(config_set_path(SDWAN_CONFIG_PATH, sdwan_encode_config($candidate))) ||
+		    ($binding_rows !== null && !is_array(config_set_path(SDWAN_BINDINGS_PATH, ['item' => $binding_rows]))) ||
+		    !is_array(write_config('Updated SD-WAN policy settings'))) {
 			config_read_file(false, false);
 			return ['pfSense could not save the SD-WAN configuration.'];
 		}

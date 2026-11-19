@@ -177,6 +177,49 @@ function sdwan_steering_policy_revision(array $config, string $name): ?string {
 	return sdwan_config_revision($inputs);
 }
 
+/* Update policy inputs and their bound revisions in the caller's single XML
+ * write. A settings edit never expands the approved native forwarding scope. */
+function sdwan_steering_policy_edit(array $current, array $candidate, bool $allowed): array {
+	$updated = [];
+	$native = null;
+	foreach (sdwan_steering_bindings() as $group => $binding) {
+		$old = sdwan_steering_policy_revision($current, $binding['policy']);
+		$new = sdwan_steering_policy_revision($candidate, $binding['policy']);
+		if ($new === $old) {
+			continue;
+		}
+		if (!$allowed) {
+			return ['errors' => ['Editing an active forwarding policy requires access to edit firewall rules and gateway groups.'], 'rows' => null];
+		}
+		if (!sdwan_steering_supported()) {
+			return ['errors' => ['The native forwarding integration is unavailable. Review the binding under Forwarding.'], 'rows' => null];
+		}
+		$native ??= sdwan_steering_native();
+		$check = sdwan_steering_preflight($candidate, $binding['policy'], $group, $native);
+		$approved = $check['binding'];
+		if ($new === null || $old !== $binding['policy_revision'] || $approved === null ||
+		    $approved['rules_revision'] !== $binding['rules_revision'] || $approved['trackers'] !== $binding['trackers'] ||
+		    count($approved['gateways']) !== count($binding['gateways']) ||
+		    array_diff($approved['gateways'], $binding['gateways'])) {
+			return ['errors' => ["Review the {$group} binding under Forwarding before changing its policy members or native scope.", ...$check['errors']],
+			    'rows' => null];
+		}
+		$updated[$group] = ['policy_revision' => $new, 'gateways' => ['item' => $approved['gateways']]];
+	}
+	if (!$updated) {
+		return ['errors' => [], 'rows' => null];
+	}
+	$rows = sdwan_steering_rows();
+	foreach ($rows as &$row) {
+		$group = sdwan_steering_group($row['group'] ?? null);
+		if (isset($updated[$group])) {
+			$row = array_replace($row, $updated[$group]);
+		}
+	}
+	unset($row);
+	return ['errors' => [], 'rows' => $rows];
+}
+
 function sdwan_steering_revision(): string {
 	return sdwan_config_revision([sdwan_get_config(), sdwan_steering_rows(), sdwan_steering_native()]);
 }
@@ -310,6 +353,60 @@ function sdwan_steering_observations(array $config, array $snapshot, array $prev
 		$states[$group] = sdwan_steering_state($config, $binding, $result, $previous[$group] ?? [], $snapshot['generated_at']);
 	}
 	return $states;
+}
+
+/* Read only the rule descriptions required to verify an approved tracker.
+ * The WebGUI never displays the raw output. */
+function sdwan_steering_pf_rules(): ?array {
+	if (!function_exists('exec') || !is_executable('/sbin/pfctl') || !is_executable('/bin/timeout')) {
+		return null;
+	}
+	exec('/bin/timeout 2 /sbin/pfctl -sr 2>/dev/null', $lines, $status);
+	return $status === 0 ? $lines : null;
+}
+
+function sdwan_steering_pf_status(array $binding, array $state, array $inventory, ?array $lines): string {
+	if ($lines === null) {
+		return 'unavailable';
+	}
+	if (!array_key_exists('gateway', $state) || ($state['revision'] ?? null) !== sdwan_config_revision($binding)) {
+		return 'pending';
+	}
+	$target = $state['gateway'];
+	if ($target !== null && (!is_string($target) || !in_array($target, $binding['gateways'], true))) {
+		return 'pending';
+	}
+	$gateway = $inventory[$target ?? ''] ?? [];
+	$matched = [];
+	foreach ($lines as $line) {
+		if (!preg_match('/\bridentifier ([0-9]+)\s*$/D', $line, $identifier) ||
+		    !in_array($identifier[1], $binding['trackers'], true)) {
+			continue;
+		}
+		[$rule] = explode(' label "', $line, 2);
+		if ($target === null) {
+			if (!str_starts_with($rule, 'block ')) {
+				return 'pending';
+			}
+		} else {
+			if (!str_starts_with($rule, 'pass ') ||
+			    !preg_match('/\broute-to\s+\(\s*([^\s()]+)\s+([^\s()]+)\s*\)/', $rule, $path) ||
+			    $path[1] !== ($gateway['device'] ?? null)) {
+				return 'pending';
+			}
+			$address = $gateway['address'] ?? '';
+			$next_hop = @inet_pton(explode('%', $path[2], 2)[0]);
+			if ($next_hop === false || ($address !== 'dynamic' &&
+			    $next_hop !== @inet_pton(explode('%', $address, 2)[0]))) {
+				return 'pending';
+			}
+		}
+		$matched[$identifier[1]] = true;
+	}
+	if (count($matched) !== count($binding['trackers'])) {
+		return 'pending';
+	}
+	return $target === null ? 'blocked' : 'applied';
 }
 
 /* Exclude ongoing preference timers from the native filter reload signature. */
