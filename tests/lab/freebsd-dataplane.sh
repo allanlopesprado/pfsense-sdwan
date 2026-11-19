@@ -235,8 +235,21 @@ if [ -n "${SDWAN_RENDERED_RULES:-}" ]; then
     done
     grep -Fqx '198.51.100.1 scoped-before' "$work/scoped"
     grep -Fqx '198.51.100.1 control-before' "$work/control-reconnect"
-    steer b
     jexec "$firewall" pfctl -vvss >"$work/states-reconnect"
+    if ! grep -Eq 'ridentifier[[:space:]]+41001([[:space:]]|$)' "$work/states-reconnect"; then
+        # FreeBSD 15's pfctl exposes state rule ordinals only. For the
+        # disposable test, resolve the ordinal in this same generation
+        # before changing the rules. The deployed parser uses ridentifier
+        # directly on pfSense and never guesses from rule order.
+        ordinal=$(jexec "$firewall" pfctl -vvsr | awk '/ridentifier 41001$/{sub(/^@/,"",$1); print $1}')
+        test -n "$ordinal"
+        awk -v ordinal="$ordinal" '{
+            print
+            if ($0 ~ ("(^|[[:space:]])rule " ordinal "([[:space:],]|$)")) print "    ridentifier 41001"
+        }' "$work/states-reconnect" >"$work/states-identifiers"
+        mv "$work/states-identifiers" "$work/states-reconnect"
+    fi
+    steer b
     php -r '
         require $argv[1];
         foreach (sdwan_steering_state_ids(file($argv[2]), ["41001"], $argv[3], "198.51.100.2") as $id) {
