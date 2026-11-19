@@ -15,6 +15,16 @@ O teste de VTI e o teste de failover CARP usam topologias diferentes. O teste de
 
 A VM executou FreeBSD 15. A fonte pública do gerador do pfSense usada nos ensaios se identifica como `2.9.0-DEVELOPMENT`, revisão `9363ac5b8651a1c7a333180425ce7719070f95f9`. O daemon usou amostras controladas e o tráfego TCP atravessou interfaces reais de VNET. A captura em um appliance com dpinger medindo degradação física continua necessária para determinar o tempo de convergência de ponta a ponta. [Execução com regras do pfSense e tráfego no FreeBSD](https://github.com/allanlopesprado/pfsense-sdwan/actions/runs/44459108859)
 
+## Widget e WebGUI da versão 0.4.0
+
+O pacote publicado para esta versão ocupa **28.924 bytes** e tem SHA-256 `67251efd7fd8841fb26b65dbfead379867ddf5274adfe456766d3db182d8c7d8`. Duas construções independentes produziram os mesmos bytes. O instalador verifica esse valor antes de chamar o gerenciador de pacotes. [Arquivo fixado no instalador](https://github.com/allanlopesprado/pfsense-sdwan/blob/c0372cadc2ce6be6afa7c01c0db85bba23bc26d6/dist/pfSense-pkg-SDWAN-0.4.0.pkg)
+
+No Chromium, o widget usou o CSS dos temas claro e escuro do pfSense a 360 e 640 px. Nas quatro combinações, os dados de teste e os identificadores longos couberam sem rolagem horizontal. O foco do teclado permaneceu na política selecionada após a atualização AJAX. O contraste mínimo medido nos valores e legendas foi de 12:1 no tema claro e 10,05:1 no escuro. Os formulários e links foram testados com a navegação, os filtros de logs, a verificação de privilégios e a proteção CSRF da fonte de referência. [Amostras visuais e métricas](https://github.com/allanlopesprado/pfsense-sdwan/actions/runs/44461547088/artifacts/14500182251)
+
+## Eventos em System Logs
+
+O teste extraiu o emissor do pacote 0.4.0 e o executou com o `syslogd` do FreeBSD 15.1. O leitor usado pela página General reconheceu cinco eventos distintos do processo `sdwan` no formato RFC 3164 e cinco no RFC 5424 com a severidade padrão. Com o limite ajustado para `warning`, dois eventos ficaram visíveis. Uma sequência de 25 falhas idênticas gerou um único erro. A mensagem do processo de controle `dpinger` seguiu para o log de gateways. A prova exercita o emissor, as regras de roteamento de logs e o parser reais. A visita à página em um appliance CE 2.9.1 permanece na matriz de homologação. [Log completo da execução](https://github.com/allanlopesprado/pfsense-sdwan/actions/runs/44462039273/job/135351197785)
+
 ## Negociação IKEv2 com dois caminhos
 
 Dois processos strongSwan do Ubuntu 24.04 negociaram duas IKE_SAs e dois CHILD_SAs independentes. O teste observou ESP nas duas direções de cada enlace e contadores de dados nas duas pontas. Durante a renovação do CHILD_SA e depois da IKE_SA do caminho A, o caminho B manteve seus SPIs e continuou transportando dados. Ao remover a associação A, as sondagens protegidas desse caminho falharam nos dois sentidos e os contadores de tráfego em claro permaneceram estáveis nos dois enlaces. [Execução com strongSwan 5.9.13](https://github.com/allanlopesprado/pfsense-sdwan/actions/runs/44460493186/job/135345795505)
