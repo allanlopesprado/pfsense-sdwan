@@ -163,6 +163,28 @@ $n['rules'][0]['destination'] = ['address' => '0.0.0.0/0'];
 $n['rules'][1] = guard_for($n['rules'][0]);
 preflight_check($n, true, 'IPv4 default');
 $n = $native;
+$n['interfaces']['lan']['ipaddr'] = '10.23.0.254';
+$n['interfaces']['lan']['subnet'] = '24';
+$n['full_tunnel_sources'] = ['inet' => ['10.23.0.128/25']];
+preflight_check($n, false, 'native WAN rule overlaps the policy IPsec full-tunnel source');
+$n['full_tunnel_sources']['inet'] = ['10.23.1.0/24'];
+preflight_check($n, true, 'unrelated source remains routed by SD-WAN');
+$n['rules'][0]['source'] = ['address' => '10.23.0.129'];
+$n['rules'][1] = guard_for($n['rules'][0]);
+$n['full_tunnel_sources']['inet'] = ['10.23.0.128/25'];
+preflight_check($n, false, 'literal host inside the protected prefix');
+$n['rules'][0]['source'] = ['address' => '10.23.0.12'];
+$n['rules'][1] = guard_for($n['rules'][0]);
+preflight_check($n, true, 'literal host outside the protected prefix');
+$n['full_tunnel_sources']['inet'] = [null];
+preflight_check($n, false, 'unresolved IPsec local source is treated as a possible overlap');
+$n['full_tunnel_sources'] = ['inet6' => ['2001:db8::/64']];
+preflight_check($n, true, 'IPv6 full tunnel does not conflict with an IPv4 rule');
+if (!sdwan_preflight_prefixes_overlap('2001:db8:1:8000::5', '2001:db8:1:8000::/49') ||
+    sdwan_preflight_prefixes_overlap('2001:db8:1:7fff::5', '2001:db8:1:8000::/49')) {
+	throw new Exception('IPv6 non-octet subnet boundaries must be respected');
+}
+$n = $native;
 $n['filtermode'] = 'if_ipsec';
 $n['vips'] = [['uniqid' => 'carp', 'mode' => 'carp', 'interface' => 'wan']];
 foreach ([1 => ['ISP_A', '_vipcarp'], 2 => ['ISP_B', 'opt1']] as $id => [$name, $transport]) {
