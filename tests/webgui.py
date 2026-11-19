@@ -17,6 +17,7 @@ class Choices(HTMLParser):
         super().__init__()
         self.fields, self.field = {}, None
         self.tokens = []
+        self.revisions = []
         self.posts = 0
         self.feed(html)
 
@@ -29,6 +30,8 @@ class Choices(HTMLParser):
             self.posts += 1
         if tag == "input" and attrs.get("name") == "__csrf_magic":
             self.tokens.append(attrs["value"])
+        if tag == "input" and attrs.get("name") == "revision":
+            self.revisions.append(attrs["value"])
         if self.field and tag == "option":
             self.fields[self.field].append((attrs["value"], "selected" in attrs))
 
@@ -41,10 +44,10 @@ def run(php, classes):
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
         shutil.copytree(SOURCE / "www/sdwan", root / "sdwan")
-        for module in ("sdwan.inc", "sdwan_engine.inc"):
+        for module in ("sdwan.inc", "sdwan_engine.inc", "sdwan_preflight.inc", "sdwan_steering.inc"):
             shutil.copyfile(SOURCE / "pkg" / module, root / module)
-        ui = root / "sdwan/ui.inc.php"
-        ui.write_text(ui.read_text().replace("'/usr/local/pkg/", "__DIR__ . '/../"))
+        for ui in (root / "sdwan/ui.inc.php", root / "sdwan/forwarding.php"):
+            ui.write_text(ui.read_text().replace("'/usr/local/pkg/", "__DIR__ . '/../"))
         engine = root / "sdwan_engine.inc"
         engine.write_text(engine.read_text().replace("'/var/run/sdwan-observer.json'", "__DIR__ . '/observer.json'"))
         (root / "guiconfig.inc").write_text("<?php require dirname($classes) . '/csrf/csrf-magic.php';")
@@ -116,6 +119,47 @@ def run(php, classes):
         stale = request("status", snapshot={**snapshot, "generated_at": 1})
         assert "Waiting for current gateway measurements" in stale and "2 of 2" not in stale
         print("ok - native CSRF verifies form posts; status checks permissions, path diversity and sample freshness")
+
+        native_group = {"name": "PBR", "item": ["GW1|1|address", "GW2|2|address"]}
+        rule = {"tracker": "50321", "interface": "lan", "gateway": "PBR", "ipprotocol": "inet", "type": "pass",
+                "source": {"address": "192.0.2.9"}, "destination": {"address": "198.51.100.6"},
+                "descr": "Voice <A>"}
+        guard = {**rule, "tracker": "50322", "type": "block", "descr": "Guard for Voice"}
+        del guard["gateway"]
+        fixture = {"gateways/gateway_group": [native_group], "filter/rule": [rule, guard],
+                   "interfaces": {n: {"enable": "", "if": d} for n, d in
+                                  (("lan", "em0"), ("wan", "em1"), ("opt1", "em2"))},
+                   "gateways/gateway_item": [{"name": "GW1", "interface": "wan"}, {"name": "GW2", "interface": "opt1"}]}
+        config = {**config, "policies": [{**config["policies"][0], "members": ["1", "01"]}]}
+        names = {"policy": "VOICE", "group": "PBR"}
+        stock = request("forwarding", native=fixture, get=names)
+        assert "matches the native group" in stock and "50321" in stock and "Voice &lt;A&gt;" in stock, stock
+        assert "Preview mode" in stock and 'value="bind"' not in stock
+        denied = request("forwarding", native=fixture, get=names, privileges={"/firewall_rules.php": False})
+        assert "Access to Firewall" in denied and "50321" not in denied
+        protected = request("forwarding", native={**fixture, "gateways/defaultgw4": "PBR"},
+                            steering_abi=True, get=names)
+        assert "system default gateway group" in protected and 'value="bind"' not in protected
+
+        lab = request("forwarding", native=fixture, steering_abi=True, get=names)
+        assert "Experimental" in lab and 'value="bind"' in lab, lab
+        controls = Choices(lab)
+        post = {**names, "action": "bind", "revision": controls.revisions[0], "__csrf_magic": controls.tokens[0]}
+        for options, message in [({}, "previews only"), ({"steering_abi": True,
+                                "privileges": {"/system_gateway_groups_edit.php": False}}, "additional privileges")]:
+            forbidden = request("forwarding", native=fixture, post=post, **options)
+            assert message in forbidden and json.loads(forbidden.split("SAVED=")[1])[0] == 0
+        bound = request("forwarding", native=fixture, post=post, steering_abi=True, capture_bindings=True)
+        assert json.loads(bound.split("SAVED=")[1])[0] == 1, bound
+        data = json.loads(bound.split("BINDINGS=")[1].split("\nSAVED=")[0])
+        orphan = {**fixture, "gateways/sdwan_bindings": data, "gateways/gateway_group": []}
+        rollback = request("forwarding", native=orphan)
+        assert 'value="unbind"' in rollback and 'value="bind"' not in rollback, rollback
+        controls = Choices(rollback)
+        post = {**names, "action": "unbind", "revision": controls.revisions[0], "__csrf_magic": controls.tokens[0]}
+        reverted = request("forwarding", native=orphan, post=post, capture_bindings=True)
+        assert json.loads(reverted.split("SAVED=")[1])[0] == 1 and '"item":[]' in reverted, reverted
+        print("ok - stock preview, native permissions, identified rules, opt-in hook and orphan rollback form")
 
 
 if __name__ == "__main__":

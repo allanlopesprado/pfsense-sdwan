@@ -4,9 +4,13 @@ case "$2" in
 DEINSTALL)
 	# Also stop during removal with an unavailable PHP-FPM service.
 	if [ -x /usr/local/etc/rc.d/sdwand.sh ]; then
-		/usr/local/etc/rc.d/sdwand.sh stop >/dev/null 2>&1 || :
+		SDWAN_PACKAGE_REMOVING=1 /usr/local/etc/rc.d/sdwand.sh stop >/dev/null 2>&1 || :
 	fi
-	rm -f /var/run/sdwan-observer.json
+	if [ -f /usr/local/pkg/sdwan_invalidate.inc ]; then
+		/usr/local/bin/php -f /usr/local/pkg/sdwan_invalidate.inc || exit 1
+	else
+		rm -f /var/run/sdwan-observer.json /var/run/sdwan-observer.json.forwarded
+	fi
 	;;
 POST-DEINSTALL) ;;
 *) exit 0 ;;

@@ -6,10 +6,15 @@ PHP_BIN=${PHP_BIN:-php}
 "$PHP_BIN" -v
 python3 tests/check_port.py
 python3 tools/update-release-index.py --check
+python3 -B tests/package_lifecycle.py "$PHP_BIN"
+python3 -B tests/lab/test_observe_path.py
 find files tests -type f \( -name '*.php' -o -name '*.inc' \) -print0 |
     xargs -0 -n 1 "$PHP_BIN" -l
 "$PHP_BIN" tests/behavior.php
 "$PHP_BIN" tests/policy_topology.php
+"$PHP_BIN" tests/steering_preflight.php
+"$PHP_BIN" tests/steering.php
+python3 -B tests/steering_daemon.py "$PHP_BIN"
 "$PHP_BIN" tests/config_edits.php
 python3 -B tests/widget.py "$PHP_BIN"
 "$PHP_BIN" tests/release.php

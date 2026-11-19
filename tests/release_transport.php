@@ -20,7 +20,7 @@ if (function_exists('curl_init') || function_exists('curl_setopt_array') ||
 	throw new RuntimeException('Run with mocked cURL functions as in tests/run.sh');
 } else {
 	function curl_init($url) {
-		check($url === 'https://raw.githubusercontent.com/allanlopesprado/pfsense-sdwan/main/dist/release.json');
+		check($url === 'https://raw.githubusercontent.com/allanlopesprado/pfsense-sdwan/dev/native-forwarding/dist/release.json');
 		return new stdClass();
 	}
 
@@ -54,7 +54,7 @@ if (function_exists('curl_init') || function_exists('curl_setopt_array') ||
 }
 
 $release = ['version' => '0.2.0', 'sha256' => str_repeat('a', 64)];
-$chunks = str_split(json_encode(['schema' => 1, 'package' => 'pfSense-pkg-SDWAN'] + $release), 6);
+$chunks = str_split(json_encode(['schema' => 1, 'channel' => 'lab', 'package' => 'pfSense-pkg-SDWAN'] + $release), 6);
 $transport_result = true;
 $http_status = 200;
 check(sdwan_release_check() === $release);

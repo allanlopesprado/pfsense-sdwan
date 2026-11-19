@@ -16,6 +16,10 @@
 		<custom_php_service_status_command>mwexec('/usr/local/etc/rc.d/sdwand.sh status', true) === 0</custom_php_service_status_command>
 	</service>
 	<custom_php_install_command>
-		mwexec('/usr/local/etc/rc.d/sdwand.sh start');
+		if (mwexec('/usr/local/etc/rc.d/sdwand.sh status', true) === 0) {
+			mwexec('/usr/local/etc/rc.d/sdwand.sh restart');
+		} else {
+			mwexec('/usr/local/etc/rc.d/sdwand.sh start');
+		}
 	</custom_php_install_command>
 </packagegui>

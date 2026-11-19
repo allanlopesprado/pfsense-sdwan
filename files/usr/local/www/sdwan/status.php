@@ -14,7 +14,7 @@ $can_inspect = isAllowedPage('/sdwan/diagnostics.php');
 $pgtitle = [gettext('Services'), gettext('SD-WAN'), gettext('Status')];
 include('head.inc');
 sdwan_ui_tabs('status');
-print_info_box(gettext('Observer mode. Policy selections are recommendations for new connections. Forwarding uses the existing firewall configuration.'), 'info', false);
+print_info_box(gettext('Recommendations reflect the latest gateway measurements. Check a new connection with Diagnostics > Packet Capture to verify its actual path.'), 'info', false);
 if ($snapshot === null) {
 	print_info_box(gettext('Waiting for current gateway measurements. Check the observer service and Diagnostics.'), 'warning', false);
 } else {

@@ -1,28 +1,28 @@
 # SD-WAN para pfSense CE
 
-A versão **0.2.0** acompanha a qualidade dos gateways e recomenda um caminho por política na WebGUI. O primeiro alvo de homologação é o **pfSense CE 2.9.1**. O pacote é experimental e independente do projeto pfSense e da Netgate.
+Esta branch contém a versão de laboratório **0.3.0**, com observação de gateways e integração experimental de encaminhamento. A versão 0.2.0 do observador continua disponível em `main`. O alvo de homologação é o **pfSense CE 2.9.1**. O pacote é experimental e independente do projeto pfSense e da Netgate.
 
 ## Como instalar pelo Diagnostics → Command Prompt
 
-Use um clone de laboratório com acesso administrativo. O próprio firewall baixa o pacote por HTTPS. O binário publicado no GitHub é um pacote local de laboratório sem assinatura de repositório.
+Use um clone de laboratório com acesso administrativo. O próprio firewall baixa o pacote por HTTPS. O instalador cuida apenas dos arquivos do pacote. A integração avançada depende do suporte correspondente no core do clone. O binário publicado no GitHub é um pacote local de laboratório sem assinatura de repositório.
 
 1. Abra **Diagnostics → Command Prompt**. No campo **Execute Shell Command**, execute `cat /etc/version && pkg config ABI`. Confira a versão do pfSense e a compatibilidade com o pacote produzido para `FreeBSD:16:*`.
 2. Cole a linha abaixo no mesmo campo e clique em **Execute**. Ela baixa o arquivo de uma revisão fixa em uma pasta temporária privada, confere o SHA-256 e instala o pacote se a verificação passar. A pasta é removida ao terminar.
 
 <!-- install-command -->
 ```sh
-d=$(mktemp -d /tmp/sdwan.XXXXXXXX) && (trap 'rm -rf "$d"' EXIT; p="$d/pfSense-pkg-SDWAN-0.2.0.pkg"; fetch -o "$p" 'https://raw.githubusercontent.com/allanlopesprado/pfsense-sdwan/d36dddb6de4c63846cee4d2c0aa6448154274f7d/dist/pfSense-pkg-SDWAN-0.2.0.pkg' && sha256 -c c8f75b540e896b555f840bdb8d3e04304a3942a81515295d1f481ce5482a15d5 "$p" && pkg add "$p")
+d=$(mktemp -d /tmp/sdwan.XXXXXXXX) && (trap 'rm -rf "$d"' EXIT; p="$d/pfSense-pkg-SDWAN-0.3.0.pkg"; fetch -o "$p" 'https://raw.githubusercontent.com/allanlopesprado/pfsense-sdwan/fe20885be522fb680e2c607bb4c298fbfdb76490/dist/pfSense-pkg-SDWAN-0.3.0.pkg' && sha256 -c 6552b2fcbc97de2be53a5c926c7f1539d06514902a42b1eb87f9b0a2aa595476 "$p" && pkg add "$p")
 ```
 
-3. Ao atualizar uma instalação anterior, execute `/usr/local/etc/rc.d/sdwand.sh restart` para carregar o novo observador. Confira a versão e o estado do serviço com o comando abaixo. O resultado esperado inclui `pfSense-pkg-SDWAN-0.2.0` e a indicação de que o serviço está em execução.
+3. No registro da versão 0.3.0, o pacote inicia o serviço ou reinicia a instância que já está rodando. Confira a versão e o estado do serviço com o comando abaixo. O resultado esperado inclui `pfSense-pkg-SDWAN-0.3.0` e a indicação de que o serviço está em execução.
 
 ```sh
 pkg query '%n-%v' pfSense-pkg-SDWAN && /usr/local/etc/rc.d/sdwand.sh status
 ```
 
-4. Recarregue a WebGUI e abra **Services → SD-WAN**. Se ocorrer erro, guarde a saída exibida pelo Command Prompt.
+4. Recarregue a WebGUI e abra **Services → SD-WAN**. Se a saída indicar que o registro foi adiado porque o PHP-FPM estava parado, aguarde a WebGUI voltar e execute `/usr/local/bin/php -f /etc/rc.packages pfSense-pkg-SDWAN POST-INSTALL`. Confira de novo o menu e o serviço.
 
-[Pacote 0.2.0](dist/pfSense-pkg-SDWAN-0.2.0.pkg) · [SHA-256](dist/pfSense-pkg-SDWAN-0.2.0.pkg.sha256) · [Command Prompt na documentação Netgate](https://docs.netgate.com/pfsense/en/latest/diagnostics/command-prompt.html)
+[Pacote de laboratório 0.3.0](dist/pfSense-pkg-SDWAN-0.3.0.pkg) · [SHA-256](dist/pfSense-pkg-SDWAN-0.3.0.pkg.sha256) · [Command Prompt na documentação Netgate](https://docs.netgate.com/pfsense/en/latest/diagnostics/command-prompt.html)
 
 ## Monitorar gateways e comparar caminhos
 
@@ -33,7 +33,9 @@ pkg query '%n-%v' pfSense-pkg-SDWAN && /usr/local/etc/rc.d/sdwand.sh status
 
 O serviço lê os sockets do monitor de gateways do pfSense. Uma amostra ausente ou inválida torna o membro inelegível. O editor salva as configurações em uma seção própria de `config.xml`. O último resultado é publicado atomicamente em `/var/run` e expira em 30 segundos.
 
-**O modo de operação é observação.** O pacote exibe qual caminho atenderia ao SLA. Regras, rotas, NAT e estados do pfSense determinam por onde passa cada sessão. A configuração de IPsec, a rota padrão, o failover CARP e a sincronização entre nós continuam a cargo dos mecanismos nativos. Para comparar WANs e túneis VTI e testar o retorno de cada fluxo, consulte a matriz de integração. [Encaminhamento, assimetria, HA e IPsec](docs/INTEGRACAO.pt-BR.md)
+**A instalação começa em observação.** No firewall padrão, a recomendação indica qual caminho atenderia ao SLA. Nesta branch, o encaminhamento experimental requer um clone com a integração correspondente compilada no core. Instalar o arquivo `.pkg` não aplica o patch ao sistema. A configuração de IPsec, a rota padrão, o failover CARP e a sincronização entre nós são administrados pelo pfSense. Em **Services → SD-WAN → Forwarding**, veja a prévia de uma política com um grupo nativo dedicado. O botão **Bind policy to this group** depende do suporte do core, dos privilégios e dos resultados de validação. Para comparar WANs e túneis VTI e testar o retorno de cada fluxo, consulte a matriz de integração. [Encaminhamento, assimetria, HA e IPsec](docs/INTEGRACAO.pt-BR.md)
+
+[Preparar o core de laboratório](core/README.md) · [Interoperabilidade com FortiOS e plano de testes](docs/FORTIOS.pt-BR.md)
 
 ## Exibir o widget
 
@@ -41,13 +43,13 @@ Em **Status → Dashboard**, clique em **+** e selecione **SD-WAN**. O widget mo
 
 ## Consultar versões
 
-Em **Services → SD-WAN → Updates**, um administrador pode ver a versão instalada no banco local do `pkg`. Clique em **Check GitHub** para consultar a versão publicada e seu SHA-256. A consulta usa HTTPS e as configurações de proxy do firewall. Se houver uma versão nova, o botão **Installation instructions** abre as instruções para a atualização manual.
+Em **Services → SD-WAN → Updates**, um administrador pode ver a versão instalada no banco local do `pkg`. Clique em **Check GitHub** para consultar a versão publicada na branch de laboratório `dev/native-forwarding` e seu SHA-256. A versão 0.2.0 consulta o índice de `main`. A consulta usa HTTPS e as configurações de proxy do firewall. Se houver uma versão nova, o botão **Installation instructions** abre as instruções para a atualização manual.
 
 **System → Package Manager → Installed Packages** utiliza o catálogo do produto. Um pacote instalado diretamente de um arquivo pode ficar ausente dessa lista. Para distribuição e atualização pelo catálogo oficial, a Netgate precisa avaliar o port para inclusão na árvore de pacotes e na branch da versão desejada. [Gerenciador de pacotes](https://docs.netgate.com/pfsense/en/latest/packages/manager.html) · [Desenvolvimento e publicação de pacotes](https://docs.netgate.com/pfsense/en/latest/development/develop-packages.html)
 
 ## Remover o pacote
 
-Em **Diagnostics → Command Prompt**, execute o comando abaixo. Na desinstalação, o pacote solicita a parada do observador e remove o arquivo de amostras.
+Para retirar o pacote do clone, abra **Services → SD-WAN → Forwarding → Configured bindings**, use **Remove binding** em cada grupo vinculado e confira o caminho de uma nova conexão. Em **Diagnostics → Command Prompt**, execute o comando abaixo. Na desinstalação, o pacote solicita a parada do serviço e remove o arquivo de amostras. [Remoção e retorno à versão anterior](docs/LAB.pt-BR.md#remoção-e-retorno-à-versão-anterior)
 
 ```sh
 pkg delete -y pfSense-pkg-SDWAN

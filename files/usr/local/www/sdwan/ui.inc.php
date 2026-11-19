@@ -18,6 +18,7 @@ function sdwan_ui_tabs(string $current): void {
 		'members' => gettext('Members'),
 		'slas' => gettext('Performance SLAs'),
 		'policies' => gettext('Policies'),
+		'forwarding' => gettext('Forwarding'),
 		'diagnostics' => gettext('Diagnostics'),
 		'updates' => gettext('Updates'),
 	];

@@ -74,6 +74,9 @@ def check_packaging():
         for path in top.rglob("*")
         if path.is_file()
     }
+    for path in installed:
+        if path.is_relative_to("etc/inc") and path != Path("etc/inc/priv/sdwan.priv.inc"):
+            fail(f"A pfSense core integration cannot be installed by the package: {path}")
     if plist != installed:
         fail(f"Missing from plist: {sorted(installed - plist)}\n"
              f"Missing source files: {sorted(plist - installed)}")
@@ -91,7 +94,7 @@ def check_packaging():
         if not (FILES / PREFIX / "www" / page).is_file():
             fail(f"Missing GUI for registered menu entry: {url}")
     tabs = (FILES / PREFIX / "www/sdwan/ui.inc.php").read_text()
-    for name in ("status", "slas", "members", "policies", "diagnostics", "updates"):
+    for name in ("status", "slas", "members", "policies", "diagnostics", "updates", "forwarding"):
         if not re.search(r"^\s*'" + name + r"'\s*=>\s*gettext\(", tabs, re.MULTILINE):
             fail(f"Missing SD-WAN tab: {name}")
         if not (FILES / PREFIX / "www/sdwan" / (name + ".php")).is_file():

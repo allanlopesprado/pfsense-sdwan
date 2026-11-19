@@ -1,6 +1,6 @@
 <?php
 // Release metadata is informational. Its contents are never used as an install target.
-const SDWAN_RELEASE_INDEX = 'https://raw.githubusercontent.com/allanlopesprado/pfsense-sdwan/main/dist/release.json';
+const SDWAN_RELEASE_INDEX = 'https://raw.githubusercontent.com/allanlopesprado/pfsense-sdwan/dev/native-forwarding/dist/release.json';
 const SDWAN_RELEASE_MAX_BYTES = 4096;
 
 function sdwan_release_pkg_version(string $value): bool {
@@ -22,7 +22,7 @@ function sdwan_release_parse(string $body): ?array {
 	}
 	$release = json_decode($body, true, 4);
 	if (!is_array($release) || ($release['schema'] ?? null) !== 1 ||
-	    ($release['package'] ?? null) !== 'pfSense-pkg-SDWAN' ||
+	    ($release['package'] ?? null) !== 'pfSense-pkg-SDWAN' || ($release['channel'] ?? null) !== 'lab' ||
 	    !is_string($release['version'] ?? null) ||
 	    !preg_match('/\A(?:0|[1-9][0-9]{0,8})(?:\.(?:0|[1-9][0-9]{0,8})){2}\z/', $release['version']) ||
 	    !is_string($release['sha256'] ?? null) ||

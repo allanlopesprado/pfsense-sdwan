@@ -25,10 +25,15 @@ jobs:
             src/etc/inc
             src/usr/local/www/classes
             src/usr/local/www/csrf
+            src/usr/local/www/system_gateway_groups.php
+          sparse-checkout-cone-mode: false
           persist-credentials: false
+      - name: Verify the build overlay against the pinned pfSense source
+        run: python3 tools/prepare-core.py --source pfsense-core-fixture --out "$RUNNER_TEMP/sdwan-core"
       - name: Verify native XML, privileges and WebGUI form requests
         run: |
           php tests/pfsense_core.php "$GITHUB_WORKSPACE/pfsense-core-fixture"
+          php tests/lab/native-group-removal.php "$GITHUB_WORKSPACE/pfsense-core-fixture"
           python3 tests/webgui.py --classes "$GITHUB_WORKSPACE/pfsense-core-fixture/src/usr/local/www/classes"
   freebsd:
     runs-on: ubuntu-24.04
@@ -46,4 +51,5 @@ jobs:
           run: |
             set -eu
             sh tests/freebsd-install.sh
+            sh tests/lab/freebsd-carp.sh
             sh tests/lab/freebsd-dataplane.sh

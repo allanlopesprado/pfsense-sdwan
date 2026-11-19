@@ -136,7 +136,7 @@ sdwan_ui_tabs($collection);
 if ($errors) {
 	print_input_errors($errors);
 } elseif (isset($_GET['saved'])) {
-	print_info_box(gettext('Observer configuration saved.'), 'success');
+	print_info_box(gettext('SD-WAN configuration saved.'), 'success');
 }
 
 ?>

@@ -105,7 +105,7 @@ load_rules() {
 load_rules
 baseline() {
     jexec "$firewall" pfctl -sn
-    jexec "$firewall" pfctl -sr | awk '!/label "(path-a|path-b|no-member)"/'
+    jexec "$firewall" pfctl -sr | awk '!/label "(descr=)?(path-a|path-b|no-member)"/'
     jexec "$firewall" route -n get default | awk '/gateway:|interface:/ {print}'
 }
 baseline >"$work/baseline"
@@ -149,8 +149,13 @@ expect_roundtrip() {
     echo "ok - $3 TCP request and response observed after NAT to $2"
 }
 counter() {
-    # labels columns: label, evaluations, packets, bytes, in/out totals, states
-    awk -v label="$1" '$1 == label && $3 > 0 {print; seen=1} END {exit !seen}'
+    # pfctl prints every label (the native compiler emits id, tags and
+    # descr), followed by eight numeric fields. Total packets is field 2.
+    awk -v label="$1" 'NF >= 9 && $(NF-6) > 0 {
+        for (i = 1; i <= NF-8; i++) {
+            if ($i == label || $i == "descr=" label) { print; seen = 1; break }
+        }
+    } END {exit !seen}'
 }
 
 if [ -n "${SDWAN_RENDERED_RULES:-}" ]; then
@@ -224,3 +229,4 @@ jexec "$firewall" pfctl -s labels | counter baseline
 baseline >"$work/final"
 cmp "$work/baseline" "$work/final"
 echo 'ok - baseline PF rules, NAT rules and kernel default route survived the path changes'
+sh "$repo/tests/lab/freebsd-vti-no-sa.sh" "$firewall" "$remote" "$wan_a" "$remote_a" "$work"

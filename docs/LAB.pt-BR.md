@@ -1,12 +1,18 @@
 # Homologação em pfSense CE 2.9.1
 
-O pacote 0.2.0 observa as medições dos gateways e recomenda membros para políticas. Neste roteiro, registre se a recomendação acompanha as métricas e se o encaminhamento nativo se mantém durante a instalação, as edições e a remoção. A alteração real de caminhos exige uma versão futura com controle de encaminhamento. [Integração com IPsec, CARP, NAT, estados e rotas](INTEGRACAO.pt-BR.md)
+A versão de laboratório 0.3.0 inclui o observador e a integração experimental de encaminhamento. Registre a revisão do pacote e a do core separadamente. Em um clone com o core padrão, valide o observador e o encaminhamento nativo. Para testar o efeito da escolha de caminhos use uma imagem de laboratório que incorpore a integração de core. [Integração com IPsec, CARP, NAT, estados e rotas](INTEGRACAO.pt-BR.md)
 
 ## Topologia e evidência
 
 Use um clone CE 2.9.1 com console independente. Para testar HA, inclua dois nós pfSense, um peer em outra rede, duas WANs virtuais com degradação independente, uma LAN de clientes e uma rede de sincronização. Use endereços e certificados de laboratório. Registre revisão Git, versão do pacote, arquitetura, versão do peer, nomes reais de interfaces, parâmetros do dpinger e limite de cada SLA. Preserve uma cópia local da configuração e snapshots dos nós antes da instalação.
 
 Para observar um SLA, basta um gateway com monitoramento habilitado. Para comparar alternativas, configure dois ou mais gateways da mesma família IP, com alvos que representem o mesmo serviço e rotas de retorno conhecidas. Se usar VTI, identifique qual VTI corresponde a cada transporte. Para HA, atribua as interfaces VTI na mesma ordem, separadamente nos dois nós. Vincule a Fase 1 ao VIP da WAN que corresponde ao túnel. Teste uma conexão pelo caminho em uso e anote o resultado antes da instalação.
+
+## Dependência do core para o teste de encaminhamento
+
+O pacote instala seus próprios arquivos em `/usr/local` e sua definição de privilégios em `/etc/inc/priv`. O adaptador do gerador de regras faz parte de uma **imagem distinta de laboratório**. A prévia funciona quando a instalação dispõe apenas do pacote. Para testar o vínculo de regras, confira na aba **Forwarding** se a imagem expõe a ABI 1.
+
+O patch tem como referência o commit público `9363ac5b8651a1c7a333180425ce7719070f95f9`. O arquivo `src/etc/version` dessa revisão identifica `2.9.0-DEVELOPMENT`. Antes de preparar a imagem do alvo, compare o gerador de regras e o inventário de gateways com a árvore exata que produzirá o clone. No checkout de **build** da base, valide o patch com `git apply --check /caminho/para/filter-sdwan.patch`; integre o arquivo do adaptador em `src/etc/inc/filter-sdwan.inc` junto da alteração de `filter.inc`. No clone, confira a revisão do core, interfaces e regras compiladas. Um patch que aplica sem conflito ainda requer ensaio de tráfego. [Patch do gerador](../core/filter-sdwan.patch) · [Adaptador da ABI 1](../core/filter-sdwan.inc)
 
 ## Construção e instalação
 
@@ -15,8 +21,8 @@ Para baixar e instalar diretamente pela WebGUI, siga [Como instalar pelo Diagnos
 O diretório [dist](../dist/) contém o .pkg de laboratório e seu checksum. Para usar o artefato já construído, baixe os dois arquivos no mesmo diretório do clone e confira a integridade com o comando abaixo. Compare a saída com o hash publicado antes de usar `pkg add`.
 
 ```sh
-sha256 -q pfSense-pkg-SDWAN-0.2.0.pkg
-cat pfSense-pkg-SDWAN-0.2.0.pkg.sha256
+sha256 -q pfSense-pkg-SDWAN-0.3.0.pkg
+cat pfSense-pkg-SDWAN-0.3.0.pkg.sha256
 ```
 
 Para compilar o port, use um builder FreeBSD/pfSense com a árvore de ports, dependências e ABI compatíveis com o appliance alvo. O diretório que contém o Makefile deste projeto é o port. Disponibilize-o como `net/pfSense-pkg-SDWAN` na árvore de trabalho do builder. Dentro desse diretório, execute:
@@ -61,6 +67,17 @@ pkg info -l pfSense-pkg-SDWAN
 
 Consulte a versão com `pkg query '%n-%v' pfSense-pkg-SDWAN` e abra **Services → SD-WAN**. Na aba **Updates**, confira a versão instalada e clique em **Check GitHub** para comparar com o índice público do projeto. **System → Package Manager** usa o repositório do produto e pode omitir um pacote adicionado diretamente de um arquivo. A inclusão no catálogo passa pela avaliação da Netgate. Registre a saída original de qualquer falha no registro, ABI, dependência, checksum ou menu. [Guia do catálogo](https://docs.netgate.com/pfsense/en/latest/packages/manager.html) · [Processo de inclusão de ports](https://docs.netgate.com/pfsense/en/latest/development/develop-packages.html)
 
+## Remoção e retorno à versão anterior
+
+O laboratório precisa de uma imagem com o core e os arquivos do pacote identificados separadamente. Guarde um snapshot do clone antes da alteração de core, uma cópia da configuração e o pacote do observador 0.2.0 com seu SHA-256. Para o teste de ida e volta, acompanhe no cliente uma conexão nova e uma sessão que já estava estabelecida.
+
+1. Em **Services → SD-WAN → Forwarding → Configured bindings**, use **Remove binding** em cada grupo para voltar ao encaminhamento nativo. Aguarde a recarga do filtro. Confira as regras e grupos que o administrador configurou no pfSense, a rota de saída e o retorno de uma nova conexão. Para prefixos protegidos, confirme também a regra nativa de bloqueio quando o túnel está indisponível.
+2. Com a WebGUI disponível, execute `pkg delete -y pfSense-pkg-SDWAN` no Command Prompt. Reabra o dashboard e o menu Services. Consulte os arquivos e o processo com os comandos do README. O `pkg` remove os arquivos de sua lista e o mecanismo `rc.packages` atualiza o menu e o registro de serviços. Em uma remoção com vínculo ainda registrado, o pacote apaga a seleção transitória e solicita recarga. No core experimental, o marcador continua permitindo que a regra vinculada bloqueie novos fluxos quando a recarga termina sem provedor. Os estados já abertos seguem sua política nativa. Se o pacote já foi removido com vínculos, reinstale o pacote compatível e use **Remove binding** antes de uma nova remoção. Regras, rotas e grupos criados pelo administrador possuem ciclo próprio.
+3. Para testar o retorno do **pacote**, instale a 0.2.0 após remover a 0.3.0. Use a instrução e o hash da revisão anterior, confirme `pkg query '%n-%v' pfSense-pkg-SDWAN` e a integridade com `pkg check -s pfSense-pkg-SDWAN`. Verifique o menu, o serviço e o caminho de uma nova conexão. [Instalador imutável da versão 0.2.0](https://github.com/allanlopesprado/pfsense-sdwan/blob/ef7d32da3a09cd5d33867eccae07588276e0cb4b/README.md)
+4. Para desfazer a alteração do **core**, restaure o snapshot anterior da imagem de laboratório. Compare a versão da base, a configuração e a primeira transação bem-sucedida com o estado de referência. Em HA, valide o papel de cada nó e a versão em ambos.
+
+No teste automatizado de pacote em FreeBSD, as raízes são isoladas e os hooks de sistema ficam desativados. A suíte separada de ciclo executa os scripts do pacote e o trecho de registro do serviço com adaptadores controlados, inclusive com PHP-FPM indisponível. A verificação do registro real na WebGUI, da continuidade de sessões e do rollback do core precisa do clone.
+
 ## Estado de referência
 
 Em cada nó, observe estes dados antes da instalação, com o serviço ativo, depois de editar a política e após remover o pacote. Salve as saídas localmente. Contadores, tempo de vida, IDs efêmeros e número de sessões podem mudar normalmente. Compare as regras efetivas, o destino, o próximo salto e o caminho da mesma classe de fluxos.
@@ -82,7 +99,7 @@ Verifique os estados relevantes com **Diagnostics → States**. Faça capturas d
 |---|---|---|
 | Instalação sem configuração | Abrir todas as abas com o conjunto inicial vazio. | Navegação funcional e ausência de recomendação para política inexistente. Rota padrão e regras de passagem continuam equivalentes às da referência. |
 | Um caminho | Criar uma política com um único membro monitorado. Tornar seu alvo indisponível. | O único membro aparece enquanto elegível. Após a perda da medição ou do SLA, o conjunto fica sem alternativa. |
-| Atualização de 0.1.1 | Instalar 0.1.1, salvar uma política de um membro e anotar sua configuração. Aplicar o pacote novo com o instalador do README e reiniciar o observador. | O registro local passa a 0.2.0. A política é lida, o serviço publica uma amostra nova e o membro continua representando um único caminho. |
+| Atualização de 0.2.0 | Instalar 0.2.0, salvar uma política de um membro e anotar sua configuração. Aplicar o pacote novo com o instalador do README e confirmar o reinício do serviço pelo registro do pacote. | O registro local passa a 0.3.0. A política é lida, o serviço publica uma amostra nova e o membro continua representando um único caminho. |
 | Widget do dashboard | Em **Status → Dashboard**, usar **+ → SD-WAN**. Comparar o membro e a hora da amostra com o status. Parar o observador e aguardar a expiração. Retirar pelo **×**. | Exibe o resultado local válido, informa ausência de políticas ou de medição atual, respeita os privilégios do usuário e sai do painel quando solicitado. |
 | Consulta de versão | Abrir **Updates**, observar a versão instalada, acionar **Check GitHub** e repetir com a saída HTTPS indisponível. | A consulta externa ocorre ao clicar. A página diferencia uma versão publicada, uma falha de consulta e uma versão local desconhecida. A operação apenas exibe informação. |
 | Dois caminhos saudáveis | Cadastrar membros associados aos gateways reais, SLA e uma política com ambos. Definir custos distintos e verificar também a estratégia de menor latência. | O candidato selecionado e o motivo batem com os dados de monitoramento e o critério configurado. Os novos fluxos continuam seguindo a política **nativa** já presente. |

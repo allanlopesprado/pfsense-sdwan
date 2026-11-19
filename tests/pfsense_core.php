@@ -82,7 +82,7 @@ $manage = $priv_list['page-services-sdwan-manage']['match'];
 $role = $view;
 verify(isAllowedPage('/sdwan/status.php') && isAllowedPage('/sdwan/diagnostics.php?policy=calls'), 'View permission');
 verify(isAllowedPage('/widgets/widgets/sdwan.widget.php') && !isAllowedPage('/sdwan/updates.php'), 'Widget and update permissions');
-foreach (['members', 'slas', 'policies', 'updates'] as $page) {
+foreach (['members', 'slas', 'policies', 'forwarding', 'updates'] as $page) {
 	$role = $manage;
 	verify(isAllowedPage("/sdwan/{$page}.php"), "Manage {$page}");
 	$role = $view;

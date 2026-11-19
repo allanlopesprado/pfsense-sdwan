@@ -34,7 +34,12 @@ set_error_handler(function ($severity, $message, $file) use ($classes) {
 function display_top_tabs($tabs, $nodrop) {}
 function print_info_box($message, $class, $button = false) { echo htmlspecialchars($message); }
 function print_input_errors($errors) { echo htmlspecialchars(implode(' ', $errors)); }
-function isAllowedPage($url) { global $request; return $request['inspect'] ?? true; }
+function isAllowedPage($url) { global $request; return $request['privileges'][$url] ?? $request['inspect'] ?? true; }
+if ($request['steering_abi'] ?? false) {
+	// Emulate the optional hook in the WebGUI test. A separate test exercises the actual core patch.
+	function filter_sdwan_binding_api() { return 1; }
+	function filter_configure() { return 0; }
+}
 function csrf_startup() {
 	csrf_conf('auto-session', false);
 	csrf_conf('secret', 'isolated-form-regression-fixture');
@@ -60,7 +65,10 @@ if (isset($request['snapshot'])) {
 if ($_POST) {
 	$_POST['revision'] ??= sdwan_config_revision($config);
 	register_shutdown_function(function () {
-		global $disk, $writes;
+		global $disk, $writes, $request;
+		if (!empty($request['capture_bindings'])) {
+			echo "\nBINDINGS=" . json_encode($disk['gateways/sdwan_bindings'] ?? []);
+		}
 		echo "\nSAVED=" . json_encode([$writes, sdwan_decode_config($disk[SDWAN_CONFIG_PATH])]);
 	});
 }

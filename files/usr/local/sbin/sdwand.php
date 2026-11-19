@@ -95,6 +95,25 @@ function sdwan_observe_once(): void {
 		$observations = sdwan_gateway_observations($config, $inventory);
 		$snapshot = sdwan_evaluate($config, $observations, $started, $inventory);
 		$snapshot['config_revision'] = sdwan_config_revision($config);
+		$receipt = SDWAN_SNAPSHOT_PATH . '.forwarded';
+		$reload = false;
+		/* Stock systems without bindings never run the native adapter. */
+		if (config_get_path('gateways/sdwan_bindings/item', []) || is_file($receipt)) {
+			require_once('/usr/local/pkg/sdwan_steering.inc');
+			if (sdwan_steering_supported()) {
+				$prior = sdwan_read_snapshot();
+				try {
+					$snapshot['steering'] = sdwan_steering_observations($config, $snapshot, $prior['steering'] ?? []);
+				} catch (UnexpectedValueException $e) {
+					/* Unreadable bindings produce no pass decisions. */
+					error_log('sdwand: ' . $e->getMessage());
+					$snapshot['steering'] = [];
+				}
+				$signature = sdwan_steering_signature($snapshot['steering']);
+				$reload = ($prior['config_revision'] ?? null) !== $snapshot['config_revision'] ||
+				    !is_file($receipt) || file_get_contents($receipt) !== $signature;
+			}
+		}
 		$json = json_encode($snapshot, JSON_THROW_ON_ERROR);
 		$temp = tempnam(dirname(SDWAN_SNAPSHOT_PATH), '.sdwan-');
 		if ($temp === false) {
@@ -108,6 +127,18 @@ function sdwan_observe_once(): void {
 		} finally {
 			if (file_exists($temp)) {
 				unlink($temp);
+			}
+		}
+		if ($reload) {
+			/* Publish before enqueueing. A crash before the receipt retries on
+			 * the next sample. Native filter reload is asynchronous. */
+			filter_configure();
+			if (config_get_path('gateways/sdwan_bindings/item', [])) {
+				if (file_put_contents($receipt, $signature, LOCK_EX) !== strlen($signature)) {
+					throw new RuntimeException('Cannot record the filter reload request');
+				}
+			} elseif (is_file($receipt)) {
+				unlink($receipt);
 			}
 		}
 	} finally {

@@ -24,7 +24,7 @@ def index_contents():
         manifest = json.load(archive.extractfile("+MANIFEST"))
     if manifest["name"] != PACKAGE or manifest["version"] != version:
         raise SystemExit("Package identity differs from the release version")
-    return json.dumps({"schema": 1, "package": PACKAGE, "version": version, "sha256": digest}, indent=2) + "\n"
+    return json.dumps({"schema": 1, "channel": "lab", "package": PACKAGE, "version": version, "sha256": digest}, indent=2) + "\n"
 
 
 if __name__ == "__main__":

@@ -1,12 +1,12 @@
 PORTNAME=	pfSense-pkg-SDWAN
-PORTVERSION=	0.2.0
+PORTVERSION=	0.3.0
 CATEGORIES=	net
 MASTER_SITES=	# empty
 DISTFILES=	# empty
 EXTRACT_ONLY=	# empty
 
 MAINTAINER=	allanlopesprado@users.noreply.github.com
-COMMENT=	SD-WAN gateway monitoring and policy evaluation for pfSense CE
+COMMENT=	SD-WAN gateway monitoring and lab policy routing for pfSense CE
 WWW=		https://github.com/allanlopesprado/pfsense-sdwan
 
 NO_ARCH=	yes

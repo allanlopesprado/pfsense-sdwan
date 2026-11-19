@@ -2,7 +2,7 @@
 <pfsensepkgs>
 	<package>
 		<name>SDWAN</name>
-		<descr>SD-WAN gateway health and policy evaluation.</descr>
+		<descr>SD-WAN gateway monitoring and lab policy routing.</descr>
 		<version>%%PKGVERSION%%</version>
 		<configurationfile>sdwan.xml</configurationfile>
 	</package>

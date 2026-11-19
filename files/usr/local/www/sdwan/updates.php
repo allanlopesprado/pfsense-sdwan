@@ -41,9 +41,9 @@ if ($installed === null) {
 			<?php endif; ?>
 		</dl>
 		<form method="post" action="/sdwan/updates.php">
-			<p><?=gettext('Check the project release information on GitHub over HTTPS. The pfSense Package Manager uses its own catalog.')?></p>
+			<p><?=gettext('Check the native-forwarding lab release on GitHub over HTTPS. The pfSense Package Manager uses its own catalog.')?></p>
 			<button type="submit" name="check" value="github" class="btn btn-primary"><?=gettext('Check GitHub')?></button>
-			<a class="btn btn-default" href="https://github.com/allanlopesprado/pfsense-sdwan#readme" target="_blank" rel="noopener noreferrer"><?=gettext('Installation instructions')?></a>
+			<a class="btn btn-default" href="https://github.com/allanlopesprado/pfsense-sdwan/tree/dev/native-forwarding#readme" target="_blank" rel="noopener noreferrer"><?=gettext('Installation instructions')?></a>
 		</form>
 	</div>
 </div>

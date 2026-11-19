@@ -125,6 +125,7 @@ function sdwan_gateways(): array {
 			'monitor' => !empty($gateway['monitor']) ? $gateway['monitor'] : $address,
 			'family' => $family,
 			'monitor_disabled' => isset($gateway['monitor_disable']),
+			'action_disabled' => isset($gateway['action_disable']),
 			'force_down' => isset($gateway['force_down']),
 		];
 	}
@@ -266,6 +267,15 @@ function sdwan_save_config(array $candidate, string $expected_revision): array {
 		}
 		if ($current === $candidate) {
 			return [];
+		}
+		if (config_get_path('gateways/sdwan_bindings/item', [])) {
+			require_once(__DIR__ . '/sdwan_steering.inc');
+			foreach (sdwan_steering_bindings() as $binding) {
+				$policy = $binding['policy'];
+				if (sdwan_steering_policy_revision($candidate, $policy) !== sdwan_steering_policy_revision($current, $policy)) {
+					return ['Roll back the active forwarding binding before changing its policy, SLA, or member definitions.'];
+				}
+			}
 		}
 		if (!is_array(config_set_path(SDWAN_CONFIG_PATH, sdwan_encode_config($candidate)))) {
 			return ['Cannot update the SD-WAN section in the pfSense configuration.'];

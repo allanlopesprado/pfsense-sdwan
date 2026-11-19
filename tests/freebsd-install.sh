@@ -33,7 +33,7 @@ if PATH="$root/bin:$PATH" sh -c "$installer"; then exit 1; fi
 rm "$root/bin/fetch"
 # The prior published release remains installed after a rejected upgrade.
 package=pfSense-pkg-SDWAN
-baseline=0.1.1
+baseline=0.2.0
 version=$(awk '$1=="PORTVERSION="{print $2}' Makefile)
 test -n "$version"
 test "$(run_pkg version -t "$baseline" "$version")" = '<'
@@ -46,24 +46,39 @@ run_pkg check -s "$package"
 PATH="$root/bin:$PATH" sh -c "$installer"
 test "$(run_pkg query '%v' "$package")" = "$version"
 run_pkg check -s pfSense-pkg-SDWAN
+test -f "$dbroot/usr/local/pkg/sdwan_steering.inc"
+test -f "$dbroot/usr/local/www/sdwan/forwarding.php"
+test ! -e "$dbroot/etc/inc/filter.inc"
+test ! -e "$dbroot/etc/inc/filter-sdwan.inc"
 run_pkg delete -Dy pfSense-pkg-SDWAN
 test ! -e "$dbroot/usr/local/www/sdwan/status.php"
 test ! -e "$dbroot/usr/local/www/sdwan/updates.php"
+test ! -e "$dbroot/usr/local/www/sdwan/forwarding.php"
 test ! -e "$dbroot/usr/local/www/widgets/widgets/sdwan.widget.php"
 test ! -e "$dbroot/usr/local/sbin/sdwand.php"
 if run_pkg info -e pfSense-pkg-SDWAN; then exit 1; fi
+# Roll back by removing the new package first. Do not force pkg past ABI checks.
+run_pkg add -I "$PWD/dist/$package-$baseline.pkg"
+test "$(run_pkg query '%v' "$package")" = "$baseline"
+test ! -e "$dbroot/usr/local/www/sdwan/forwarding.php"
+run_pkg check -s "$package"
 PATH="$root/bin:$PATH" sh -c "$installer"
-run_pkg check -s pfSense-pkg-SDWAN
+test "$(run_pkg query '%v' "$package")" = "$version"
+run_pkg check -s "$package"
 # Exercise the shipped service wrapper with FreeBSD rc.subr and daemon(8).
 # Substitute a temporary pidfile and a sleeping process for the pfSense worker.
 sed -e "s|/var/run/sdwand.pid|$root/sdwand.pid|" \
     -e 's|/usr/local/bin/php /usr/local/sbin/sdwand.php|/bin/sleep 120|' \
+    -e "s|/usr/local/bin/php -f /usr/local/pkg/sdwan_invalidate.inc|/usr/bin/touch $root/invalidated|" \
     "$dbroot/usr/local/etc/rc.d/sdwand.sh" > "$root/sdwand.sh"
 sh "$root/sdwand.sh" start
 sh "$root/sdwand.sh" status
 sh "$root/sdwand.sh" restart
+test -f "$root/invalidated"
+rm "$root/invalidated"
 sh "$root/sdwand.sh" status
 sh "$root/sdwand.sh" stop
+test -f "$root/invalidated"
 if sh "$root/sdwand.sh" status; then exit 1; fi
 echo "Verified FreeBSD service start, restart and stop with a fixture worker."
-echo "Verified checksum rejection, download failure, upgrade from $baseline to $version, removal and reinstall (hooks disabled)."
+echo "Verified checksum rejection, download failure, upgrade from $baseline to $version, removal, rollback to $baseline and reinstall (hooks disabled)."

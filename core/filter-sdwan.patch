@@ -1,0 +1,71 @@
+--- a/src/etc/inc/filter.inc
++++ b/src/etc/inc/filter.inc
+@@ -27,6 +27,7 @@
+  * limitations under the License.
+  */
+ 
++require_once(__DIR__ . "/filter-sdwan.inc");
+ require_once("openvpn.inc");
+ require_once("captiveportal.inc");
+ require_once('/etc/inc/pfsense-utils.inc');
+@@ -1718,7 +1719,9 @@
+ }
+ 
+ function filter_generate_gateways() {
+-	global $PFConfig, $GatewaysList, $GatewaysStatus;
++	global $PFConfig, $GatewaysList, $GatewaysStatus, $sdwan_gateway_routes;
++	$sdwan_gateway_routes = [];
++	filter_sdwan_begin_reload();
+ 
+ 	$rules = '';
+ 
+@@ -1754,6 +1757,12 @@
+ 			$route = "route-to ( {$gateway['interface']} {$gwip} )";
+ 		} else {
+ 			$route = '';
++		}
++		if ($route !== '') {
++			$path = filter_sdwan_gateway_route($gateway, $gwip);
++			if ($path !== null) {
++				$sdwan_gateway_routes[$gwname] = $path;
++			}
+ 		}
+ 		$rules .= "GW{$gwname} = \" {$route} \"\n";
+ 	}
+@@ -4273,6 +4282,7 @@
+ }
+ 
+ function filter_generate_user_rule($rule) {
++	global $sdwan_gateway_routes;
+ 	global $g, $FilterIflist, $GatewaysList, $vpns_list, $use_floating_states_for_ipsec;
+ 	global $dummynet_name_list, $vlanprio_values, $time_based_rules;
+ 
+@@ -4408,6 +4418,17 @@
+ 		$type = "pass";
+ 	}
+ 
++	$sdwan_route = null;
++	if ($type === 'pass') {
++		$sdwan_route = filter_sdwan_rule_route($rule, $sdwan_gateway_routes ?? []);
++		if ($sdwan_route === false) {
++			$type = 'block';
++			$rule['type'] = 'block';
++			$rule['gateway'] = '';
++			unset($rule['nat']);
++		}
++	}
++
+ 	if (array_path_enabled($rule, 'nat')) {
+ 		$nat_type = match ($rule['ipprotocol']) {
+ 			'inet6' => '64',
+@@ -4467,7 +4488,9 @@
+ 	}
+ 	/* if user has selected a custom gateway, lets work with it */
+ 	else if ($rule['gateway'] <> "" && $type == "pass") {
+-		if (isset($GatewaysList[$rule['gateway']])) {
++		if (is_string($sdwan_route)) {
++			$aline['route'] = $sdwan_route;
++		} elseif (isset($GatewaysList[$rule['gateway']])) {
+ 			/* Add the load balanced gateways */
+ 			$aline['route'] = " \$GW{$rule['gateway']} ";
+ 

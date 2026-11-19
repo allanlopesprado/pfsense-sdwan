@@ -1,4 +1,4 @@
-SD-WAN gateway health and policy evaluation integrated into the pfSense CE
-WebGUI. Operators can define members, performance thresholds and policies,
-and observe path recommendations using gateway monitor data. This version
-runs in observation mode.
+Monitor gateway health and compare SD-WAN policies in the pfSense CE WebGUI.
+On stock pfSense the package provides observation and forwarding previews.
+An opt-in lab integration can steer new connections matching selected native
+rules on a firewall built with the corresponding filter adapter.

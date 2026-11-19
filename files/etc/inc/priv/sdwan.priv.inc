@@ -15,6 +15,7 @@ $priv_list['page-services-sdwan-manage'] = [
 		'sdwan/members.php*',
 		'sdwan/slas.php*',
 		'sdwan/policies.php*',
+		'sdwan/forwarding.php*',
 		'sdwan/updates.php*',
 	]),
 ];

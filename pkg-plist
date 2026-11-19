@@ -3,11 +3,15 @@ etc/rc.d/sdwand.sh
 pkg/sdwan.inc
 pkg/sdwan.xml
 pkg/sdwan_engine.inc
+pkg/sdwan_invalidate.inc
+pkg/sdwan_preflight.inc
 pkg/sdwan_release.inc
+pkg/sdwan_steering.inc
 sbin/sdwand.php
 %%DATADIR%%/info.xml
 www/sdwan/diagnostics.php
 www/sdwan/editor.inc.php
+www/sdwan/forwarding.php
 www/sdwan/members.php
 www/sdwan/policies.php
 www/sdwan/slas.php
