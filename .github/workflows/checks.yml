@@ -98,11 +98,11 @@ jobs:
           usesh: true
           prepare: |
             env ASSUME_ALWAYS_YES=yes pkg bootstrap
-            pkg install -y php84 python3
+            pkg install -y php84 php84-filter python3
             php -n -v
           run: |
             set -eu
-            python3 -B tests/steering_daemon.py php
+            python3 -B tests/steering_daemon.py php --load-filter-extension
             sh tests/freebsd-install.sh
             sh tests/lab/freebsd-system-log.sh "$PWD/lab-syslog/syslog.inc"
             sh tests/lab/freebsd-carp.sh

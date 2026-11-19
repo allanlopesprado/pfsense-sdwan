@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
 """Test the publisher against the pfSense reload service's Unix protocol."""
+import argparse
 from concurrent.futures import ThreadPoolExecutor
 import json
 from pathlib import Path
 import shutil
 import socket
-import sys
 import tempfile
 import time
 
 from daemon_integration import PKG, fixture, php, stage
 
 
-def run(binary):
+def run(binary, load_filter_extension):
     with tempfile.TemporaryDirectory(prefix="sdwan-queue-", dir="/tmp") as tmp:
         work = Path(tmp)
         stage(work)
@@ -44,6 +44,8 @@ def run(binary):
         settings = work / "fixture.json"
         settings.write_text(json.dumps(config))
         params = ["-d", f"include_path={work}"]
+        if load_filter_extension:
+            params += ["-d", "extension=filter"]
         binding = json.loads(php(binary, *params, "-r",
             f"require {json.dumps(str(work / 'sdwan_steering.inc'))}; "
             "echo json_encode(sdwan_steering_preview(sdwan_get_config(), 'calls', 'G'));"))
@@ -135,4 +137,8 @@ def run(binary):
 
 
 if __name__ == "__main__":
-    run(sys.argv[1] if len(sys.argv) > 1 else "php")
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("php", nargs="?", default="php")
+    parser.add_argument("--load-filter-extension", action="store_true")
+    args = parser.parse_args()
+    run(args.php, args.load_filter_extension)
