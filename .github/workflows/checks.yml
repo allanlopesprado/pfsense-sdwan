@@ -93,6 +93,8 @@ jobs:
         with:
           name: native-syslog
           path: lab-syslog
+      - name: Configure the Ubuntu dependency mirror
+        run: bash .github/scripts/ubuntu-archive.sh
       - name: Test the pinned installer and native forwarding rules in FreeBSD
         uses: vmactions/freebsd-vm@4441bea20b31bfa77329a5af583199362489567e # v1.4.9
         with:

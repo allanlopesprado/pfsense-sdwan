@@ -19,7 +19,7 @@ jobs:
           persist-credentials: false
       - name: Install real VPN implementations and traffic capture
         run: |
-          sudo apt-get update -qq
+          bash .github/scripts/ubuntu-archive.sh
           sudo apt-get install -y --no-install-recommends iproute2 openvpn wireguard-tools tcpdump
           dpkg-query -W openvpn wireguard-tools
       - name: Transfer data before outage, on backup link, and after return
@@ -38,7 +38,7 @@ jobs:
           persist-credentials: false
       - name: Install DHCP and PPPoE implementations
         run: |
-          sudo apt-get update -qq
+          bash .github/scripts/ubuntu-archive.sh
           sudo apt-get install -y --no-install-recommends iproute2 iputils-ping ethtool dnsmasq-base ppp pppoe busybox
           dpkg-query -W dnsmasq-base ppp pppoe busybox
       - name: Prepare PPPoE kernel driver
@@ -58,7 +58,7 @@ jobs:
           persist-credentials: false
       - name: Install IPv6 access components
         run: |
-          sudo apt-get update -qq
+          bash .github/scripts/ubuntu-archive.sh
           sudo apt-get install -y --no-install-recommends iproute2 iputils-ping isc-dhcp-client kea-dhcp6-server radvd
           dpkg-query -W isc-dhcp-client kea-dhcp6-server radvd
       - name: Delegate, advertise, withdraw and replace an IPv6 prefix

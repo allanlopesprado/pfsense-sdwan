@@ -19,7 +19,7 @@ jobs:
           persist-credentials: false
       - name: Install Ubuntu networking and strongSwan packages
         run: |
-          sudo apt-get update -qq
+          bash .github/scripts/ubuntu-archive.sh
           sudo apt-get install -y --no-install-recommends \
             iproute2 iputils-ping nftables tcpdump strongswan-charon \
             strongswan-swanctl libstrongswan-standard-plugins
