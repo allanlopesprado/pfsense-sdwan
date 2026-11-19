@@ -48,3 +48,18 @@ jobs:
           test -c /dev/ppp || sudo mknod /dev/ppp c 108 0
       - name: Renegotiate the link and compare old and current monitor metadata
         run: sudo python3 -B -u tests/lab/renew-dynamic-wan.py "${{ matrix.protocol }}"
+  ipv6_pd:
+    name: DHCPv6 Prefix Delegation and LAN renumbering
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install IPv6 access components
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends iproute2 iputils-ping isc-dhcp-client kea-dhcp6-server radvd
+          dpkg-query -W isc-dhcp-client kea-dhcp6-server radvd
+      - name: Delegate, advertise, withdraw and replace an IPv6 prefix
+        run: sudo python3 -B -u tests/lab/ipv6-pd.py
