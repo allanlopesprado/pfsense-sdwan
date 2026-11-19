@@ -109,12 +109,16 @@ function widget_request(array $privileges, string $method, array $post, string $
 	include $widget;
 	return [http_response_code(), ob_get_clean()];
 }
+$test_config = [
+	'interfaces' => ['wan' => ['enable' => '', 'if' => 'vtnet0']],
+	'gateways/gateway_item' => [['name' => 'WANGW', 'interface' => 'wan', 'gateway' => '192.0.2.1']],
+];
 $sequence = 'sdwan:col1:show:0,';
 $post = ['ajax' => 'ajax', 'widgetkey' => 'sdwan-0'];
 [$code, $content] = widget_request($view, 'GET', [], $sequence, true);
-verify($code === 200 && str_contains($content, 'register_ajax') && str_contains($content, 'No SD-WAN policies'), 'Dashboard include');
+verify($code === 200 && str_contains($content, 'register_ajax') && str_contains($content, 'WANGW'), 'Dashboard include');
 [$code, $content] = widget_request($view, 'POST', $post, $sequence, false);
-verify($code === 200 && str_contains($content, 'No SD-WAN policies') && !str_contains($content, 'register_ajax'), 'Authorized fragment');
+verify($code === 200 && str_contains($content, 'WANGW') && !str_contains($content, 'register_ajax') && !str_contains($content, '<time'), 'Authorized fragment');
 foreach ([
 	[[], 'POST', $post, $sequence, 403],
 	[$view, 'GET', $post, $sequence, 400],
@@ -122,6 +126,6 @@ foreach ([
 	[$view, 'POST', ['ajax' => 'ajax', 'widgetkey' => 'sdwan-1'], $sequence, 400],
 ] as [$privileges, $method, $body, $layout, $status]) {
 	[$code, $content] = widget_request($privileges, $method, $body, $layout, false);
-	verify($code === $status && !str_contains($content, 'No SD-WAN policies'), 'Unauthorized or unconfigured widget request');
+	verify($code === $status && !str_contains($content, 'WANGW'), 'Unauthorized or unconfigured widget request');
 }
 echo "ok - dashboard rendering and refresh enforce status privilege and native widget instance membership\n";
