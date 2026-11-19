@@ -93,7 +93,7 @@ def screenshots(directory, www, pages):
                 for name, theme, size in [("status", "pfSense", "1440,900"), ("status", "pfSense-dark", "390,844"),
                                           ("diagnostics", "pfSense", "1440,900"), ("members", "pfSense", "1440,900"),
                                           ("members-edit", "pfSense-dark", "1440,900"), ("updates", "pfSense", "1440,900"),
-                                          ("forwarding", "pfSense", "1440,900")]:
+                                          ("updates", "pfSense-dark", "390,844"), ("forwarding", "pfSense", "1440,900")]:
                     preview = name + "-" + theme
                     styles = ('<link rel="stylesheet" href="/vendor/font-awesome/css/all.min.css">'
                               f'<link rel="stylesheet" href="/css/{theme}.css">')
@@ -117,6 +117,18 @@ def screenshots(directory, www, pages):
                 assert fields.get("filterlogentries_process") == ["sdwan"] and fields.get("filterlogentries_submit") == ["1"]
                 assert fields.get("__csrf_magic")
                 print("ok - the browser submits a native System Logs POST with its filter and CSRF token")
+                page = pages["updates"].replace("</head>", "<script>var events = [];</script></head>").replace(
+                    "</body>", '<script>events.forEach(function (init) { init(); });'
+                    'document.getElementById("upgrade_release").click();</script></body>')
+                (site / "upgrade-click.html").write_text(page)
+                subprocess.run([chrome, "--headless", "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage",
+                                f"--user-data-dir={folder}/chrome", "--dump-dom",
+                                f"http://127.0.0.1:{server.server_port}/upgrade-click.html"],
+                               capture_output=True, check=True, timeout=35)
+                path, fields = requests.get(timeout=5)
+                assert path == "/sdwan/updates.php" and fields.get("target_version") == ["0.4.8"], (path, fields)
+                assert fields.get("target_sha256") and "__csrf_magic" in fields and "upgrade_release" in fields
+                print("ok - the browser submits the selected release and CSRF token through Upgrade")
             finally:
                 server.shutdown()
                 worker.join()
@@ -130,6 +142,10 @@ def run(php, classes, screenshot_dir=None):
             shutil.copyfile(SOURCE / "pkg" / module, root / module)
         for ui in (root / "sdwan/ui.inc.php", root / "sdwan/forwarding.php", root / "sdwan/updates.php"):
             ui.write_text(ui.read_text().replace("'/usr/local/pkg/", "__DIR__ . '/../"))
+        version = root / "pfsense-version"
+        version.write_text("2.9.1-RELEASE\n")
+        release = root / "sdwan_release.inc"
+        release.write_text(release.read_text().replace("'/etc/version'", repr(str(version))))
         engine = root / "sdwan_engine.inc"
         engine.write_text(engine.read_text().replace("'/var/run/sdwan-observer.json'", "__DIR__ . '/observer.json'"))
         upstream = (classes.parent / "guiconfig.inc").read_text()
@@ -156,8 +172,8 @@ def run(php, classes, screenshot_dir=None):
 
         def request(page, **params):
             data = {"native": native, "config": config, **params}
-            result = subprocess.run([php, str(ROOT / "tests/fixtures/gui_request.php"), str(root),
-                                     str(classes), page], input=json.dumps(data), text=True,
+            result = subprocess.run([php, "-d", "disable_functions=curl_init,curl_setopt_array,curl_exec,curl_getinfo",
+                                     str(ROOT / "tests/fixtures/gui_request.php"), str(root), str(classes), page], input=json.dumps(data), text=True,
                                     capture_output=True)
             assert result.returncode == 0 and not result.stderr, result.stderr or result.stdout[-1500:]
             return result.stdout
@@ -246,6 +262,40 @@ def run(php, classes, screenshot_dir=None):
         assert Choices(updates).posts == 1 and len(Choices(updates).tokens) == 1
         assert "/pkg_mgr_installed.php" in Choices(updates).links
         assert "/pkg_mgr_installed.php" not in Choices(request("updates", privileges={"/pkg_mgr_installed.php": False})).links
+        assert 'name="upgrade_release"' not in updates
+        checked = {"check_release": "1", "__csrf_magic": Choices(updates).tokens[0]}
+        offered = request("updates", post=checked)
+        assert "Upgrade to 0.4.8" in offered
+        offered_form = Choices(offered).forms[0][1]
+        action = {k: offered_form[k] for k in ("__csrf_magic", "target_version", "target_sha256")}
+        action["upgrade_release"] = "1"
+        assert "UPGRADES=0" in request("updates", get=action)
+        csrf_failure = request("updates", post={**action, "__csrf_magic": "invalid"})
+        assert "CSRF check failed" in csrf_failure and "UPGRADES=0" in csrf_failure
+        privileges = {"/pkg_mgr_install.php": False}
+        denied = request("updates", privileges=privileges, post=action)
+        assert "UPGRADES=0 HTTP=403" in denied
+        assert 'name="upgrade_release"' not in request("updates", privileges=privileges, post=checked)
+        for options, message in [
+            ({"abi": "FreeBSD:15:amd64"}, "incompatible"),
+            ({"release_http_failure": 1}, "asset could not be verified"),
+            ({"installed_release": "0.4.8"}, "up to date"),
+        ]:
+            result = request("updates", post=checked, **options)
+            assert 'name="upgrade_release"' not in result and message in result
+        assert "UPGRADES=0" in request("updates", post={**action, "target_sha256": "0" * 64})
+        assert "UPGRADES=0" in request("updates", post=action, installed_release="0.4.9")
+        busy = request("updates", post=action, upgrade_busy=True)
+        assert "already in progress" in busy and "UPGRADES=0" in busy
+        failed = request("updates", post=action, corrupt_release=True)
+        assert "failed SHA-256 verification" in failed and "UPGRADES=0" in failed
+        failed = request("updates", post=action, install_failure=True)
+        assert "could not install the update" in failed and "UPGRADES=1" in failed
+        failed = request("updates", post=action, service_failure=True)
+        assert "could not be verified" in failed and "UPGRADES=1" in failed
+        installed = request("updates", post=action)
+        assert "0.4.8 was installed and the observer is running" in installed and "UPGRADES=1" in installed
+        print("ok - native CSRF, install permission, stale target, compatibility, checksum and upgrade results")
 
         if screenshot_dir:
             demo = {**config, "members": [{"name": "Fiber", "gateway": "FIBER_GW", "cost": "10"},
@@ -259,6 +309,7 @@ def run(php, classes, screenshot_dir=None):
             pages = {page: request(page, config=demo, snapshot=demo_snapshot)
                      for page in ("status", "diagnostics", "members", "updates")}
             pages["members-edit"] = request("members", get={"edit": "1"})
+            pages["updates"] = offered
 
         native_group = {"name": "PBR", "item": ["GW1|1|address", "GW2|2|address"]}
         rule = {"tracker": "50321", "interface": "lan", "gateway": "PBR", "ipprotocol": "inet", "type": "pass",

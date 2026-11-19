@@ -38,7 +38,7 @@ test -n "$version"
 head -c 80 "$PWD/dist/$package-$version.pkg" > "$root/interrupted.pkg"
 
 # Cover both update channels and the previous patch level.
-for baseline in 0.2.0 0.3.0 0.4.0 0.4.1 0.4.2 0.4.3 0.4.4 0.4.5 0.4.6; do
+for baseline in 0.2.0 0.3.0 0.4.0 0.4.1 0.4.2 0.4.3 0.4.4 0.4.5 0.4.6 0.4.7; do
     test "$(run_pkg version -t "$baseline" "$version")" = '<'
     checksum=$(awk '{print $1}' "$PWD/dist/$package-$baseline.pkg.sha256")
     sha256 -c "$checksum" "$PWD/dist/$package-$baseline.pkg" || exit 1
@@ -85,7 +85,11 @@ for baseline in 0.2.0 0.3.0 0.4.0 0.4.1 0.4.2 0.4.3 0.4.4 0.4.5 0.4.6; do
     run_pkg check -s "$package"
     run_pkg delete -Dy "$package"
 done
-PATH="$root/bin:$PATH" sh -c "$installer"
+run_pkg add -I "$PWD/dist/$package-0.4.7.pkg"
+printf '2.9.1-RELEASE\n' > "$root/pfsense-version"
+sed "s|'/etc/version'|'$root/pfsense-version'|" files/usr/local/pkg/sdwan_release.inc > "$root/sdwan_release.inc"
+php -n -d disable_functions=curl_init,curl_setopt_array,curl_exec,curl_getinfo \
+    tests/release_transport.php "$root/sdwan_release.inc" "$dbroot" "$version" "$PWD/dist/$package-$version.pkg"
 test "$(run_pkg query '%v' "$package")" = "$version"
 run_pkg check -s "$package"
 # Exercise the shipped service wrapper with FreeBSD rc.subr and daemon(8).
@@ -104,4 +108,4 @@ sh "$root/sdwand.sh" stop
 test -f "$root/invalidated"
 if sh "$root/sdwand.sh" status; then exit 1; fi
 echo "Verified FreeBSD service start, restart and stop with a fixture worker."
-echo "Verified checksum rejection, download failure, direct upgrades through 0.4.6 to $version, removal, rollback to each prior version and reinstall (hooks disabled)."
+echo "Verified checksum rejection, download failure, direct upgrades through 0.4.7 to $version, removal, rollback to each prior version and reinstall (hooks disabled)."

@@ -42,7 +42,7 @@ O arquivo de pré-lançamento também pode ser reproduzido com Python 3.9+, a fe
 fakeroot python3 tools/build-lab-pkg.py --output ./dist
 ```
 
-Depois de produzir o pacote e seu arquivo `.sha256`, gere o índice consultado pela aba **Updates**. As versões a partir de 0.4.0 consultam o canal `main`. A maturidade atual é `experimental`. A versão 0.3.0 continua consultando o índice próprio de laboratório. A verificação confere nome e versão do manifesto, arquivo e SHA-256. Publique o índice e o pacote na mesma revisão. No README de distribuição, fixe a URL do pacote nesse commit e atualize seu SHA-256.
+Depois de produzir o pacote e seu arquivo `.sha256`, gere o índice consultado pela aba **Updates**. As versões a partir de 0.4.0 consultam o canal `main`. A maturidade atual é `experimental`. A versão 0.3.0 continua consultando o índice próprio de laboratório. A verificação confere nome e versão do manifesto, arquivo e SHA-256. Publique o índice e o pacote na mesma revisão. No README de distribuição, fixe a URL do pacote nesse commit e atualize seu SHA-256. A WebGUI da 0.4.8 só oferece a instalação depois que o GitHub publica a release com o mesmo SHA-256 e a tag aponta para o arquivo correspondente.
 
 ```sh
 python3 tools/update-release-index.py

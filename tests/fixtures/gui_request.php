@@ -31,7 +31,55 @@ set_error_handler(function ($severity, $message, $file) use ($classes) {
 	    ($file === $classes . '/Form/Group.class.php' && $message === 'Undefined variable $hidden') ||
 	    ($file === $classes . '/Form/Input.class.php' && $message === 'Undefined variable $help');
 });
-function pkg_exec($query, &$stdout, &$stderr) { $stdout = '0.4.3'; $stderr = ''; return 0; }
+$installed_release = $request['installed_release'] ?? '0.4.7';
+$upgrade_calls = 0;
+function pkg_exec($query, &$stdout, &$stderr) {
+	global $installed_release, $upgrade_calls, $request;
+	$stderr = '';
+	if ($query === 'query %v pfSense-pkg-SDWAN') {
+		$stdout = $installed_release;
+	} elseif ($query === 'config ABI') {
+		$stdout = $request['abi'] ?? 'FreeBSD:16:amd64';
+	} elseif (str_starts_with($query, 'query -F ')) {
+		$stdout = 'pfSense-pkg-SDWAN 0.4.8 net/pfSense-pkg-SDWAN';
+	} elseif (str_starts_with($query, 'add ')) {
+		$upgrade_calls++;
+		if (!empty($request['install_failure'])) {
+			return 1;
+		}
+		$installed_release = '0.4.8';
+	} elseif ($query !== 'check -s pfSense-pkg-SDWAN') {
+		throw new RuntimeException('Unexpected package command');
+	}
+	return 0;
+}
+
+function pkg_version_compare($installed, $version) {
+	return ['<', '=', '>'][version_compare($installed, $version) + 1];
+}
+
+function mwexec($command, $quiet) {
+	if ($command !== '/usr/local/etc/rc.d/sdwand.sh status' || !$quiet) {
+		throw new RuntimeException('Unexpected service command');
+	}
+	return !empty($GLOBALS['request']['service_failure']) ? 1 : 0;
+}
+
+if ($page === 'updates') {
+	require __DIR__ . '/release_curl.php';
+	$archive = 'package fixture';
+	$release_http = fixture_release_http('0.4.8', $archive);
+	if (isset($request['release_http_failure'])) {
+		$url = array_keys($release_http)[$request['release_http_failure']];
+		$release_http[$url]['status'] = 404;
+	}
+	if (!empty($request['corrupt_release'])) {
+		$release_http[array_key_last($release_http)]['body'] = str_repeat('x', strlen($archive));
+	}
+	register_shutdown_function(static function () {
+		echo "\nUPGRADES=" . $GLOBALS['upgrade_calls'] . ' HTTP=' . http_response_code() . "\n";
+	});
+}
 function isAllowedPage($url) { global $request; return $request['privileges'][$url] ?? $request['inspect'] ?? true; }
 function get_interface_gateway($interface) { return config_get_path('fixture_dynamic_targets', [])[$interface] ?? null; }
 function get_interface_gateway_v6($interface) { return get_interface_gateway($interface); }
@@ -53,7 +101,8 @@ $disk = $current = $request['native'];
 $config = $request['config'];
 $disk[SDWAN_CONFIG_PATH] = $current[SDWAN_CONFIG_PATH] = sdwan_encode_config($config);
 $writes = 0;
-$busy = $fail = false;
+$busy = !empty($request['upgrade_busy']);
+$fail = false;
 $_GET = $request['get'] ?? [];
 $_POST = $request['post'] ?? [];
 $_SERVER['REQUEST_URI'] = '/sdwan/' . $page . '.php';

@@ -1,70 +1,116 @@
 <?php
-// Run in the CLI with the four cURL functions disabled, so no network is used.
-foreach (['CURLOPT_SSL_VERIFYPEER', 'CURLOPT_SSL_VERIFYHOST', 'CURLOPT_CAPATH', 'CURLOPT_FOLLOWLOCATION',
-    'CURLOPT_CONNECTTIMEOUT', 'CURLOPT_TIMEOUT', 'CURLOPT_USERAGENT', 'CURLOPT_WRITEFUNCTION', 'CURLINFO_HTTP_CODE'] as $id => $key) {
-	if (!defined($key)) {
-		define($key, $id + 1);
-	}
-}
-
-require_once __DIR__ . '/../files/usr/local/pkg/sdwan_release.inc';
+require_once __DIR__ . '/fixtures/release_curl.php';
+require_once $argv[1] ?? __DIR__ . '/../files/usr/local/pkg/sdwan_release.inc';
 
 function check(bool $test): void {
 	if (!$test) {
-		throw new RuntimeException('Unexpected transport result near line ' . debug_backtrace()[0]['line']);
+		throw new RuntimeException('Unexpected release result near line ' . debug_backtrace()[0]['line']);
 	}
 }
 
-if (function_exists('curl_init') || function_exists('curl_setopt_array') ||
-    function_exists('curl_exec') || function_exists('curl_getinfo')) {
-	throw new RuntimeException('Run with mocked cURL functions as in tests/run.sh');
-} else {
-	function curl_init($url) {
-		check($url === 'https://raw.githubusercontent.com/allanlopesprado/pfsense-sdwan/main/dist/release.json');
-		return new stdClass();
-	}
+function try_lock($name, $timeout) {
+	check($name === 'sdwan-package-upgrade' && $timeout === 1);
+	return $GLOBALS['locked'] ? null : tmpfile();
+}
 
-	function set_curlproxy(&$handle): void {
-		$handle->proxyConfigured = true;
-	}
+function unlock($lock): void {
+	fclose($lock);
+}
 
-	function curl_setopt_array($handle, $options): bool {
-		check($handle->proxyConfigured && $options[CURLOPT_SSL_VERIFYPEER] === true);
-		check($options[CURLOPT_SSL_VERIFYHOST] === 2 && $options[CURLOPT_FOLLOWLOCATION] === false);
-		check($options[CURLOPT_CAPATH] === '/etc/ssl/certs/' && $options[CURLOPT_TIMEOUT] <= 10);
-		check($options[CURLOPT_CONNECTTIMEOUT] <= $options[CURLOPT_TIMEOUT]);
-		$handle->write = $options[CURLOPT_WRITEFUNCTION];
-		return true;
-	}
-
-	function curl_exec($handle): bool {
-		global $chunks, $transport_result;
-		foreach ($chunks as $chunk) {
-			if (($handle->write)($handle, $chunk) !== strlen($chunk)) {
-				return false;
-			}
+function pkg_exec($command, &$stdout, &$stderr): int {
+	global $arg_root, $local_version, $version, $pkg_adds, $force_failure;
+	$stderr = '';
+	if ($arg_root !== null) {
+		if (str_starts_with($command, 'add ')) {
+			$pkg_adds++;
+			$command = 'add -I ' . substr($command, 4); // Suppress pfSense hooks in the isolated FreeBSD root.
 		}
-		return $transport_result;
+		$native = '/usr/local/sbin/pkg-static -r ' . escapeshellarg($arg_root) .
+		    ' -o ABI=FreeBSD:16:amd64 -o OSVERSION=1600018 ';
+		exec($native . $command, $lines, $rc);
+		$stdout = implode("\n", $lines);
+		return $rc;
 	}
-
-	function curl_getinfo($handle, $key): int {
-		check($key === CURLINFO_HTTP_CODE);
-		return $GLOBALS['http_status'];
+	if ($command === 'config ABI') {
+		$stdout = 'FreeBSD:16:amd64';
+	} elseif ($command === 'query %v pfSense-pkg-SDWAN') {
+		$stdout = $local_version;
+	} elseif (str_starts_with($command, 'query -F ')) {
+		$stdout = ($force_failure === 'manifest' ? 'unexpected' : "pfSense-pkg-SDWAN {$version} net/pfSense-pkg-SDWAN");
+	} elseif (str_starts_with($command, 'add ')) {
+		$pkg_adds++;
+		if ($force_failure === 'install') {
+			return 1;
+		}
+		$local_version = $version;
+	} else {
+		check($command === 'check -s pfSense-pkg-SDWAN');
 	}
+	return 0;
 }
 
-$release = ['version' => '0.4.0', 'sha256' => str_repeat('a', 64), 'maturity' => 'experimental'];
-$chunks = str_split(json_encode(['schema' => 1, 'channel' => 'main', 'package' => 'pfSense-pkg-SDWAN'] + $release), 6);
-$transport_result = true;
-$http_status = 200;
+function pkg_version_compare($a, $b): string {
+	pkg_exec('version -t ' . escapeshellarg($a) . ' ' . escapeshellarg($b), $stdout, $stderr);
+	return trim($stdout);
+}
+
+function mwexec($command, $quiet): int {
+	check($command === '/usr/local/etc/rc.d/sdwand.sh status' && $quiet);
+	return 0; // The native service wrapper is exercised separately in the same FreeBSD job.
+}
+
+$version = $argv[3] ?? '0.4.8';
+$arg_root = $argv[2] ?? null;
+$archive = $arg_root === null ? 'fixture archive' : file_get_contents($argv[4]);
+$index_http = fixture_release_http($version, $archive);
+[$index, $api, $package] = array_keys($index_http);
+$release_http = $index_http;
+$release_requests = [];
+$target = ['version' => $version, 'sha256' => hash('sha256', $archive)];
+$release = $target + ['maturity' => 'experimental'];
+$pkg_adds = 0;
+$locked = false;
+$force_failure = null;
+$local_version = '0.4.7';
+
 check(sdwan_release_check() === $release);
+check(sdwan_release_asset_size($release) === strlen($archive));
+if ($arg_root !== null) {
+	// Under FreeBSD, every package command operates on the real isolated pkg database.
+	check(sdwan_release_installed() === '0.4.7');
+	$release_http[$package]['body'] = str_repeat('x', strlen($archive));
+	check(sdwan_release_upgrade($target) === 'checksum' && $pkg_adds === 0);
+	check(sdwan_release_installed() === '0.4.7');
+	$release_http = $index_http;
+	check(sdwan_release_upgrade($target) === 'success' && $pkg_adds === 1);
+	check(sdwan_release_installed() === $version);
+	check(sdwan_release_upgrade($target) === 'not_newer' && $pkg_adds === 1);
+	echo "ok - verified WebGUI package command upgrades a real FreeBSD pkg database and rejects replay\n";
+	exit;
+}
+
 foreach ([301, 403, 404, 500] as $http_status) {
+	$release_http[$index]['status'] = $http_status;
 	check(sdwan_release_check() === null);
 }
-$http_status = 200;
-$transport_result = false;
+$release_http = $index_http;
+$release_http[$index]['ok'] = false;
 check(sdwan_release_check() === null);
-$transport_result = true;
-$chunks[] = str_repeat(' ', SDWAN_RELEASE_MAX_BYTES);
+$release_http = $index_http;
+$release_http[$index]['body'] .= str_repeat(' ', SDWAN_RELEASE_MAX_BYTES);
 check(sdwan_release_check() === null);
-echo "ok - fixed GitHub destination, TLS, proxy, bounded body and transport failures\n";
+$release_http = $index_http;
+foreach ([['draft', true], ['prerelease', true], ['tag_name', 'v0.4.9']] as [$key, $value]) {
+	$body = json_decode($index_http[$api]['body'], true);
+	$body[$key] = $value;
+	$release_http[$api]['body'] = json_encode($body);
+	check(sdwan_release_asset_size($release) === null);
+}
+foreach ([['state', 'new'], ['digest', 'sha256:' . str_repeat('0', 64)], ['size', SDWAN_RELEASE_PACKAGE_LIMIT + 1]] as [$key, $value]) {
+	$body = json_decode($index_http[$api]['body'], true);
+	$body['assets'][0][$key] = $value;
+	$release_http[$api]['body'] = json_encode($body);
+	check(sdwan_release_asset_size($release) === null);
+}
+check(sdwan_release_asset_size(['version' => '../wrong', 'sha256' => $target['sha256']]) === null);
+echo "ok - fixed GitHub destinations, TLS, proxy, bounded transfers and published asset metadata\n";
