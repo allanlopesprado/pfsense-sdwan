@@ -53,7 +53,8 @@ if ($mode === 'prepare') {
 	    !str_starts_with($rows['gateways'], "!dpinger\n")) {
 		throw new RuntimeException('Pinned source no longer generates the expected log destinations');
 	}
-	file_put_contents($work . '/etc/lab-syslog.conf', implode("\n", $rows) . "\n");
+	file_put_contents($work . '/etc/lab-syslog.conf', implode("\n", $rows) .
+	    "\n!*\n*.*\t/var/log/fixture-input.log\n");
 	return;
 }
 function demand(bool $condition, string $message): void {
@@ -80,7 +81,12 @@ foreach ($events as $entry) {
 $text = file_get_contents($file);
 demand(!str_contains($text, 'CREDENTIAL_CANARY') && !str_contains($text, 'below-default') &&
     !str_contains($text, 'separate-program'), 'Unexpected sensitive, below-threshold, or separately routed log data');
-demand(str_contains(file_get_contents($work . '/var/log/gateways.log'), 'separate-program'), 'Separate routing control absent');
+$gateways = file_get_contents($work . '/var/log/gateways.log');
+$input = file_get_contents($work . '/var/log/fixture-input.log');
+foreach (['below-default', 'separate-program'] as $marker) {
+	demand(str_contains($input, $marker), "Isolated syslogd input did not receive control {$marker}");
+}
+demand(str_contains($gateways, 'separate-program'), 'dpinger absent from native gateways.log');
 if ($format === 'rfc5424') {
 	$priorities = [28 => 'no eligible path', 27 => 'Gateway observation failed'];
 	if ($level !== 'warning') { $priorities[29] = 'Observer service started'; }

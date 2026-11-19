@@ -54,9 +54,13 @@ for scenario in rfc3164-default rfc5424-default rfc5424-warning; do
     "$php" -n "$repo/tests/lab/native-system-log.php" prepare "$src" "$work" "$format" "$level"
     : >"$work/var/log/system.log"
     : >"$work/var/log/gateways.log"
+    : >"$work/var/log/fixture-input.log"
     rm -f "$work/var/run/sdwan-observer.json.events"
     jexec "$node" /usr/sbin/syslogd -ss -c -c -m 0 -O "$format" -f /etc/lab-syslog.conf -P /var/run/lab.pid
     jexec "$node" "$php" -n /fixture/events.php
+    # External FreeBSD logger controls are independent of PHP's emitter.
+    jexec "$node" /usr/bin/logger -t sdwan -p daemon.info 'below-default'
+    jexec "$node" /usr/bin/logger -t dpinger -p daemon.warning 'separate-program'
     # Queue drain marker goes through the next independent program selector.
     for attempt in 1 2 3 4 5; do
         grep -q separate-program "$work/var/log/gateways.log" && break
@@ -68,5 +72,14 @@ for scenario in rfc3164-default rfc5424-default rfc5424-warning; do
         sleep 1
     done
     test ! -f "$work/var/run/lab.pid"
-    "$php" -n "$repo/tests/lab/native-system-log.php" verify "$src" "$work" "$format" "$level"
+    if ! "$php" -n "$repo/tests/lab/native-system-log.php" verify "$src" "$work" "$format" "$level"; then
+        echo "Isolated fixture diagnostics for $scenario" >&2
+        cat "$work/etc/lab-syslog.conf" >&2
+        for logfile in "$work"/var/log/*.log; do
+            echo "$logfile" >&2
+            # Only synthetic fixture data, never a host log.
+            tail -20 "$logfile" >&2
+        done
+        exit 1
+    fi
 done
