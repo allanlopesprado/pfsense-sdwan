@@ -303,5 +303,9 @@ EOF
     load_rules
 fi
 
+if [ "${SDWAN_REAL_DPINGER:-0}" = 1 ]; then
+    python3 -B "$repo/tests/lab/freebsd_dpinger.py" "$firewall" "$remote" "$remote_a" "${wan_b%?}b" "$work/remote.pf"
+fi
+
 sh "$repo/tests/lab/freebsd-vti-no-sa.sh" "$firewall" "$remote" "$wan_a" "$remote_a" "$work"
 sh "$repo/tests/lab/freebsd-vti-esp.sh" "$firewall" "$remote" "$wan_a" "$remote_a" "$work"

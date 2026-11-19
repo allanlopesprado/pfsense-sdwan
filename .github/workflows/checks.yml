@@ -98,7 +98,7 @@ jobs:
           usesh: true
           prepare: |
             env ASSUME_ALWAYS_YES=yes pkg bootstrap
-            pkg install -y php84 php84-filter python3
+            pkg install -y php84 php84-filter python3 dpinger
             php -n -v
           run: |
             set -eu
@@ -106,7 +106,7 @@ jobs:
             sh tests/freebsd-install.sh
             sh tests/lab/freebsd-system-log.sh "$PWD/lab-syslog/syslog.inc"
             sh tests/lab/freebsd-carp.sh
-            SDWAN_RENDERED_RULES="$PWD/lab-rendered" sh tests/lab/freebsd-dataplane.sh
+            SDWAN_REAL_DPINGER=1 SDWAN_RENDERED_RULES="$PWD/lab-rendered" sh tests/lab/freebsd-dataplane.sh
   publish:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main' && startsWith(github.event.head_commit.message, 'Release ')
     needs: [offline, freebsd, ikev2]

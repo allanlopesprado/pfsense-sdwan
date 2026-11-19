@@ -63,7 +63,7 @@ Em uma VM FreeBSD descartável com VNET, o teste CARP cria dois participantes pa
 
 Outro teste configura uma rota por VTI sem associação IPsec em duas jails e verifica o contador de ausência de associação e o recebimento no peer. Os controles pela rota física demonstram que o destino responde antes e depois da condição de falha. [Teste negativo de VTI sem SA](../tests/lab/freebsd-vti-no-sa.sh)
 
-O FortiOS combina medições ativas ou passivas com regras que dirigem tráfego. O PAN-OS permite ponderar a sensibilidade a perda, latência e jitter por perfil. Esses produtos servem de referência para comparar métricas, comportamento durante falhas e recuperação. Neste projeto, a telemetria vem do dpinger. A seleção para tráfego real depende do core de laboratório e do vínculo explícito com regras nativas. Asserções de interoperabilidade e tempos de convergência dependem de resultados de laboratório identificados por versão e topologia. [FortiOS Performance SLA](https://docs.fortinet.com/document/fortigate/7.6.6/administration-guide/584396/sd-wan-performance-sla) · [FortiOS SD-WAN rules](https://docs.fortinet.com/document/fortigate/7.6.6/administration-guide/683285/sd-wan-rules) · [PAN-OS Path Quality Profile](https://docs.paloaltonetworks.com/ngfw/help/11-1/objects/objects-sd-wan-link-management/objects-sd-wan-link-management-path-quality-profile)
+A matriz de validação reúne referências oficiais de fabricantes, os critérios aplicados ao pfSense e a evidência esperada em cada teste. A interoperabilidade e os tempos de convergência dependem da versão dos equipamentos, da topologia e da transação observada. [Matriz de validação](VALIDACAO.pt-BR.md)
 
 
 ## Conferência do endpoint IPsec em um par CARP
