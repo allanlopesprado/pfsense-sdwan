@@ -12,4 +12,6 @@ jobs:
         with:
           persist-credentials: false
       - name: Check port, PHP syntax and offline behavior
+        env:
+          REQUIRE_NATIVE_SOCKET_TEST: "1"
         run: sh tests/run.sh
