@@ -108,12 +108,15 @@ echo json_encode([http_response_code() ?: 200, $body, $sdwan_title_link,
     status, body, _, _ = render("ajax")
     assert status == 200 and "Voice" in body and "<script>" not in body
     assert all(label in body for label in ("2 of 2 eligible", "1 of 2 eligible", "0 of 2 eligible", "No recommendation"))
-    assert all(f'class="bg-{state}"' in body for state in ("success", "warning", "danger"))
+    assert all(icon in body for icon in ("fa-circle-check text-success", "fa-triangle-exclamation text-warning",
+                                         "fa-circle-xmark text-danger"))
+    assert 'class="bg-' not in body and all(f'>{count}/2</span>' in body for count in (0, 1, 2))
+    assert 'class="table table-striped table-hover table-condensed"' in body
     assert "Requested gateway" not in body and "Branch_WAN" not in body and "<time datetime=" in body
     assert 'scope="row"' in body and "aria-hidden=" in body and 'href="/sdwan/diagnostics.php?policy=Voice"' in body
     assert 'href="/sdwan/diagnostics.php?' not in render("ajax", "status")[1]
     managed = render("ajax", "manage")[1]
-    assert "Recommended member" in managed and "Requested gateway · Branch_WAN" in managed and "GW_B" in managed
+    assert "Recommended member" in managed and "Requested gateway · Branch_WAN" in managed and "Branch_WAN: GW_B" in managed
     assert "Forwarding requests unavailable." not in managed
     for allowed in ("rules-only", "groups-only"):
         restricted = render("ajax", allowed)[1]

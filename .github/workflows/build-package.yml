@@ -19,6 +19,7 @@ jobs:
         run: |
           php tests/steering_preflight.php
           php tests/steering.php
+          python3 -B tests/widget.py php
       - uses: actions/checkout@v4
         with:
           repository: freebsd/pkg

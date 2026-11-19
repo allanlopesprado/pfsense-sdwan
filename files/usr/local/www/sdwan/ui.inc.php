@@ -54,7 +54,7 @@ function sdwan_ui_snapshot(array $config): ?array {
 }
 
 function sdwan_ui_empty(string $message, int $columns): void {
-	echo '<tr><td colspan="' . $columns . '">' . sdwan_ui_escape($message) . '</td></tr>';
+	echo '<tr><td colspan="' . $columns . '" class="text-center">' . sdwan_ui_escape($message) . '</td></tr>';
 }
 
 function sdwan_ui_metric($number, string $unit): string {
@@ -76,13 +76,13 @@ function sdwan_ui_actions(array $links, bool $events = false): void {
 	$buttons = [];
 	$can_view_events = $events && isAllowedPage('/status_logs.php');
 	if ($can_view_events) {
-		$buttons[] = '<button type="submit" form="sdwan-system-logs" class="btn btn-info btn-sm">' .
+		$buttons[] = '<button type="submit" form="sdwan-system-logs" class="btn btn-primary btn-sm">' .
 		    '<i class="fa-solid fa-list icon-embed-btn" aria-hidden="true"></i> ' .
 		    sdwan_ui_escape(gettext('System Logs')) . '</button>';
 	}
 	foreach ($links as $url => [$label, $icon]) {
 		if (isAllowedPage($url)) {
-			$buttons[] = '<a class="btn btn-info btn-sm" role="button" href="' . sdwan_ui_escape($url) . '">' .
+			$buttons[] = '<a class="btn btn-default btn-sm" role="button" href="' . sdwan_ui_escape($url) . '">' .
 			    '<i class="fa-solid ' . sdwan_ui_escape($icon) . ' icon-embed-btn" aria-hidden="true"></i> ' .
 			    sdwan_ui_escape($label) . '</a>';
 		}

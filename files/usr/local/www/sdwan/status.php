@@ -34,7 +34,7 @@ if (!$sdwan['members']) {
 			<tr><th scope="row"><?php if ($can_inspect): ?><a href="/sdwan/diagnostics.php?policy=<?=rawurlencode($policy['name'])?>" title="<?=gettext('View policy diagnostics')?>"><?=sdwan_ui_escape($policy['name'])?></a><?php else: ?><?=sdwan_ui_escape($policy['name'])?><?php endif; ?></th>
 				<td><?=sdwan_ui_escape($result['selected'] ?? '—')?></td>
 				<td><?=isset($result['eligible_count']) ? sdwan_ui_escape(sprintf(gettext('%1$d of %2$d'), $result['eligible_count'], count($policy['members']))) : '—'?></td>
-				<td class="<?=$path_class?>"><strong><?=sdwan_ui_escape($path_text)?></strong>
+				<td class="<?=$path_class?>"><?=sdwan_ui_escape($path_text)?>
 					<?php if (!empty($result['shared_interface'])): ?>
 						<br><small><?=gettext('Members share a gateway interface.')?></small>
 					<?php elseif (!empty($result['shared_underlay'])): ?>
@@ -48,11 +48,11 @@ if (!$sdwan['members']) {
 		?>
 		</tbody>
 	</table></div>
-	<?php if ($snapshot !== null): ?>
-	<p><small><?=gettext('Last sample')?>:
-		<time datetime="<?=date(DATE_ATOM, $snapshot['generated_at'])?>"><?=sdwan_ui_escape(date('Y-m-d H:i:s T', $snapshot['generated_at']))?></time></small></p>
-	<?php endif; ?>
 	</div>
+	<?php if ($snapshot !== null): ?>
+	<div class="panel-footer"><small><?=gettext('Last sample')?>
+		<time datetime="<?=date(DATE_ATOM, $snapshot['generated_at'])?>"><?=sdwan_ui_escape(date('Y-m-d H:i:s T', $snapshot['generated_at']))?></time></small></div>
+	<?php endif; ?>
 </div>
 <div class="panel panel-default">
 	<div class="panel-heading"><h2 class="panel-title"><?=gettext('Gateway Status')?></h2></div>
@@ -70,7 +70,7 @@ if (!$sdwan['members']) {
 				<td><?=sdwan_ui_metric($reading['rtt_ms'] ?? null, ' ms')?></td>
 				<td><?=sdwan_ui_metric($reading['rttsd_ms'] ?? null, ' ms')?></td>
 				<td><?=sdwan_ui_metric($reading['loss_pct'] ?? null, '%')?></td>
-				<td class="<?=$cell_class?>"><strong><?=sdwan_ui_escape($state_text)?></strong></td></tr>
+				<td class="<?=$cell_class?>"><?=sdwan_ui_escape($state_text)?></td></tr>
 		<?php endforeach;
 		if (!$sdwan['members']) {
 			sdwan_ui_empty(gettext('Add a member to observe an existing gateway.'), 6);

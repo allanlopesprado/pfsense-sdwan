@@ -109,7 +109,7 @@ def verify_dashboard_layout(core, output, widget, fragment):
 
         metrics = []
         for theme in ("light", "dark"):
-            for width in (640, 360):
+            for width in (640, 360, 320):
                 call("/goog/cdp/execute", {"cmd": "Emulation.setDeviceMetricsOverride",
                      "params": {"width": width, "height": 800, "deviceScaleFactor": 1, "mobile": False}})
                 call("/url", {"url": f"http://127.0.0.1:{server.server_port}/{theme}.html"})
@@ -155,17 +155,21 @@ def verify_dashboard_layout(core, output, widget, fragment):
                         const a=luminance(bg),b=luminance(over(bg,rgba(getComputedStyle(el).color)));
                         return (Math.max(a,b)+.05)/(Math.min(a,b)+.05);
                     }
-                    const readouts=region.querySelectorAll('tbody td, .sdwan-widget-detail, time');
+                    const readouts=region.querySelectorAll('tbody th a, tbody td, .sdwan-widget-detail, time');
+                    const rows=region.querySelectorAll('tbody tr');
                     return {width:box.width,height:Math.ceil(box.height),viewport:innerWidth,
                             horizontalOverflow:Math.max(...nodes.map(e=>e.scrollWidth-e.clientWidth)),
                             background:getComputedStyle(document.body).backgroundColor,
-                            rows:panel.querySelectorAll('tbody tr').length,
+                            rows:rows.length,
+                            neutralStatusCells:Array.from(rows).every(row=>Array.from(row.cells).every(c=>!c.className.includes('bg-'))),
+                            pathRatios:Array.from(rows).map(row=>row.lastElementChild.querySelector('[aria-hidden]').textContent),
                             minimumReadoutContrast:Math.min(...Array.from(readouts,contrast)),
                             positiveTabindex:panel.querySelectorAll('[tabindex]:not([tabindex="-1"]):not([tabindex="0"])').length};
                 """
                 data = js(layout_script)
                 assert data["width"] == width and data["viewport"] == width and data["horizontalOverflow"] <= 1, data
                 assert data["rows"] == 3 and data["positiveTabindex"] == 0
+                assert data["neutralStatusCells"] and data["pathRatios"] == ["2/2", "1/2", "0/2"]
                 assert data["minimumReadoutContrast"] >= 4.5, data
                 expected_bg = "rgb(245, 245, 245)" if theme == "light" else "rgb(33, 33, 33)"
                 assert data["background"] == expected_bg, data
@@ -176,11 +180,11 @@ def verify_dashboard_layout(core, output, widget, fragment):
                 assert png[:8] == b"\x89PNG\r\n\x1a\n" and struct.unpack(">II", png[16:24]) == (width, data["height"])
                 (output / f"widget-{theme}-{width}.png").write_bytes(png)
                 js("""document.querySelector('tbody th a').textContent='X'.repeat(32);
-                      document.querySelector('.sdwan-widget-request').append('Y'.repeat(96));""")
+                      document.querySelector('.sdwan-widget-detail').append('Y'.repeat(96));""")
                 stress = js(layout_script)["horizontalOverflow"]
                 assert stress <= 1, (theme, width, stress)
                 metrics.append(dict(data, theme=theme, tabOrder=tabs, focusRetainedAfterRefresh=True,
                                     longIdentifierOverflow=stress))
         (output / "widget-fragment.html").write_text(widget)
         (output / "metrics.json").write_text(json.dumps(metrics, indent=2) + "\n")
-        print("ok - four native theme/width screenshots, no horizontal overflow, keyboard navigation and AJAX focus")
+        print("ok - six native theme/width screenshots, no horizontal overflow, keyboard navigation and AJAX focus")

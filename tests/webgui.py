@@ -223,6 +223,9 @@ def run(php, classes, screenshot_dir=None):
         event_attrs, event_post = event_form
         assert event_attrs.get("method") == "post" and event_attrs.get("id") == "sdwan-system-logs"
         assert 'form="sdwan-system-logs"' in fresh and "__csrf_magic" in event_post
+        assert 'form="sdwan-system-logs" class="btn btn-primary btn-sm"' in fresh
+        assert 'class="btn btn-default btn-sm" role="button" href="/status_gateways.php"' in fresh
+        assert 'class="panel-footer"><small>Last sample' in fresh
         assert event_post["logfile"] == "system" and event_post["filterlogentries_process"] == "sdwan"
         delegated = request("status", privileges={"/firewall_rules.php": False}, snapshot=snapshot)
         assert "/sdwan/forwarding.php" not in Choices(delegated).links and 'form="sdwan-system-logs"' in delegated

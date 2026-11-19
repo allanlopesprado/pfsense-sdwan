@@ -58,7 +58,7 @@ if ($policy !== null):
 			[$cell_class, $state_text] = sdwan_ui_gateway_state($reading['status'] ?? null);
 		?>
 			<tr><th scope="row"><?=sdwan_ui_escape($member)?></th>
-				<td class="<?=$cell_class?>"><strong><?=sdwan_ui_escape($state_text)?></strong></td>
+				<td class="<?=$cell_class?>"><?=sdwan_ui_escape($state_text)?></td>
 				<td><?=sdwan_ui_metric($reading['rtt_ms'] ?? null, ' ms')?></td>
 				<td><?=sdwan_ui_metric($reading['loss_pct'] ?? null, '%')?></td>
 				<td><?=sdwan_ui_escape($result['candidates'][$member] ?? gettext('Awaiting evaluation'))?></td></tr>
