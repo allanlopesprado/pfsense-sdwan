@@ -5,29 +5,77 @@ require_once('pfsense-utils.inc');
 require_once('/usr/local/pkg/sdwan_release.inc');
 define('SDWAN_GUI', true);
 require_once(__DIR__ . '/ui.inc.php');
+require_once('/usr/local/pkg/sdwan_log.inc');
+
+$can_upgrade = isAllowedPage('/pkg_mgr_install.php');
+$is_post = ($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST';
+$check = $is_post && isset($_POST['check_release']);
+$upgrade = $is_post && isset($_POST['upgrade_release']);
+$target = ['version' => sdwan_ui_scalar($_POST, 'target_version'), 'sha256' => sdwan_ui_scalar($_POST, 'target_sha256')];
+$result = null;
+$message = null;
+$severity = 'warning';
+if ($upgrade) {
+	if (!$can_upgrade) {
+		http_response_code(403);
+		$message = gettext('Upgrading SD-WAN requires the Package Manager installation privilege.');
+	} else {
+		ignore_user_abort(true);
+		set_time_limit(0);
+		$result = sdwan_release_upgrade($target);
+		$severity = $result === 'success' ? 'success' : 'warning';
+		$message = match ($result) {
+			'success' => sprintf(gettext('SD-WAN %s was installed and the observer is running.'), $target['version']),
+			'invalid' => gettext('The upgrade request is invalid or this firewall is incompatible with the package.'),
+			'busy' => gettext('An SD-WAN upgrade is already in progress. Reload this page in a moment.'),
+			'not_newer' => gettext('This release is no longer newer than the installed package. Check GitHub again.'),
+			'changed' => gettext('The installed or published version changed. Check GitHub again before upgrading.'),
+			'unpublished' => gettext('The GitHub release asset could not be verified. Check GitHub again later.'),
+			'download' => gettext('The package download did not complete. Check connectivity to GitHub and retry.'),
+			'checksum' => gettext('The downloaded package failed SHA-256 verification. Check GitHub again before retrying.'),
+			'storage' => gettext('The firewall could not stage the package. Check available space in /tmp.'),
+			'manifest' => gettext('The downloaded package identity does not match the selected SD-WAN release.'),
+			'install' => gettext('The package manager could not install the update. Check System Logs before retrying.'),
+			default => gettext('The package manager returned success, but the installed version, files or observer could not be verified. Check System Logs.'),
+		};
+		if (in_array($result, ['success', 'install', 'verify'], true)) {
+			sdwan_log_emit($result === 'success' ? LOG_NOTICE : LOG_WARNING,
+			    'Package upgrade to ' . $target['version'] . ': ' . $result . '.');
+		}
+	}
+}
 
 $installed = sdwan_release_installed();
-$requested = $_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['check'] ?? null) === 'github';
-$release = $requested ? sdwan_release_check() : null;
+$release = !$upgrade && $check ? sdwan_release_check() : null;
+$available = false;
+if (!$upgrade && $check && $release === null) {
+	$message = gettext('Could not verify release information from GitHub. Check network access, DNS, the proxy and the firewall clock, then retry.');
+} elseif ($message === null && $installed === null) {
+	$message = gettext('The installed SD-WAN version could not be read from the local package database.');
+} elseif ($release !== null && $installed !== null) {
+	$comparison = pkg_version_compare($installed, $release['version']);
+	$severity = 'info';
+	if ($comparison === '<' && $can_upgrade && sdwan_release_compatible()) {
+		$available = sdwan_release_asset_size($release) !== null;
+		$message = $available ? gettext('A newer version is ready to install.') :
+		    gettext('The GitHub release asset could not be verified. Check GitHub again later.');
+		$severity = $available ? 'info' : 'warning';
+	} else {
+		$message = match ($comparison) {
+			'<' => $can_upgrade ? gettext('This firewall is incompatible with the published package.') :
+			    gettext('A newer version is available. Upgrading requires the Package Manager installation privilege.'),
+			'=' => gettext('SD-WAN is up to date.'),
+			'>' => gettext('The installed version is newer than the version published on GitHub.'),
+			default => gettext('Unable to compare package versions.'),
+		};
+	}
+}
 
 $pgtitle = [gettext('Services'), gettext('SD-WAN'), gettext('Updates')];
 include('head.inc');
 sdwan_ui_tabs('updates');
-
-if ($requested && $release === null) {
-	print_info_box(gettext('Could not verify release information from GitHub. Check network access, DNS, the proxy and the firewall clock, then retry.'), 'warning', false);
-}
-if ($installed === null) {
-	print_info_box(gettext('The installed SD-WAN version could not be read from the local package database.'), 'warning', false);
-} elseif ($release !== null) {
-	$comparison = pkg_version_compare($installed, $release['version']);
-	$messages = [
-		'<' => gettext('A newer version is published on GitHub. Review the installation instructions before upgrading.'),
-		'=' => gettext('The installed version matches the version published on GitHub.'),
-		'>' => gettext('The installed version is newer than the version published on GitHub.'),
-	];
-	print_info_box($messages[$comparison] ?? gettext('Unable to compare package versions.'),
-	    isset($messages[$comparison]) ? 'info' : 'warning', false);
+if ($message !== null) {
+	print_info_box($message, $severity, false);
 }
 $form = new Form(false);
 $form->setAction('/sdwan/updates.php');
@@ -41,11 +89,32 @@ if ($release !== null) {
 	$section->addInput(new Form_StaticText(gettext('SHA-256'), $digest));
 }
 $form->add($section);
-$form->addGlobal(new Form_Input('check', '', 'hidden', 'github'));
-$form->addGlobal(new Form_Button('check_release', gettext('Check GitHub'), null, 'fa-solid fa-arrows-rotate'))->addClass('btn-primary');
-$form->addGlobal(new Form_Button('instructions', gettext('Installation Instructions'),
-	'https://github.com/allanlopesprado/pfsense-sdwan/blob/main/README.md', 'fa-solid fa-arrow-up-right-from-square'))
-    ->setAttribute('target', '_blank')->setAttribute('rel', 'noopener noreferrer');
+$form->addGlobal(new Form_Button('check_release', gettext('Check GitHub'), null, 'fa-solid fa-search'))
+    ->addClass($available ? 'btn-default' : 'btn-primary');
+if ($available) {
+	$form->addGlobal(new Form_Input('target_version', '', 'hidden', $release['version']));
+	$form->addGlobal(new Form_Input('target_sha256', '', 'hidden', $release['sha256']));
+	$form->addGlobal(new Form_Button('upgrade_release', sprintf(gettext('Upgrade to %s'), $release['version']),
+	    null, 'fa-solid fa-arrows-rotate'))->addClass('btn-success');
+}
 print $form;
+if ($available): ?>
+	<p id="sdwan-upgrade-progress" role="status" class="text-info hidden"><?=gettext('Installing the SD-WAN update. Please wait.')?></p>
+	<script>
+	events.push(function () {
+		var upgrade = document.getElementById('upgrade_release');
+		if (!upgrade) return;
+		var submitting = false;
+		upgrade.form.addEventListener('submit', function (event) {
+			if (submitting) {
+				event.preventDefault();
+			} else if (event.submitter === upgrade) {
+				submitting = true;
+				document.getElementById('sdwan-upgrade-progress').classList.remove('hidden');
+			}
+		});
+	});
+	</script>
+<?php endif;
 sdwan_ui_actions(['/pkg_mgr_installed.php' => [gettext('Installed Packages'), 'fa-box-archive']]);
 include('foot.inc');
