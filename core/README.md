@@ -15,6 +15,10 @@ git diff --no-index pfsense-base/src/etc/inc/filter.inc sdwan-core-lab/src/etc/i
 
 O último comando mostra a diferença e retorna 1 quando encontra alterações. O preparador verifica o SHA-256 do arquivo de origem, aplica o patch numa cópia e gera dois arquivos em `sdwan-core-lab/src/etc/inc`. Incorpore ambos na mesma revisão da árvore usada pelo seu processo de construção de imagem. Para outra base, compare também as implementações de inventário dos gateways, geração das regras, parser XML e recarga do filtro antes de portar a mudança. A restauração do snapshot do clone recupera sua imagem de referência. [Construção fora do firewall](https://docs.netgate.com/pfsense/en/latest/development/compile-software.html) · [Testes da imagem e rollback](../docs/LAB.pt-BR.md)
 
+### Cópia de laboratório do CE 2.9.1
+
+Para preparar uma cópia fora do appliance, use `--ce-291-lab` com uma árvore que contenha o `filter.inc` original em `src/etc/inc/filter.inc`. O modo exige o SHA-256 `6acd8621e4f88660759c5656488d81f580b49f4c9848b19048ae6a2570e177b4`. O hook vem depois da decisão nativa que pode omitir gateways indisponíveis. O ensaio cobriu aplicação e sintaxe PHP na cópia exata. Tráfego com dois caminhos, recarga do filtro e reversão ainda precisam ser validados no clone antes de usar a imagem.
+
 ## Escopo do encaminhamento
 
 O gerador consulta os próximos saltos que o pfSense calculou na recarga atual. Um vínculo identifica os trackers das regras aprovadas, a mesma família IP, o grupo dedicado, os membros e a revisão das condições de correspondência. A escolha de um gateway fica estável entre os trackers do mesmo vínculo durante uma geração completa. Sem amostra válida, a regra vinculada gera um bloqueio quando o filtro é recompilado. A prévia exige também um bloqueio nativo permanente de mesmo escopo logo abaixo da permissão, para os cenários em que o próprio pfSense omitir uma regra.
