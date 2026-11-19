@@ -1,0 +1,61 @@
+name: Native WebGUI candidate
+on:
+  push:
+    branches: [codex/pfsense-native-webgui-build]
+permissions:
+  contents: read
+jobs:
+  webgui:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: pfsense/pfsense
+          ref: 9363ac5b8651a1c7a333180425ce7719070f95f9
+          path: pfsense-core-fixture
+          sparse-checkout: |
+            src/usr/local/www/css
+            src/usr/local/www/vendor/font-awesome
+            src/usr/local/www/vendor/bootstrap
+            src/usr/local/www/vendor/jquery
+            src/usr/local/www/vendor/jquery-ui
+            src/usr/local/www/classes
+            src/usr/local/www/csrf
+            src/usr/local/www/guiconfig.inc
+            src/usr/local/www/status_logs_common.inc
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - name: Verify native forms and dashboard
+        run: |
+          find files -type f \( -name '*.php' -o -name '*.inc' \) -exec php -l {} \;
+          python3 tests/webgui.py --classes pfsense-core-fixture/src/usr/local/www/classes --screenshots-dir preview-out/pages
+          python3 -B tests/widget.py php --visual-core pfsense-core-fixture --screenshots preview-out/dashboard
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-webgui-previews
+          path: preview-out/
+          if-no-files-found: error
+  package:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Build with FreeBSD pkg
+        uses: vmactions/freebsd-vm@4441bea20b31bfa77329a5af583199362489567e
+        with:
+          release: "15.0"
+          usesh: true
+          copyback: true
+          prepare: |
+            env ASSUME_ALWAYS_YES=yes pkg bootstrap
+            pkg install -y python311
+          run: python3.11 tools/build-lab-pkg.py --pkg /usr/local/sbin/pkg-static --output "$PWD/package-out"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-webgui-package
+          path: package-out/
+          if-no-files-found: error
