@@ -31,7 +31,7 @@ An experimental package for monitoring links, comparing gateways against SLAs, a
 
 <!-- install-command -->
 ```sh
-d=$(mktemp -d /tmp/sdwan.XXXXXXXX) && (trap 'rm -rf "$d"' EXIT; p="$d/pfSense-pkg-SDWAN-0.4.16.pkg"; fetch -o "$p" 'https://raw.githubusercontent.com/allanlopesprado/pfsense-sdwan/60d7c1299ac03eedafad9e6782070d6486750c59/dist/pfSense-pkg-SDWAN-0.4.16.pkg' && sha256 -c 2a9f9cefe0a8faa2a88fa6b930735ae985cd83e8c3e4bf7f3742af3a449377fe "$p" && pkg add "$p")
+d=$(mktemp -d /tmp/sdwan.XXXXXXXX) && (trap 'rm -rf "$d"' EXIT; p="$d/pfSense-pkg-SDWAN-0.4.17.pkg"; fetch -o "$p" 'https://raw.githubusercontent.com/allanlopesprado/pfsense-sdwan/3e96d30ab2540ef163eb8c819baf1e6a4883f465/dist/pfSense-pkg-SDWAN-0.4.17.pkg' && sha256 -c ec7e17ae797071f14daa82e8c2697df565f9df2e2d52f49461d710578ced70ca "$p" && pkg add "$p")
 ```
 
 3. Open **Services → SD-WAN**. Check the service under **Status → Services** and the installed version under **SD-WAN → Updates**.
