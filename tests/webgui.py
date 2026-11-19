@@ -79,7 +79,7 @@ def screenshots(directory, www, pages):
             self.wfile.write(b"<title>Native system log fixture</title>")
     with tempfile.TemporaryDirectory() as folder:
         site = Path(folder)
-        for assets in ("css", "vendor/bootstrap/css", "vendor/font-awesome", "vendor/jquery-ui"):
+        for assets in ("css", "js", "vendor/bootstrap", "vendor/font-awesome", "vendor/jquery", "vendor/jquery-ui"):
             source = www / assets
             if not source.is_dir():
                 raise RuntimeError(f"Missing upstream pfSense assets: {source}")
@@ -105,6 +105,39 @@ def screenshots(directory, www, pages):
                                     f"--screenshot={out.resolve()}", f"http://127.0.0.1:{server.server_port}/{preview}.html"],
                                    capture_output=True, check=True, timeout=35)
                     assert out.read_bytes().startswith(b"\x89PNG"), out
+                # pfSense.js focuses the first visible input before running the page callbacks.
+                native_scripts = ("/vendor/jquery/jquery-3.7.1.min.js", "/vendor/jquery-ui/jquery-ui-1.13.2.min.js",
+                                  "/vendor/bootstrap/js/bootstrap.min.js", "/js/pfSense.js")
+                focus_probe = """
+                    <script>
+                    const logs = document.querySelector('button[form="sdwan-system-logs"]');
+                    let automaticFocus = 0;
+                    logs.addEventListener('focus', function () { automaticFocus++; });
+                    events.push(function () {
+                        const filter = document.querySelector('select[name="policy"]');
+                        const correctInitialFocus = filter ? document.activeElement === filter && automaticFocus === 0 :
+                            document.activeElement !== logs && automaticFocus === 1;
+                        const noOutline = getComputedStyle(logs).outlineStyle === 'none';
+                        logs.focus({preventScroll: true});
+                        const focusStillWorks = document.activeElement === logs && logs.tabIndex === 0 &&
+                            getComputedStyle(logs).outlineStyle !== 'none';
+                        document.body.dataset.sdwanFocus = correctInitialFocus && noOutline && focusStillWorks ? 'pass' : 'fail';
+                    });
+                    </script>
+                """
+                for name, theme in (("status", "pfSense"), ("status", "pfSense-dark"), ("diagnostics", "pfSense")):
+                    focus_page = pages[name].replace("</head>", f'<link rel="stylesheet" href="/css/{theme}.css"></head>')
+                    footer = focus_probe + "".join(f'<script src="{url}"></script>' for url in native_scripts)
+                    focus_page = focus_page.replace("</body>", footer + "</body>")
+                    filename = f"{name}-{theme}-focus.html"
+                    (site / filename).write_text(focus_page)
+                    output = subprocess.run([chrome, "--headless", "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage",
+                                             f"--user-data-dir={folder}/chrome", "--virtual-time-budget=1000", "--dump-dom",
+                                             f"http://127.0.0.1:{server.server_port}/{filename}"],
+                                            capture_output=True, text=True, check=True, timeout=35)
+                    assert 'data-sdwan-focus="pass"' in output.stdout, (name, theme, output.stdout.split("<body")[1][:140])
+                print("ok - native startup clears the System Logs outline, preserves the policy field and keeps the button focusable")
+
                 page = pages["status"].replace("</body>",
                     '<script>document.querySelector(\'button[form="sdwan-system-logs"]\').click();</script></body>')
                 (site / "system-logs-click.html").write_text(page)
@@ -156,7 +189,8 @@ def run(php, classes, screenshot_dir=None):
             (root / name).touch()
         (root / "phpsessionmanager.inc").write_text("<?php function phpsession_end() {}")
         (root / "head.inc").write_text('<!doctype html><html lang="en"><head><meta charset="utf-8">'
-                                      '<meta name="viewport" content="width=device-width, initial-scale=1"></head>'
+                                      '<meta name="viewport" content="width=device-width, initial-scale=1">'
+                                      '<script>var events = [];</script></head>'
                                       '<body><main class="container"><header class="header"><?=genhtmltitle($pgtitle)?></header>')
         (root / "foot.inc").write_text("</main></body></html>")
 

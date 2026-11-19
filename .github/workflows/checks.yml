@@ -29,6 +29,7 @@ jobs:
           sparse-checkout: |
             src/etc/inc
             src/usr/local/www/css
+            src/usr/local/www/js/pfSense.js
             src/usr/local/www/vendor/font-awesome
             src/usr/local/www/vendor/bootstrap
             src/usr/local/www/vendor/jquery

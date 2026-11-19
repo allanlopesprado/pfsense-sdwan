@@ -99,6 +99,17 @@ function sdwan_ui_actions(array $links, bool $events = false): void {
 		    '<input type="hidden" name="filterlogentries_submit" value="1">' .
 		    '<input type="hidden" name="filterlogentries_process" value="sdwan">' .
 		    '</form>';
+		?>
+		<script>
+		events.push(function () {
+			// pfSense runs these callbacks after focusing the first visible input.
+			const button = document.querySelector('button[form="sdwan-system-logs"]');
+			if (button && document.activeElement === button) {
+				button.blur();
+			}
+		});
+		</script>
+		<?php
 	}
 }
 
