@@ -39,4 +39,6 @@ Dois processos strongSwan do Ubuntu 24.04 negociaram duas IKE_SAs e dois CHILD_S
 
 ## Aceite em equipamento
 
-Permanecem pendentes a instalação com os hooks reais no CE 2.9.1, a negociação e o rekey IKEv2 com FortiOS, o retorno simétrico nas duas WANs e a recuperação conjunta de CARP, estados e IPsec entre dois appliances. A entrega experimental cobre seleção de caminho por regra de entrada. A decisão de rota padrão do próprio firewall, a distribuição por catálogo e os recursos específicos do FortiOS têm critérios próprios. [Matriz de interoperabilidade](FORTIOS.pt-BR.md) · [Procedimento de homologação](LAB.pt-BR.md)
+No CE 2.9.1, a atualização do 0.4.2 para o 0.4.3 executou os hooks reais. A verificação no equipamento confirmou integridade, registro de pacote e serviço, amostra atual e eventos no leitor nativo do log. A configuração do SD-WAN e as regras PF e NAT apresentaram os mesmos valores antes e depois. [Versão 0.4.3](https://github.com/allanlopesprado/pfsense-sdwan/releases/tag/v0.4.3)
+
+Permanecem pendentes a negociação e o rekey IKEv2 com FortiOS, o retorno simétrico nas duas WANs e a recuperação conjunta de CARP, estados e IPsec entre dois appliances usando a imagem CE 2.9.1. A entrega experimental cobre seleção de caminho por regra de entrada. A decisão de rota padrão do próprio firewall, a distribuição por catálogo e os recursos específicos do FortiOS têm critérios próprios. [Matriz de interoperabilidade](FORTIOS.pt-BR.md) · [Procedimento de homologação](LAB.pt-BR.md)
