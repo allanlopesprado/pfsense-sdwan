@@ -8,6 +8,7 @@ pkg/sdwan_log.inc
 pkg/sdwan_preflight.inc
 pkg/sdwan_release.inc
 pkg/sdwan_steering.inc
+pkg/shortcuts/pkg_sdwan.inc
 sbin/sdwand.php
 %%DATADIR%%/info.xml
 www/sdwan/diagnostics.php

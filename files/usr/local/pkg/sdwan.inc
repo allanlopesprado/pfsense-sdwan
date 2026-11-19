@@ -4,6 +4,20 @@
 const SDWAN_CONFIG_PATH = 'installedpackages/sdwan';
 const SDWAN_CONFIG_VERSION = '1';
 
+/* pfSense registers services by name and saves the list after this install hook. */
+function sdwan_remove_legacy_service(): void {
+	$path = 'installedpackages/service';
+	$services = config_get_path($path, []);
+	if (!is_array($services)) {
+		return;
+	}
+	$current = array_filter($services, static fn($service) =>
+	    !(($service['name'] ?? null) === 'sdwand' && ($service['rcfile'] ?? null) === 'sdwand.sh'));
+	if ($current !== $services) {
+		config_set_path($path, array_values($current));
+	}
+}
+
 function sdwan_empty_config(): array {
 	return ['version' => SDWAN_CONFIG_VERSION, 'members' => [], 'slas' => [], 'policies' => []];
 }

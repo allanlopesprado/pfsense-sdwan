@@ -17,19 +17,33 @@ def check_install_xml(php):
     if not hook:
         raise AssertionError("Missing package installation hook")
     # Execute exactly the PHP fragment read by install_package_xml.
-    harness = """$calls = [];
+    harness = "require " + json.dumps(str(FILES / "usr/local/pkg/sdwan.inc")) + ";\n" + """$calls = [];
+$services = json_decode($argv[2], true, 512, JSON_THROW_ON_ERROR);
+$writes = 0;
+function config_get_path($path, $default) {
+    if ($path !== 'installedpackages/service') { exit(64); }
+    return $GLOBALS['services'];
+}
+function config_set_path($path, $value) {
+    if ($path !== 'installedpackages/service') { exit(64); }
+    $GLOBALS['services'] = $value;
+    $GLOBALS['writes']++;
+}
 function mwexec($command, $nologentry = false) {
     global $calls, $argv;
     $calls[] = $command;
     return str_ends_with($command, ' status') ? (int)$argv[1] : 0;
 }
-""" + hook + "\necho json_encode($calls);"
+""" + hook + "\necho json_encode([$calls, $services, $writes]);"
     rcfile = "/usr/local/etc/rc.d/sdwand.sh "
-    for status, action in [(0, "restart"), (1, "start")]:
-        result = subprocess.run([php, "-r", harness, "--", str(status)],
+    current = [{"name": "other", "rcfile": "other.sh"}, {"name": "sdwan", "rcfile": "sdwand.sh"},
+               {"name": "sdwand", "rcfile": "unrelated.sh"}]
+    legacy = {"name": "sdwand", "rcfile": "sdwand.sh"}
+    for status, action, services, writes in [(0, "restart", [legacy, *current, legacy], 1), (1, "start", current, 0)]:
+        result = subprocess.run([php, "-r", harness, "--", str(status), json.dumps(services)],
                                 check=True, text=True, capture_output=True)
-        if json.loads(result.stdout) != [rcfile + "status", rcfile + action]:
-            raise AssertionError("Unexpected worker lifecycle during package registration")
+        if json.loads(result.stdout) != [[rcfile + "status", rcfile + action], current, writes]:
+            raise AssertionError("Unexpected service migration or worker lifecycle during package registration")
 
 
 def check_shell_hooks(tmp):

@@ -1,5 +1,5 @@
 PORTNAME=	pfSense-pkg-SDWAN
-PORTVERSION=	0.4.11
+PORTVERSION=	0.4.12
 CATEGORIES=	net
 MASTER_SITES=	# empty
 DISTFILES=	# empty
@@ -20,11 +20,12 @@ do-extract:
 	@ ${MKDIR} ${WRKSRC}
 
 do-install:
-	@ ${MKDIR} ${STAGEDIR}${PREFIX}/pkg ${STAGEDIR}${PREFIX}/www/sdwan \
+	@ ${MKDIR} ${STAGEDIR}${PREFIX}/pkg/shortcuts ${STAGEDIR}${PREFIX}/www/sdwan \
 		${STAGEDIR}${PREFIX}/www/widgets/include ${STAGEDIR}${PREFIX}/www/widgets/widgets \
 		${STAGEDIR}${PREFIX}/sbin ${STAGEDIR}${PREFIX}/etc/rc.d \
 		${STAGEDIR}/etc/inc/priv ${STAGEDIR}${DATADIR}
-	${INSTALL_DATA} ${FILESDIR}/usr/local/pkg/* ${STAGEDIR}${PREFIX}/pkg/
+	${INSTALL_DATA} ${FILESDIR}/usr/local/pkg/*.inc ${FILESDIR}/usr/local/pkg/*.xml ${STAGEDIR}${PREFIX}/pkg/
+	${INSTALL_DATA} ${FILESDIR}/usr/local/pkg/shortcuts/pkg_sdwan.inc ${STAGEDIR}${PREFIX}/pkg/shortcuts/
 	${INSTALL_DATA} ${FILESDIR}/usr/local/www/sdwan/* ${STAGEDIR}${PREFIX}/www/sdwan/
 	${INSTALL_DATA} ${FILESDIR}/usr/local/www/widgets/include/sdwan.inc ${STAGEDIR}${PREFIX}/www/widgets/include/
 	${INSTALL_DATA} ${FILESDIR}/usr/local/www/widgets/widgets/sdwan.widget.php ${STAGEDIR}${PREFIX}/www/widgets/widgets/

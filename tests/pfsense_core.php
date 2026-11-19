@@ -16,12 +16,17 @@ $temp = sys_get_temp_dir() . '/sdwan-core-' . bin2hex(random_bytes(10));
 mkdir($temp, 0700);
 mkdir($temp . '/Net');
 register_shutdown_function(static function () use ($temp): void {
-	foreach (['Net/IPv6.php', 'globals.inc', 'guiconfig.inc', 'config.inc', 'sdwan.widget.php', 'config.xml'] as $path) {
+	foreach (['Net/IPv6.php', 'globals.inc', 'guiconfig.inc', 'config.inc', 'sdwan.widget.php', 'config.xml',
+	    'shortcuts.inc', 'webgui/status_logs.php', 'webgui/sdwan/members.php', 'webgui/sdwan/status.php'] as $path) {
 		if (is_file($temp . '/' . $path)) {
 			unlink($temp . '/' . $path);
 		}
 	}
-	rmdir($temp . '/Net');
+	foreach (['native-shortcuts', 'webgui/sdwan', 'webgui', 'Net'] as $directory) {
+		if (is_dir($temp . '/' . $directory)) {
+			rmdir($temp . '/' . $directory);
+		}
+	}
 	rmdir($temp);
 });
 // The selected upstream routines do not use the PEAR IPv6 class or need an
@@ -58,7 +63,8 @@ require $root . '/files/etc/inc/priv/sdwan.priv.inc';
 $package = parse_xml_config_pkg($local . '/share/pfSense-pkg-SDWAN/info.xml', 'pfsensepkgs')['package'][0];
 $gui = parse_xml_config_pkg($local . '/pkg/' . $package['configurationfile'], 'packagegui');
 verify($gui['menu'][0]['url'] === '/sdwan/status.php' && $gui['menu'][0]['section'] === 'Services', 'Package menu');
-verify($gui['service'][0]['name'] === 'sdwand' && is_file($local . '/etc/rc.d/' . $gui['service'][0]['rcfile']), 'Service metadata');
+verify($gui['service'][0]['name'] === 'sdwan' && $gui['service'][0]['rcfile'] === 'sdwand.sh' &&
+    is_file($local . '/etc/rc.d/' . $gui['service'][0]['rcfile']), 'Service metadata');
 echo "ok - upstream package XML parser loads the menu and service\n";
 
 $single = [
@@ -89,6 +95,46 @@ foreach (['members', 'slas', 'policies', 'forwarding', 'updates'] as $page) {
 	verify(!isAllowedPage("/sdwan/{$page}.php"), "Read-only role denied {$page}");
 }
 echo "ok - upstream page matcher enforces the SD-WAN view and manage roles\n";
+
+$corewww = $argv[1] . '/src/usr/local/www';
+$packagewww = $www;
+$www = $temp . '/webgui';
+mkdir($www . '/sdwan', 0700, true);
+mkdir($temp . '/native-shortcuts', 0700);
+foreach (['members.php', 'status.php'] as $page) {
+	copy($packagewww . '/sdwan/' . $page, $www . '/sdwan/' . $page);
+}
+copy($corewww . '/status_logs.php', $www . '/status_logs.php');
+file_put_contents($temp . '/shortcuts.inc', strtr(file_get_contents($corewww . '/shortcuts.inc'), [
+	'/usr/local/www/shortcuts' => $temp . '/native-shortcuts',
+	'/usr/local/pkg/shortcuts' => $local . '/pkg/shortcuts',
+]));
+$role = ['*'];
+$_SERVER['REQUEST_URI'] = '/status_services.php';
+require $temp . '/shortcuts.inc';
+$shortcut = get_shortcut_by_service_name($gui['service'][0]['name']);
+verify($shortcut === 'sdwan' && get_shortcut_by_service_name('sdwand') === null, 'Shortcut bound to the registered service');
+verify(str_contains(get_shortcut_main_link($shortcut), 'href="sdwan/members.php"') &&
+    str_contains(get_shortcut_status_link($shortcut), 'href="sdwan/status.php"'), 'Native settings and status icons');
+$log_link = get_shortcut_log_link($shortcut);
+preg_match('/href="([^"]+)"/', $log_link, $href);
+verify(str_contains($log_link, 'Related log entries') && isset($href[1]), 'Native log icon');
+$log_url = html_entity_decode($href[1], ENT_QUOTES, 'UTF-8');
+parse_str(parse_url($log_url, PHP_URL_QUERY), $log_query);
+verify($log_query === ['logfile' => 'system', 'filterlogentries_submit' => '1', 'filterlogentries_process' => 'sdwan'],
+    'Native system log filter URL');
+
+$role = array_merge($view, ['status_logs.php']);
+require $local . '/pkg/shortcuts/pkg_sdwan.inc';
+verify(get_shortcut_main_link($shortcut) === '' && str_contains(get_shortcut_status_link($shortcut), 'sdwan/status.php'),
+    'View-only accounts only see allowed SD-WAN shortcuts');
+verify(!isAllowedPage($log_url) && str_contains(get_shortcut_log_link($shortcut), 'href="status_logs.php"'),
+    'Exact native System Logs privilege gets its authorized URL');
+$role = $manage;
+require $local . '/pkg/shortcuts/pkg_sdwan.inc';
+verify(get_shortcut_log_link($shortcut) === '', 'Missing log privilege hides the log shortcut');
+$www = $packagewww;
+echo "ok - native service shortcut loader renders SD-WAN settings, status and authorized log links\n";
 
 // Relocate absolute installed includes, preserving the shipped widget basename
 // because the native widget validator compares the key to the endpoint filename.

@@ -37,6 +37,8 @@ jobs:
             src/usr/local/www/classes
             src/usr/local/www/csrf
             src/usr/local/www/guiconfig.inc
+            src/usr/local/www/shortcuts.inc
+            src/usr/local/www/status_logs.php
             src/usr/local/www/status_logs_common.inc
             src/usr/local/www/system_gateway_groups.php
           sparse-checkout-cone-mode: false
