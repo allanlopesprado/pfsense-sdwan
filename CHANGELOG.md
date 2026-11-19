@@ -4,6 +4,7 @@ Versions are listed newest first, in numeric order. The [dist directory](dist/) 
 
 | Version | Main changes | Notes |
 | --- | --- | --- |
+| 0.4.17 | Remove the sample timestamp from the Status page. | [Notes](docs/releases/v0.4.17.md) |
 | 0.4.16 | Invalidate samples after changes to monitored gateways and document the impact of native settings. | [Notes](docs/releases/v0.4.16.md) |
 | 0.4.15 | Remove the service banner from the Status tab. | [Notes](docs/releases/v0.4.15.md) |
 | 0.4.14 | Show the recommendation, decision reason, SLA limits, and highlighted measurements in gateway diagnostics. | [Notes](docs/releases/v0.4.14.md) |

@@ -50,10 +50,6 @@ if (!$sdwan['members']) {
 		</tbody>
 	</table></div>
 	</div>
-	<?php if ($snapshot !== null): ?>
-	<div class="panel-footer"><small><?=gettext('Last sample')?>
-		<time datetime="<?=date(DATE_ATOM, $snapshot['generated_at'])?>"><?=sdwan_ui_escape(date('Y-m-d H:i:s T', $snapshot['generated_at']))?></time></small></div>
-	<?php endif; ?>
 </div>
 <div class="panel panel-default">
 	<div class="panel-heading"><h2 class="panel-title"><?=gettext('Gateway Status')?></h2></div>
