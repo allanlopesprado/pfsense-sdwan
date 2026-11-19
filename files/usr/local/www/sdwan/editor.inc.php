@@ -32,14 +32,6 @@ foreach ($sdwan['policies'] as $policy) {
 		$used_by[$reference][] = $policy['name'];
 	}
 }
-// Native Form_Select compares values loosely. Prefix identifiers so names
-// such as "1" and "01" remain distinct in both single and multiple selects.
-function sdwan_editor_choice(string $value): string {
-	return $value === '' ? '' : ':' . $value;
-}
-function sdwan_editor_value(string $value): string {
-	return str_starts_with($value, ':') ? substr($value, 1) : $value;
-}
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 	$action = sdwan_ui_scalar($_POST, 'action');
 	$original = sdwan_ui_scalar($_POST, 'original');
@@ -65,9 +57,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 					$errors[] = gettext('Select valid members.');
 					$selected = [];
 				}
-				$sdwan_record[$key] = array_map('sdwan_editor_value', array_values($selected));
+				$sdwan_record[$key] = array_map('sdwan_ui_choice_value', array_values($selected));
 			} elseif (in_array($key, ['sla', 'gateway'], true)) {
-				$sdwan_record[$key] = sdwan_editor_value(sdwan_ui_scalar($_POST, $key));
+				$sdwan_record[$key] = sdwan_ui_choice_value(sdwan_ui_scalar($_POST, $key));
 			} else {
 				$sdwan_record[$key] = sdwan_ui_scalar($_POST, $key);
 			}
@@ -119,10 +111,10 @@ if ($collection === 'members') {
 		} elseif ($metadata['force_down']) {
 			$label = sprintf(gettext('%s (marked down)'), $gateway_name);
 		}
-		$gateways[sdwan_editor_choice($gateway_name)] = $label;
+		$gateways[sdwan_ui_choice($gateway_name)] = $label;
 	}
 	if ($current_gateway !== '') {
-		$gateways[sdwan_editor_choice($current_gateway)] ??= sprintf(gettext('%s (unavailable)'), $current_gateway);
+		$gateways[sdwan_ui_choice($current_gateway)] ??= sprintf(gettext('%s (unavailable)'), $current_gateway);
 	}
 	if (count($gateways) === 1) {
 		$prerequisite = gettext('To add a member, configure an unused gateway with monitoring enabled under System > Routing.');
@@ -142,10 +134,11 @@ if ($errors) {
 if (!$display_form): ?>
 <div class="panel panel-default">
 	<div class="panel-heading"><h2 class="panel-title"><?=sdwan_ui_escape($sections[$collection])?></h2></div>
-	<div class="table-responsive"><table class="table table-striped table-hover table-condensed">
+	<div class="panel-body">
+	<div class="table-responsive"><table class="table table-striped table-hover table-condensed<?=$rows ? ' table-rowdblclickedit' : ''?>">
 		<thead><tr><?php foreach ($columns[$collection] as $label): ?>
-			<th><?=sdwan_ui_escape($label)?></th>
-		<?php endforeach; ?><th><?=gettext('Actions')?></th></tr></thead><tbody>
+			<th scope="col"><?=sdwan_ui_escape($label)?></th>
+		<?php endforeach; ?><th scope="col"><?=gettext('Actions')?></th></tr></thead><tbody>
 		<?php foreach ($sdwan[$collection] as $row): ?>
 		<tr>
 			<?php foreach ($columns[$collection] as $key => $label):
@@ -161,11 +154,14 @@ if (!$display_form): ?>
 			<td><form method="post" action="<?=$url?>" class="form-inline">
 				<input type="hidden" name="revision" value="<?=sdwan_ui_escape($revision)?>">
 				<input type="hidden" name="original" value="<?=sdwan_ui_escape($row['name'])?>">
-				<a class="btn btn-default btn-xs" href="<?=$url?>?edit=<?=rawurlencode($row['name'])?>"><i class="fa-solid fa-pencil" aria-hidden="true"></i> <?=gettext('Edit')?></a>
+				<a class="fa-solid fa-pencil" href="<?=$url?>?edit=<?=rawurlencode($row['name'])?>"
+				    title="<?=gettext('Edit entry')?>" aria-label="<?=gettext('Edit entry')?>"></a>
 				<?php if (isset($used_by[$row['name']])): ?>
-				<small><?=sdwan_ui_escape(sprintf(gettext('Used by: %s'), implode(', ', $used_by[$row['name']])))?></small>
+				<?php $in_use = sdwan_ui_escape(sprintf(gettext('Used by: %s'), implode(', ', $used_by[$row['name']]))); ?>
+				<i class="fa-solid fa-lock" title="<?=$in_use?>" aria-hidden="true"></i><span class="sr-only"><?=$in_use?></span>
 				<?php else: ?>
-				<button type="submit" name="action" value="delete" class="btn btn-danger btn-xs"><i class="fa-solid fa-trash-can" aria-hidden="true"></i> <?=gettext('Delete')?></button>
+				<button type="submit" name="action" value="delete" class="btn btn-link btn-xs fa-solid fa-trash-can"
+				    title="<?=gettext('Delete entry')?>" aria-label="<?=gettext('Delete entry')?>"></button>
 				<?php endif; ?>
 			</form></td>
 		</tr>
@@ -176,12 +172,15 @@ if (!$display_form): ?>
 		?>
 		</tbody>
 	</table></div>
+	</div>
 </div>
 <?php endif;
 if ($prerequisite !== ''):
 	print_info_box($prerequisite, 'info', false);
 elseif (!$display_form): ?>
-	<a class="btn btn-success btn-sm" href="<?=$url?>?add=1"><i class="fa-solid fa-plus" aria-hidden="true"></i> <?=gettext('Add')?></a>
+	<nav class="action-buttons" aria-label="<?=gettext('Actions')?>">
+		<a class="btn btn-success btn-sm" role="button" href="<?=$url?>?add=1"><i class="fa-solid fa-plus icon-embed-btn" aria-hidden="true"></i> <?=gettext('Add')?></a>
+	</nav>
 <?php else:
 	$form = new Form();
 	$form->setAction($url);
@@ -200,7 +199,7 @@ elseif (!$display_form): ?>
 	}
 	$section->addInput($name_input);
 	if ($collection === 'members') {
-		$section->addInput(new Form_Select('gateway', gettext('Gateway'), sdwan_editor_choice($sdwan_record['gateway'] ?? ''), $gateways))
+		$section->addInput(new Form_Select('gateway', gettext('Gateway'), sdwan_ui_choice($sdwan_record['gateway'] ?? ''), $gateways))
 			->setAttribute('required', 'required')
 			->setHelp(gettext('Each member uses one gateway. Configure gateways and their monitors under System > Routing.'));
 		$section->addInput(new Form_Input('cost', gettext('Cost'), 'number', $sdwan_record['cost'] ?? '1',
@@ -214,18 +213,18 @@ elseif (!$display_form): ?>
 	} else {
 		$sla_options = ['' => gettext('Select an SLA')];
 		foreach ($sdwan['slas'] as $sla) {
-			$sla_options[sdwan_editor_choice($sla['name'])] = $sla['name'];
+			$sla_options[sdwan_ui_choice($sla['name'])] = $sla['name'];
 		}
 		$selected_members = $sdwan_record['members'] ?? [];
 		$available = array_column($sdwan['members'], 'name');
 		// Browsers submit a multi-select in document order. Keep the saved tie order.
 		$member_options = [];
 		foreach (array_merge(array_intersect($selected_members, $available), $available) as $name) {
-			$member_options[sdwan_editor_choice($name)] = $name;
+			$member_options[sdwan_ui_choice($name)] = $name;
 		}
-		$section->addInput(new Form_Select('sla', gettext('Performance SLA'), sdwan_editor_choice($sdwan_record['sla'] ?? ''), $sla_options))
+		$section->addInput(new Form_Select('sla', gettext('Performance SLA'), sdwan_ui_choice($sdwan_record['sla'] ?? ''), $sla_options))
 			->setAttribute('required', 'required');
-		$section->addInput(new Form_Select('members', gettext('Candidate members'), array_map('sdwan_editor_choice', $selected_members), $member_options, true))
+		$section->addInput(new Form_Select('members', gettext('Candidate members'), array_map('sdwan_ui_choice', $selected_members), $member_options, true))
 			->setAttribute('required', 'required')
 			->setHelp(gettext('Select one member to monitor a path, or two or more of the same address family to compare paths. For equal scores the first selected member in the displayed list wins.'));
 		$section->addInput(new Form_Select('strategy', gettext('Selection strategy'), $sdwan_record['strategy'] ?? 'cost', $strategies));
@@ -234,8 +233,7 @@ elseif (!$display_form): ?>
 	foreach (['revision' => $revision, 'action' => 'save', 'original' => $original] as $field => $value) {
 		$form->addGlobal(new Form_Input($field, '', 'hidden', $value));
 	}
+	$form->addGlobal(new Form_Button('cancel', gettext('Cancel'), $url, 'fa-solid fa-undo'));
 	print($form);
-?>
-	<a class="btn btn-default" href="<?=$url?>"><?=gettext('Cancel')?></a>
-<?php endif;
+endif;
 include('foot.inc');

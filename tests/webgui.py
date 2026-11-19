@@ -25,6 +25,7 @@ class Choices(HTMLParser):
         self.revisions = []
         self.links = []
         self.posts = 0
+        self.gets = 0
         self.feed(html)
 
     def handle_starttag(self, tag, attrs):
@@ -36,6 +37,8 @@ class Choices(HTMLParser):
             self.fields[self.field] = []
         if tag == "form" and attrs.get("method") == "post":
             self.posts += 1
+        if tag == "form" and attrs.get("method") == "get":
+            self.gets += 1
         if tag == "input" and attrs.get("name") == "__csrf_magic":
             self.tokens.append(attrs["value"])
         if tag == "input" and attrs.get("name") == "revision":
@@ -58,7 +61,7 @@ def screenshots(directory, www, pages):
             pass
     with tempfile.TemporaryDirectory() as folder:
         site = Path(folder)
-        for assets in ("css", "vendor/bootstrap/css", "vendor/jquery-ui"):
+        for assets in ("css", "vendor/bootstrap/css", "vendor/font-awesome", "vendor/jquery-ui"):
             source = www / assets
             if not source.is_dir():
                 raise RuntimeError(f"Missing upstream pfSense assets: {source}")
@@ -70,9 +73,13 @@ def screenshots(directory, www, pages):
             worker.start()
             try:
                 for name, theme, size in [("status", "pfSense", "1440,900"), ("status", "pfSense-dark", "390,844"),
-                                          ("diagnostics", "pfSense", "1440,900")]:
+                                          ("diagnostics", "pfSense", "1440,900"), ("members", "pfSense", "1440,900"),
+                                          ("members-edit", "pfSense-dark", "1440,900"), ("updates", "pfSense", "1440,900"),
+                                          ("forwarding", "pfSense", "1440,900")]:
                     preview = name + "-" + theme
-                    html = pages[name].replace("</head>", f'<link rel="stylesheet" href="/css/{theme}.css"></head>')
+                    styles = ('<link rel="stylesheet" href="/vendor/font-awesome/css/all.min.css">'
+                              f'<link rel="stylesheet" href="/css/{theme}.css">')
+                    html = pages[name].replace("</head>", styles + "</head>")
                     (site / (preview + ".html")).write_text(html)
                     out = directory / (preview + ".png")
                     subprocess.run([chrome, "--headless", "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage",
@@ -158,6 +165,10 @@ def run(php, classes, screenshot_dir=None):
             html = request(page, config=empty, native={}, get={"add": "1"})
             assert message in html and 'name="save"' not in html
         print("ok - editor explains prerequisites, preserves unavailable gateways and protects policy references")
+        member_list = request("members")
+        assert 'table-rowdblclickedit' in member_list and 'class="fa-solid fa-pencil"' in member_list
+        assert 'class="action-buttons"' in member_list and 'icon-embed-btn' in member_list
+        assert Choices(member_list).tokens and 'value="delete"' in member_list
 
         assert "diagnostics.php?policy=VOICE" in request("status")
         assert "diagnostics.php?policy=VOICE" not in request("status", inspect=False)
@@ -171,17 +182,26 @@ def run(php, classes, screenshot_dir=None):
         excluded = {**policy, "candidates": {"backup": "Loss above SLA", "01": "Loss above SLA"},
                     "selected": None, "eligible_count": 0, "path_status": "no_eligible"}
         unavailable = request("status", snapshot={**snapshot, "policies": {"VOICE": excluded}})
-        assert "Policies without an eligible path: 1." in unavailable and 'alert-danger' in unavailable
+        assert "No eligible path" in unavailable and 'class="bg-danger"' in unavailable
         stale = request("status", snapshot={**snapshot, "generated_at": 1})
         assert "Waiting for current gateway measurements" in stale and "2 of 2" not in stale
         print("ok - native CSRF verifies form posts; status checks permissions, path diversity and sample freshness")
-        assert "Every policy has an eligible path" in fresh and 'class="bg-success"' in fresh
+        assert "Multiple eligible paths" in fresh and 'class="bg-success"' in fresh
+        assert 'data-sortable' in fresh and "RTTsd" in fresh and 'class="action-buttons"' in fresh
         event_url = next(url for url in Choices(fresh).links if "filterlogentries_process" in url)
         diagnostics = request("diagnostics", get={"policy": "VOICE"}, snapshot=snapshot)
         assert "Maximum RTT" in diagnostics and "Maximum loss" in diagnostics and "1.00 ms" in diagnostics
+        diagnostic_form = Choices(diagnostics)
+        assert diagnostic_form.gets == 1 and not diagnostic_form.tokens
+        assert diagnostic_form.fields["policy"] == [(":VOICE", True)]
+        assert "fa-solid fa-search" in diagnostics
+        numeric = {**config, "policies": [{**config["policies"][0], "name": n} for n in ("1", "01")]}
+        numeric_options = Choices(request("diagnostics", config=numeric, get={"policy": ":01"})).fields["policy"]
+        assert numeric_options == [(":1", False), (":01", True)], numeric_options
         assert "no longer configured" in request("diagnostics", get={"policy": "deleted"})
         assert event_url not in Choices(request("diagnostics", privileges={event_url: False})).links
         updates = request("updates")
+        assert Choices(updates).posts == 1 and len(Choices(updates).tokens) == 1
         assert "/pkg_mgr_installed.php" in Choices(updates).links
         assert "/pkg_mgr_installed.php" not in Choices(request("updates", privileges={"/pkg_mgr_installed.php": False})).links
 
@@ -194,8 +214,9 @@ def run(php, classes, screenshot_dir=None):
                                         "LTE": {**sample, "status": "degraded", "rtt_ms": 76.1, "rttsd_ms": 5.8}},
                              "policies": {"Office": {**policy, "candidates": {"Fiber": "Eligible", "LTE": "RTT above SLA"},
                                  "selected": "Fiber", "path_status": "degraded", "eligible_count": 1, "shared_underlay": False}}}
-            pages = {page: request(page, config=demo, snapshot=demo_snapshot) for page in ("status", "diagnostics")}
-            screenshots(screenshot_dir, classes.parent, pages)
+            pages = {page: request(page, config=demo, snapshot=demo_snapshot)
+                     for page in ("status", "diagnostics", "members", "updates")}
+            pages["members-edit"] = request("members", get={"edit": "1"})
 
         native_group = {"name": "PBR", "item": ["GW1|1|address", "GW2|2|address"]}
         rule = {"tracker": "50321", "interface": "lan", "gateway": "PBR", "ipprotocol": "inet", "type": "pass",
@@ -212,6 +233,12 @@ def run(php, classes, screenshot_dir=None):
         stock = request("forwarding", native=fixture, get=names)
         assert "matches the native group" in stock and "50321" in stock and "Voice &lt;A&gt;" in stock, stock
         assert "Preview mode" in stock and 'value="bind"' not in stock
+        generated_selection = request("forwarding", native=fixture, get={"policy": ":VOICE", "group": ":PBR"})
+        assert "matches the native group" in generated_selection
+        assert Choices(generated_selection).fields["group"] == [("", False), (":PBR", True)]
+        if screenshot_dir:
+            pages["forwarding"] = stock
+            screenshots(screenshot_dir, classes.parent, pages)
         tracker_url = next(url for url in Choices(stock).links if "filterlogentries_tracker" in url)
         visible = request("forwarding", native=fixture, get=names, privileges={tracker_url: False})
         assert tracker_url not in Choices(visible).links and "50321" in visible

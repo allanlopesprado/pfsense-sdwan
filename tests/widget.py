@@ -106,6 +106,7 @@ echo json_encode([http_response_code() ?: 200, $body, $sdwan_title_link,
     status, body, _, _ = render("ajax")
     assert status == 200 and "Voice" in body and "<script>" not in body
     assert all(label in body for label in ("2 of 2 eligible", "1 of 2 eligible", "0 of 2 eligible", "No recommendation"))
+    assert all(f'class="bg-{state}"' in body for state in ("success", "warning", "danger"))
     assert "Requested gateway" not in body and "Branch_WAN" not in body and "<time datetime=" in body
     assert 'scope="row"' in body and "aria-hidden=" in body and 'href="/sdwan/diagnostics.php?policy=Voice"' in body
     assert 'href="/sdwan/diagnostics.php?' not in render("ajax", "status")[1]
