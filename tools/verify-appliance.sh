@@ -44,10 +44,11 @@ if (count($registered) !== 1 || ($registered[0]["name"] ?? "") !== $service_name
 }
 
 try {
-    $config = sdwan_get_config();
+    // Keep the native pfSense $config global available for gateway discovery.
+    $sdwan_settings = sdwan_get_config();
     $snapshot = function_exists("sdwan_current_snapshot") ?
-        sdwan_current_snapshot($config, sdwan_gateways()) : sdwan_read_snapshot();
-    if (($snapshot["config_revision"] ?? null) !== sdwan_config_revision($config)) {
+        sdwan_current_snapshot($sdwan_settings, sdwan_gateways()) : sdwan_read_snapshot();
+    if (($snapshot["config_revision"] ?? null) !== sdwan_config_revision($sdwan_settings)) {
         throw new RuntimeException();
     }
 } catch (Throwable $error) {
