@@ -80,7 +80,7 @@ function sdwan_candidate_reason(?array $member, ?array $sample, ?array $sla): st
 }
 
 /* Pure evaluation. Equal ranks retain policy member order. */
-function sdwan_evaluate(array $config, array $gateways, int $now): array {
+function sdwan_evaluate(array $config, array $gateways, int $now, array $inventory = []): array {
 	$members = array_column($config['members'] ?? [], null, 'name');
 	$slas = array_column($config['slas'] ?? [], null, 'name');
 	$samples = [];
@@ -93,10 +93,20 @@ function sdwan_evaluate(array $config, array $gateways, int $now): array {
 		$selected = null;
 		$best = INF;
 		$candidates = [];
+		// Gateways can change family outside this package after a restore.
+		$families = [];
+		foreach ($policy['members'] as $name) {
+			$family = $inventory[$members[$name]['gateway'] ?? '']['family'] ?? null;
+			if ($family !== null) {
+				$families[$family] = true;
+			}
+		}
+		$mixed = count($families) > 1;
 		foreach ($policy['members'] as $name) {
 			$member = $members[$name] ?? null;
 			$sample = $samples[$name] ?? null;
-			$reason = sdwan_candidate_reason($member, $sample, $sla);
+			$reason = $mixed ? 'Members now use different IP address families' :
+			    sdwan_candidate_reason($member, $sample, $sla);
 			$candidates[$name] = $reason;
 			if ($reason !== 'Eligible') {
 				continue;
@@ -137,8 +147,45 @@ function sdwan_read_snapshot(): ?array {
 	$now = time();
 	if (!is_int($when) || $when > $now || $now - $when > SDWAN_MAX_SNAPSHOT_AGE ||
 	    !is_array($data['members'] ?? null) || !is_array($data['policies'] ?? null) ||
-	    !is_string($data['config_revision'] ?? null)) {
+	    !is_string($data['config_revision'] ?? null) ||
+	    !preg_match('/^[a-f0-9]{64}$/D', $data['config_revision'])) {
 		return null;
+	}
+	foreach ($data['members'] as $sample) {
+		if (!is_array($sample) || !in_array($sample['status'] ?? null,
+		    ['online', 'degraded', 'down', 'unknown'], true)) {
+			return null;
+		}
+		foreach (['rtt_ms', 'rttsd_ms', 'loss_pct'] as $metric) {
+			if (!array_key_exists($metric, $sample)) {
+				return null;
+			}
+			$value = $sample[$metric];
+			if ($value === null && in_array($sample['status'], ['unknown', 'down'], true)) {
+				continue;
+			}
+			if ((!is_int($value) && !is_float($value)) || !is_finite($value) ||
+			    $value < 0 || ($metric === 'loss_pct' && $value > 100)) {
+				return null;
+			}
+		}
+	}
+	foreach ($data['policies'] as $policy) {
+		if (!is_array($policy) || !array_key_exists('selected', $policy) ||
+		    !is_string($policy['reason'] ?? null) || !is_array($policy['candidates'] ?? null)) {
+			return null;
+		}
+		foreach ($policy['candidates'] as $member => $reason) {
+			if (!isset($data['members'][$member]) || !is_string($reason)) {
+				return null;
+			}
+		}
+		$selected = $policy['selected'];
+		if ($selected !== null && (!is_string($selected) ||
+		    ($policy['candidates'][$selected] ?? null) !== 'Eligible' ||
+		    !in_array($data['members'][$selected]['status'], ['online', 'degraded'], true))) {
+			return null;
+		}
 	}
 	return $data;
 }

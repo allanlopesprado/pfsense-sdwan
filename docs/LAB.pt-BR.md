@@ -10,11 +10,13 @@ Configure ao menos dois gateways com monitoramento habilitado, alvos distintos e
 
 ## Construção e instalação
 
+Para baixar e instalar diretamente pela WebGUI, siga [Como instalar pelo Diagnostics → Command Prompt](../README.md#como-instalar-pelo-diagnostics--command-prompt).
+
 O diretório [dist](../dist/) contém o .pkg de laboratório e seu checksum. Para usar o artefato já construído, baixe os dois arquivos no mesmo diretório do clone e confira a integridade com o comando abaixo. Compare a saída com o hash publicado antes de usar `pkg add`.
 
 ```sh
-sha256 -q pfSense-pkg-SDWAN-0.1.0.pkg
-cat pfSense-pkg-SDWAN-0.1.0.pkg.sha256
+sha256 -q pfSense-pkg-SDWAN-0.1.1.pkg
+cat pfSense-pkg-SDWAN-0.1.1.pkg.sha256
 ```
 
 Para compilar o port, use um builder FreeBSD/pfSense com a árvore de ports, dependências e ABI compatíveis com o appliance alvo. O diretório que contém o Makefile deste projeto é o port. Disponibilize-o como `net/pfSense-pkg-SDWAN` na árvore de trabalho do builder. Dentro desse diretório, execute:

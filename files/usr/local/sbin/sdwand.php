@@ -27,9 +27,8 @@ function sdwan_sample_socket(array $process, string $name): ?array {
 	return sdwan_parse_dpinger_line($line, $name);
 }
 
-function sdwan_gateway_observations(array $config): array {
+function sdwan_gateway_observations(array $config, array $inventory): array {
 	$processes = running_dpinger_processes();
-	$inventory = sdwan_gateways();
 	$settings = array_column(config_get_path('gateways/gateway_item', []), null, 'name');
 	$defaults = return_dpinger_defaults();
 	$observations = [];
@@ -96,8 +95,9 @@ function sdwan_observe_once(): void {
 		}
 		$config = sdwan_get_config();
 		$started = time();
-		$observations = sdwan_gateway_observations($config);
-		$snapshot = sdwan_evaluate($config, $observations, $started);
+		$inventory = sdwan_gateways();
+		$observations = sdwan_gateway_observations($config, $inventory);
+		$snapshot = sdwan_evaluate($config, $observations, $started, $inventory);
 		$snapshot['config_revision'] = sdwan_config_revision($config);
 		$json = json_encode($snapshot, JSON_THROW_ON_ERROR);
 		$temp = tempnam(dirname(SDWAN_SNAPSHOT_PATH), '.sdwan-');

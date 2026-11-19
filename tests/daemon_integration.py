@@ -10,6 +10,7 @@ import shutil
 import socket
 import subprocess
 import tempfile
+import time
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -104,6 +105,17 @@ def run(binary, require_unix):
         snapshot.write_text(json.dumps(offline))
         assert json.loads(php(binary, "-r", read)) is None
         print("ok - --once publishes an unavailable gateway and expires the stale snapshot")
+        now = int(time.time())
+        for label, broken in [
+            ("truncated JSON", '{"members":'),
+            ("future sample", json.dumps(dict(offline, generated_at=now + 3600))),
+            ("malformed policy", json.dumps(dict(offline, generated_at=now, policies={"calls": "partial"}))),
+            ("malformed member", json.dumps(dict(offline, generated_at=now, members={"a": []}))),
+            ("invalid revision", json.dumps(dict(offline, generated_at=now, config_revision="other"))),
+        ]:
+            snapshot.write_text(broken)
+            assert json.loads(php(binary, "-r", read)) is None, label
+        print("ok - rejects malformed, truncated, and future observations")
         config_path.write_bytes(original_config)
 
         gateways = fixture(sandbox)["processes"]

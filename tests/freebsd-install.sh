@@ -31,13 +31,31 @@ if run_pkg info -e pfSense-pkg-SDWAN; then exit 1; fi
 printf '#!/bin/sh\nexit 1\n' > "$root/bin/fetch"
 if PATH="$root/bin:$PATH" sh -c "$installer"; then exit 1; fi
 rm "$root/bin/fetch"
+# Upgrade from the original observer. A truncated upgrade must preserve it.
+run_pkg add -I "$PWD/dist/pfSense-pkg-SDWAN-0.1.0.pkg"
+head -c 80 dist/pfSense-pkg-SDWAN-0.1.1.pkg > "$root/interrupted.pkg"
+if run_pkg add -I "$root/interrupted.pkg"; then exit 1; fi
+test "$(run_pkg query '%v' pfSense-pkg-SDWAN)" = 0.1.0
+run_pkg check -s pfSense-pkg-SDWAN
 PATH="$root/bin:$PATH" sh -c "$installer"
 version=$(awk '$1=="PORTVERSION="{print $2}' Makefile)
 test "$(run_pkg query '%v' pfSense-pkg-SDWAN)" = "$version"
 run_pkg check -s pfSense-pkg-SDWAN
-run_pkg delete -Iy pfSense-pkg-SDWAN
+run_pkg delete -Dy pfSense-pkg-SDWAN
 test ! -e "$dbroot/usr/local/www/sdwan/status.php"
 if run_pkg info -e pfSense-pkg-SDWAN; then exit 1; fi
 PATH="$root/bin:$PATH" sh -c "$installer"
 run_pkg check -s pfSense-pkg-SDWAN
+# Exercise the shipped service wrapper with FreeBSD rc.subr and daemon(8).
+# Substitute a temporary pidfile and a sleeping process for the pfSense worker.
+sed -e "s|/var/run/sdwand.pid|$root/sdwand.pid|" \
+    -e 's|/usr/local/bin/php /usr/local/sbin/sdwand.php|/bin/sleep 120|' \
+    "$dbroot/usr/local/etc/rc.d/sdwand.sh" > "$root/sdwand.sh"
+sh "$root/sdwand.sh" start
+sh "$root/sdwand.sh" status
+sh "$root/sdwand.sh" restart
+sh "$root/sdwand.sh" status
+sh "$root/sdwand.sh" stop
+if sh "$root/sdwand.sh" status; then exit 1; fi
+echo "Verified FreeBSD service start, restart and stop with a fixture worker."
 echo "Verified checksum rejection, download failure, installation, removal and reinstall (hooks disabled)."

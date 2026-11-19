@@ -125,3 +125,14 @@ foreach (['status', 'diagnostics', 'members', 'slas', 'policies'] as $page) {
     check("viewer privilege for $page", $granted($view) === in_array($page, ['status', 'diagnostics'], true));
     check("management privilege for $page", $granted($manage));
 }
+
+// A restore may change the family of an existing gateway without editing a policy.
+$restored = $inventory;
+$restored['GW_A']['family'] = 'inet';
+$restored['GW_B']['family'] = 'inet6';
+$with_other = $config;
+$with_other['policies'][] = ['name' => 'single', 'sla' => 'voice', 'strategy' => 'cost', 'members' => ['a']];
+$decisions = sdwan_evaluate($with_other, $gateways, 1700000000, $restored)['policies'];
+check('a restored policy mixing IPv4 and IPv6 cannot select a gateway', $decisions['calls']['selected'] === null);
+check('mixed family exclusion is explained', str_contains($decisions['calls']['candidates']['b'], 'families'));
+check('another restored policy stays eligible', $decisions['single']['selected'] === 'a');

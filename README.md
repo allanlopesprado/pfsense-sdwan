@@ -12,7 +12,7 @@ Port experimental para acompanhar a qualidade dos gateways e simular a seleção
 
 O serviço local lê os sockets do monitor de gateways do pfSense (dpinger). Uma medição ausente ou inválida torna o membro inelegível. As configurações são persistidas em uma seção própria do config.xml. O último resultado é gravado atomicamente em /var/run e expira em 30 segundos.
 
-**Modo de operação da versão 0.1.0: observação.** A decisão exibida é uma recomendação. O encaminhamento segue as regras, as rotas e os estados já configurados pelo administrador. Esta versão não classifica conexões, troca rotas, altera túneis, muda a rota padrão nem sincroniza políticas entre nós CARP.
+**Modo de operação da versão 0.1.1: observação.** A decisão exibida é uma recomendação. O encaminhamento segue as regras, as rotas e os estados já configurados pelo administrador. Esta versão não classifica conexões, troca rotas, altera túneis, muda a rota padrão nem sincroniza políticas entre nós CARP.
 
 ## Como instalar pelo Diagnostics → Command Prompt
 
@@ -23,7 +23,7 @@ Use um clone de laboratório com **pfSense CE 2.9.1** e acesso administrativo. O
 
 <!-- install-command -->
 ```sh
-d=$(mktemp -d /tmp/sdwan.XXXXXXXX) && (trap 'rm -rf "$d"' EXIT; p="$d/pfSense-pkg-SDWAN-0.1.0.pkg"; fetch -o "$p" 'https://raw.githubusercontent.com/allanlopesprado/pfsense-sdwan/25b61cf39fd9743a28822d20a52408cecf27e783/dist/pfSense-pkg-SDWAN-0.1.0.pkg' && sha256 -c 0b3ec01e5e7499d5b6220892f744ec958ae0b6c67d9733ea3a1f4c53ca4a2717 "$p" && pkg add "$p")
+d=$(mktemp -d /tmp/sdwan.XXXXXXXX) && (trap 'rm -rf "$d"' EXIT; p="$d/pfSense-pkg-SDWAN-0.1.1.pkg"; fetch -o "$p" 'https://raw.githubusercontent.com/allanlopesprado/pfsense-sdwan/e60b7476a1593db71cc84c43996b06c0284ea220/dist/pfSense-pkg-SDWAN-0.1.1.pkg' && sha256 -c 96b126f6215b7df122e66d9fbbd6cf57cd7641fae0a30dd194bb9fa6153e184c "$p" && pkg add "$p")
 ```
 
 3. Execute a linha abaixo. Confira a versão instalada e o estado do serviço. Se o download falhar, o hash divergir ou o serviço não iniciar, guarde a saída exibida para diagnóstico.
@@ -34,7 +34,7 @@ pkg query '%n-%v' pfSense-pkg-SDWAN && /usr/local/etc/rc.d/sdwand.sh status
 
 4. Atualize a página e abra **Services → SD-WAN**. Para remover o pacote, use **System → Package Manager → Installed Packages → pfSense-pkg-SDWAN → Remove**.
 
-[Pacote](dist/pfSense-pkg-SDWAN-0.1.0.pkg) · [SHA-256](dist/pfSense-pkg-SDWAN-0.1.0.pkg.sha256) · [Homologação e build](docs/LAB.pt-BR.md) · [Command Prompt na documentação Netgate](https://docs.netgate.com/pfsense/en/latest/diagnostics/command-prompt.html)
+[Pacote](dist/pfSense-pkg-SDWAN-0.1.1.pkg) · [SHA-256](dist/pfSense-pkg-SDWAN-0.1.1.pkg.sha256) · [Homologação e build](docs/LAB.pt-BR.md) · [Command Prompt na documentação Netgate](https://docs.netgate.com/pfsense/en/latest/diagnostics/command-prompt.html)
 
 ## Primeiro uso no laboratório
 
