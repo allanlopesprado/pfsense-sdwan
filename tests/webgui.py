@@ -225,6 +225,7 @@ def run(php, classes, screenshot_dir=None):
         assert 'form="sdwan-system-logs"' in fresh and "__csrf_magic" in event_post
         assert 'form="sdwan-system-logs" class="btn btn-primary btn-sm"' in fresh
         assert 'class="btn btn-default btn-sm" role="button" href="/status_gateways.php"' in fresh
+        assert 'class="fa-solid fa-network-wired fa-fw"' in fresh
         assert 'class="panel-footer"><small>Last sample' in fresh
         assert event_post["logfile"] == "system" and event_post["filterlogentries_process"] == "sdwan"
         delegated = request("status", privileges={"/firewall_rules.php": False}, snapshot=snapshot)

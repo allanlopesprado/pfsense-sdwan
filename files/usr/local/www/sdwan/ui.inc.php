@@ -83,7 +83,7 @@ function sdwan_ui_actions(array $links, bool $events = false): void {
 	foreach ($links as $url => [$label, $icon]) {
 		if (isAllowedPage($url)) {
 			$buttons[] = '<a class="btn btn-default btn-sm" role="button" href="' . sdwan_ui_escape($url) . '">' .
-			    '<i class="fa-solid ' . sdwan_ui_escape($icon) . ' icon-embed-btn" aria-hidden="true"></i> ' .
+			    '<i class="fa-solid ' . sdwan_ui_escape($icon) . ' fa-fw" aria-hidden="true"></i> ' .
 			    sdwan_ui_escape($label) . '</a>';
 		}
 	}
