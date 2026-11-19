@@ -15,6 +15,7 @@ jobs:
           - {paths: 2, scenario: "negotiation and rekey (2 links)"}
           - {paths: 3, scenario: "negotiation and rekey (3 links)"}
           - {paths: 2, scenario: "shared selectors and return paths", options: "--shared-selectors"}
+          - {paths: 1, scenario: "VIP takeover and new SAs", options: "--vip-takeover"}
     runs-on: ubuntu-24.04
     timeout-minutes: 12
     steps:

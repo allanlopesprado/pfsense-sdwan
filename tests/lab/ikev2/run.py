@@ -440,11 +440,58 @@ def exercise_shared_selectors(work, stack):
     print("ok - a route through a withdrawn SA dropped protected traffic until both peers returned to A", flush=True)
 
 
+def exercise_vip_takeover(work, stack):
+    path = PATHS[0]
+    suffix = str(os.getpid())
+    primary, backup, remote, wire = (label + suffix for label in ("ikeprimary", "ikebackup", "ikepeer", "ikewire"))
+    create_network(stack, (primary, remote), wire, (path,))
+    for index, node in enumerate((primary, remote)):
+        guard(node, index, (path,))
+    keys = {path.name: secrets.token_hex(32)}
+    active = Peer(primary, 0, work, keys, stack, (path,))
+    peer = Peer(remote, 1, work, keys, stack, (path,))
+    active.control("--initiate", "--child", f"data-{path.name}")
+    baseline = snapshot((active, peer), path)
+    data_stage(work, wire, (active, peer), (path,), "vip-primary")
+
+    # The standby owns no SAs. Move the test endpoint into its network
+    # namespace while leaving the remote peer's original SAs untouched.
+    stop_process(active.process, signal.SIGKILL)
+    run(["ip", "netns", "add", backup])
+    stack.callback(run, ["ip", "netns", "del", backup], check=False)
+    run(["ip", "-n", backup, "link", "set", "lo", "up"])
+    run(["ip", "-n", primary, "link", "set", "wana", "netns", backup])
+    run(["ip", "-n", backup, "addr", "replace", path.outer[0] + "/30", "dev", "wana"])
+    run(["ip", "-n", backup, "link", "set", "wana", "up"])
+    run(["ip", "-n", backup, "addr", "add", path.inner[0] + "/32", "dev", "lo"])
+    run(["ip", "-n", backup, "route", "add", path.inner[1] + "/32", "via", path.outer[1],
+         "dev", "wana", "src", path.inner[0]])
+    guard(backup, 0, (path,))
+    with captures(work, wire, "vip-no-sa", (path,)) as files:
+        probe(backup, 0, path, expect=False)
+        probe(remote, 1, path, expect=False)
+    no_clear(files, (path,))
+    if guard_drops(backup, path) == 0:
+        raise RuntimeError("The standby did not enforce its protection rule before negotiation")
+
+    takeover = Peer(backup, 0, work, keys, stack, (path,))
+    takeover.control("--initiate", "--child", f"data-{path.name}")
+    fresh = snapshot((takeover, peer), path)
+    if any(fresh[0][field] == baseline[0][field] for field in ("ike", "in_spi", "out_spi")):
+        raise RuntimeError("The new owner did not negotiate independent IKE and ESP SAs")
+    data_stage(work, wire, (takeover, peer), (path,), "vip-backup")
+    print("ok - the same endpoint recovered on a different node with newly negotiated SAs and no protected cleartext", flush=True)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--paths", type=int, choices=(1, 2, 3), default=2)
-    parser.add_argument("--shared-selectors", action="store_true", help="two tunnels with identical wildcard selectors")
+    scenarios = parser.add_mutually_exclusive_group()
+    scenarios.add_argument("--shared-selectors", action="store_true", help="two tunnels with identical wildcard selectors")
+    scenarios.add_argument("--vip-takeover", action="store_true", help="move one endpoint between separate IKE processes")
     settings = parser.parse_args()
+    if settings.vip_takeover and settings.paths != 1:
+        parser.error("--vip-takeover requires one path")
     if settings.shared_selectors and settings.paths != 2:
         parser.error("--shared-selectors requires exactly two paths")
     if sys.platform != "linux" or os.getuid() != 0:
@@ -457,6 +504,8 @@ def main():
             try:
                 if settings.shared_selectors:
                     exercise_shared_selectors(Path(directory), stack)
+                elif settings.vip_takeover:
+                    exercise_vip_takeover(Path(directory), stack)
                 else:
                     exercise(Path(directory), stack, PATHS[:settings.paths])
             except Exception:
