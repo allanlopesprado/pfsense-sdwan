@@ -61,8 +61,18 @@ A test destination beyond the configured next-hop address stopped responding to 
 
 OpenVPN and WireGuard transferred 64 KiB of verified data in both directions over a 1280-byte backup WAN with a 1200-byte tunnel MTU. DNS initiated by the VPN node also succeeded over the active WAN. The Linux lab selected the route and recorded outer traffic during failure and recovery. [OpenVPN](https://github.com/allanlopesprado/pfsense-sdwan/actions/runs/44582400239/job/135766221951) · [WireGuard](https://github.com/allanlopesprado/pfsense-sdwan/actions/runs/44582400239/job/135766221473)
 
+## Startup, restore, and HA lab coverage
+
+The running observer started with no WAN monitor sockets and recovered on the same process when they became available. The pinned pfSense XML parser preserved the SD-WAN policy after a physical interface remap, and the inventory revision invalidated old readings. A renamed gateway required an explicit member change. An import without package settings started with an empty SD-WAN configuration. [Observer and restored XML tests](https://github.com/allanlopesprado/pfsense-sdwan/actions/runs/44586802461/job/135781826298)
+
+FreeBSD moved both CARP VIPs to the standby while it held the original protected TCP state from pfsync. New protected requests failed during the interval without an SA. After the lab installed independent ESP SAs on the new owner and peer, the original socket and new connections worked. Failback restored encrypted delivery with a fresh set of SAs. The WAN rules recorded no protected plaintext. [CARP and VTI test](https://github.com/allanlopesprado/pfsense-sdwan/actions/runs/44586802461/job/135783079110)
+
+In a separate Linux lab, the protected endpoint moved between network namespaces after terminating the first IKE process. strongSwan negotiated new IKE and CHILD_SA SPIs with the existing peer. Bidirectional probes recovered and the WAN capture found no protected plaintext. [Negotiated endpoint takeover](https://github.com/allanlopesprado/pfsense-sdwan/actions/runs/44587488845/job/135784270477)
+
+Suricata 8.0.8 on FreeBSD 15.1 intercepted a disposable epair through netmap host-stack mode. It passed HTTP control requests and ICMP, recorded the expected EVE block, and prevented the matched request from reaching the server. A control request succeeded after the inspector stopped. [FreeBSD netmap test](https://github.com/allanlopesprado/pfsense-sdwan/actions/runs/44587248657/job/135783422131)
+
 ## Appliance acceptance
 
 On CE 2.9.1, upgrading from 0.4.2 to 0.4.3 ran the actual hooks. On-appliance checks verified package integrity, package and service registration, a current sample, and events in the native log reader. SD-WAN configuration and PF and NAT rules matched before and after. [Release 0.4.3](https://github.com/allanlopesprado/pfsense-sdwan/releases/tag/v0.4.3)
 
-Pending tests include IKEv2 negotiation and rekey with FortiOS, symmetric return over both WANs, and combined CARP, state, and IPsec recovery between two CE 2.9.1 appliances. Experimental forwarding selects a path for ingress rules. The firewall's own default route, catalog distribution, and FortiOS-specific capabilities have separate acceptance criteria. [Interoperability matrix](FORTIOS.md) · [Acceptance procedure](LAB.md)
+Appliance acceptance still includes a full cold boot with the WAN disconnected, restoration onto different NIC assignments, inline Suricata on VirtIO, and a single combined test of IKEv2 and symmetric return through two CE 2.9.1 nodes and a licensed FortiGate. Experimental forwarding selects a path for ingress rules. The firewall's own default route and catalog distribution have separate acceptance criteria. [Interoperability matrix](FORTIOS.md) · [Acceptance procedure](LAB.md)
