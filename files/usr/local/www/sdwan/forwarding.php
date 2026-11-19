@@ -77,10 +77,15 @@ if ($group !== null) {
 $sample = sdwan_ui_snapshot($sdwan);
 $winner = $sample['policies'][$policy_name]['selected'] ?? null;
 $member_gateways = array_column($sdwan['members'], 'gateway', 'name');
-$gateway_name = $member_gateways[$winner ?? ''] ?? null;
+$strategy = array_column($sdwan['policies'], 'strategy', 'name')[$policy_name] ?? '';
+$gateways = array_keys($sample['policies'][$policy_name]['candidates'] ?? [], 'Eligible', true);
+$gateway_name = $strategy === 'balance' && $gateways
+    ? implode(', ', array_map(static fn($name) => $member_gateways[$name] ?? $name, $gateways))
+    : ($member_gateways[$winner ?? ''] ?? null);
 $steering = $sample['steering'][$group_name] ?? [];
 $target = $binding !== null && ($steering['revision'] ?? null) === sdwan_config_revision($binding) &&
-    in_array($steering['gateway'] ?? null, $binding['gateways'], true) ? $steering['gateway'] : null;
+    in_array($steering['gateway'] ?? null, $binding['gateways'], true)
+    ? implode(', ', $steering['pool'] ?? [$steering['gateway']]) : null;
 $pf_labels = [
 	'applied' => gettext('Applied to new connections'),
 	'blocked' => gettext('Blocked by the active filter'),
@@ -129,9 +134,19 @@ if (!$policy_names || !$groups_by_name) {
 	$preview_button->setAttribute('disabled', 'disabled');
 }
 print $form;
-if (!$bindings_by_group && $supported && $native_edit) {
-	print_info_box(gettext('Use a dedicated gateway group with the same gateways as the policy. In Firewall Rules, assign it to the ingress pass rule and put a block for the same traffic immediately below it. Keep local and VPN exceptions above both rules. Preview the group before binding.'), 'info', false);
-}
+if (!$bindings_by_group && $native_edit): ?>
+<div class="panel panel-default">
+	<div class="panel-heading"><h2 class="panel-title"><?=gettext('Set up forwarding')?></h2></div>
+	<div class="panel-body">
+		<ol>
+			<li><?=gettext('Configure members, a performance SLA and a policy.')?></li>
+			<li><a href="/system_gateway_groups.php"><?=gettext('Gateway Groups')?></a> · <?=gettext('Create a dedicated group with the same gateways as the policy.')?></li>
+			<li><a href="/firewall_rules.php"><?=gettext('Firewall Rules')?></a> · <?=gettext('Keep local and VPN exceptions first. Assign the group to the ingress pass rule and place a block or reject with the same match directly below it.')?></li>
+			<li><?=gettext('Preview the policy and group above. Review the matching rules and bind the policy when the checks pass.')?></li>
+		</ol>
+	</div>
+</div>
+<?php endif;
 if (!$policy_names || !$groups_by_name) {
 	print_info_box(gettext('A forwarding preview requires an SD-WAN policy and a native gateway group.'), 'info', false);
 }
@@ -149,7 +164,7 @@ if ($preview !== null):
 			<dt><?=gettext('Recommendation')?></dt><dd><?=sdwan_ui_escape($gateway_name ?? gettext('No current eligible gateway'))?></dd>
 			<dt><?=gettext('Bound policy')?></dt><dd><?=sdwan_ui_escape($binding['policy'] ?? gettext('None'))?></dd>
 			<?php if ($binding !== null): ?>
-			<dt><?=gettext('Selected gateway')?></dt><dd><?=sdwan_ui_escape($target ?? gettext('No current target'))?></dd>
+			<dt><?=gettext('Selected gateways')?></dt><dd><?=sdwan_ui_escape($target ?? gettext('No current target'))?></dd>
 			<dt><?=gettext('Active filter')?></dt><dd><?=sdwan_ui_escape($pf_labels[$filter_status])?></dd>
 			<?php endif; ?>
 			<?php if ($default_families): ?>
@@ -168,7 +183,7 @@ if ($preview !== null):
 			</tbody>
 		</table></div>
 		<div class="table-responsive"><table class="table table-striped table-hover table-condensed">
-			<thead><tr><th><?=gettext('Rule tracker')?></th><th><?=gettext('Interface')?></th><th><?=gettext('Description')?></th><th><?=gettext('State')?></th></tr></thead><tbody>
+			<thead><tr><th><?=gettext('Rule tracker')?></th><th><?=gettext('Interface')?></th><th><?=gettext('Description')?></th><th><?=gettext('State')?></th><th><?=gettext('No eligible gateway')?></th></tr></thead><tbody>
 			<?php foreach ($native_rules as $rule):
 				$tracker = (string)($rule['tracker'] ?? '');
 				$log_url = '/status_logs_filter.php?filterlogentries_submit=1&filterlogentries_tracker=' . rawurlencode($tracker);
@@ -179,9 +194,13 @@ if ($preview !== null):
 				<td><?=sdwan_ui_escape($rule['interface'] ?? '—')?></td>
 				<td><?=sdwan_ui_escape($rule['descr'] ?? '')?></td>
 				<td><?=isset($rule['disabled']) ? gettext('Disabled') : gettext('Enabled')?></td>
+				<td><?php $guard = $preview['rule_pairs'][$tracker] ?? null; ?>
+					<?=sdwan_ui_escape($guard === null ? gettext('Guard not verified') : sprintf(
+					    $guard['action'] === 'reject' ? gettext('Reject · rule %s') : gettext('Block · rule %s'), $guard['guard']))?>
+				</td>
 			</tr><?php endforeach;
 			if (!$native_rules) {
-				sdwan_ui_empty(gettext('No configured firewall rule references this group.'), 4);
+				sdwan_ui_empty(gettext('No configured firewall rule references this group.'), 5);
 			}
 			?></tbody>
 		</table></div>

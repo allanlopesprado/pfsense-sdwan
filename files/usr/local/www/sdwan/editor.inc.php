@@ -10,11 +10,13 @@ $sections = [
 	'policies' => gettext('Policies'),
 ];
 $columns = [
-	'members' => ['name' => gettext('Name'), 'gateway' => gettext('Gateway'), 'cost' => gettext('Cost')],
-	'slas' => ['name' => gettext('Name'), 'latency_ms' => gettext('Maximum RTT (ms)'), 'loss_pct' => gettext('Maximum loss (%)')],
+	'members' => ['name' => gettext('Name'), 'gateway' => gettext('Gateway'), 'cost' => gettext('Cost'),
+	    'probe_primary' => gettext('Primary service check'), 'probe_secondary' => gettext('Secondary service check')],
+	'slas' => ['name' => gettext('Name'), 'latency_ms' => gettext('Maximum RTT (ms)'), 'rttsd_ms' => gettext('Maximum RTTsd (ms)'), 'loss_pct' => gettext('Maximum loss (%)')],
 	'policies' => ['name' => gettext('Name'), 'sla' => gettext('Performance SLA'), 'members' => gettext('Members'), 'strategy' => gettext('Selection strategy')],
 ];
-$strategies = ['cost' => gettext('Lowest cost'), 'latency' => gettext('Lowest RTT')];
+$strategies = ['cost' => gettext('Lowest cost'), 'latency' => gettext('Lowest RTT'),
+    'balance' => gettext('Weighted balancing within SLA')];
 $url = '/sdwan/' . $collection . '.php';
 $revision = sdwan_config_revision($sdwan);
 $rows = $sdwan[$collection];
@@ -64,10 +66,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 				$sdwan_record[$key] = sdwan_ui_scalar($_POST, $key);
 			}
 		}
+		$optional = ['members' => ['probe_primary', 'probe_secondary'], 'slas' => ['rttsd_ms']];
+		$cleared = [];
+		foreach ($optional[$collection] ?? [] as $field) {
+			if ($sdwan_record[$field] === '') {
+				unset($sdwan_record[$field]);
+				$cleared[$field] = true;
+			}
+		}
 		if ($original === '') {
 			$rows[] = $sdwan_record;
 		} elseif ($sdwan_record['name'] === $original) {
-			$rows[$position] = array_replace($rows[$position], $sdwan_record);
+			$rows[$position] = array_diff_key(array_replace($rows[$position], $sdwan_record), $cleared);
 		} else {
 			$errors[] = gettext('An existing entry must keep its name.');
 		}
@@ -142,7 +152,7 @@ if (!$display_form): ?>
 		<?php foreach ($sdwan[$collection] as $row): ?>
 		<tr>
 			<?php foreach ($columns[$collection] as $key => $label):
-				$value = $row[$key];
+				$value = $row[$key] ?? gettext('Disabled');
 				if ($key === 'members') {
 					$value = implode(', ', $value);
 				} elseif ($key === 'strategy') {
@@ -205,9 +215,18 @@ elseif (!$display_form): ?>
 		$section->addInput(new Form_Input('cost', gettext('Cost'), 'number', $sdwan_record['cost'] ?? '1',
 			['min' => 0, 'max' => 65535, 'required' => true]))
 			->setHelp(gettext('A smaller value is preferred by the lowest cost strategy.'));
+		$section->addInput(new Form_Input('probe_primary', gettext('Primary service check'), 'text',
+		    $sdwan_record['probe_primary'] ?? '', ['maxlength' => 512]))
+		    ->setHelp(gettext('Optional. Enter an HTTPS URL or a DNS query name, followed by a space and the target IP. Examples: https://monitor.example.com/health 192.0.2.20 or dns://example.com 192.0.2.53. Add a host route through this gateway under System > Routing. HTTPS requires a valid certificate.'));
+		$section->addInput(new Form_Input('probe_secondary', gettext('Secondary service check'), 'text',
+		    $sdwan_record['probe_secondary'] ?? '', ['maxlength' => 512]))
+		    ->setHelp(gettext('Use a different target IP and its own host route. A member with service checks needs at least one passing check.'));
 	} elseif ($collection === 'slas') {
 		$section->addInput(new Form_Input('latency_ms', gettext('Maximum RTT (ms)'), 'number', $sdwan_record['latency_ms'] ?? '',
 			['min' => '0.000001', 'max' => '600000', 'step' => 'any', 'required' => true]));
+		$section->addInput(new Form_Input('rttsd_ms', gettext('Maximum RTTsd (ms)'), 'number', $sdwan_record['rttsd_ms'] ?? '',
+			['min' => '0', 'max' => '600000', 'step' => 'any']))
+			->setHelp(gettext('Optional. Limit the standard deviation of round-trip time reported by the gateway monitor.'));
 		$section->addInput(new Form_Input('loss_pct', gettext('Maximum loss (%)'), 'number', $sdwan_record['loss_pct'] ?? '',
 			['min' => '0', 'max' => '100', 'step' => 'any', 'required' => true]));
 	} else {

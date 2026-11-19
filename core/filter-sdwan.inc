@@ -2,7 +2,7 @@
 // Core-side interface for a laboratory pfSense build. This file is not a package payload.
 
 function filter_sdwan_binding_api(): int {
-	return 1;
+	return 2;
 }
 
 /* Derive route-to solely from the gateway inventory used by this filter reload.
@@ -32,7 +32,27 @@ function filter_sdwan_gateway_route(array $gateway, mixed $address): ?array {
 		return null;
 	}
 	$next = inet_ntop($packed) . ($linklocal ? '%' . $interface : '');
-	return ['family' => $family, 'route' => " route-to ({$interface} {$next}) "];
+	return ['family' => $family, 'route' => " route-to ({$interface} {$next}) ",
+	    'hop' => "({$interface} {$next})", 'weight' => max(1, min(30, (int)($gateway['weight'] ?? 1)))];
+}
+
+function filter_sdwan_pool_route(array $paths): ?string {
+	if (count($paths) === 1) {
+		return reset($paths)['route'];
+	}
+	if (!$paths) {
+		return null;
+	}
+	$weights = array_column($paths, 'weight');
+	$multiplier = min($weights) === 1 && max($weights) > 1 ? 2 : 1;
+	if (array_sum($weights) * $multiplier > 384) {
+		return null;
+	}
+	$hops = [];
+	foreach ($paths as $path) {
+		$hops[] = str_repeat($path['hop'] . ' ', $path['weight'] * $multiplier);
+	}
+	return ' route-to { ' . implode('', $hops) . '} round-robin ';
 }
 
 /* An index belongs to a single native generation. Conflicting tracker entries
@@ -99,13 +119,14 @@ function filter_sdwan_rule_route(array $rule, array $routes): array|false|null {
 		if ($sdwan_filter_cycle !== null && array_key_exists($key, $sdwan_filter_cycle['choices'])) {
 			$chosen = $sdwan_filter_cycle['choices'][$key];
 		} else {
-			$chosen = sdwan_steering_gateway_for_rule($match, $rule);
+			$chosen = function_exists('sdwan_steering_gateways_for_rule')
+			    ? sdwan_steering_gateways_for_rule($match, $rule)
+			    : array_values(array_filter([sdwan_steering_gateway_for_rule($match, $rule)], 'is_string'));
 			if ($sdwan_filter_cycle !== null) {
 				$sdwan_filter_cycle['choices'][$key] = $chosen;
 			}
 		}
-		if (!is_string($chosen) || !in_array($chosen, $allowed, true) ||
-		    ($routes[$chosen]['family'] ?? '') !== $rule['ipprotocol']) {
+		if (!is_array($chosen) || !$chosen) {
 			return false;
 		}
 		$native = array_filter(config_get_path('gateways/gateway_group', []),
@@ -113,12 +134,26 @@ function filter_sdwan_rule_route(array $rule, array $routes): array|false|null {
 		if (count($native) !== 1) {
 			return false;
 		}
+		$tiers = [];
 		foreach (reset($native)['item'] ?? [] as $entry) {
 			$parts = is_string($entry) ? explode('|', $entry, 3) : [];
-			if (($parts[0] ?? null) === $chosen && in_array($parts[1] ?? null, ['1', '2', '3', '4', '5'], true)) {
-				return ['route' => $routes[$chosen]['route'], 'tier' => $parts[1]];
+			if (in_array($parts[1] ?? null, ['1', '2', '3', '4', '5'], true)) {
+				$tiers[$parts[0]] = $parts[1];
 			}
 		}
+		$tier = null;
+		$paths = [];
+		foreach ($chosen as $gateway) {
+			if (!is_string($gateway) || !in_array($gateway, $allowed, true) || !isset($tiers[$gateway]) ||
+			    isset($paths[$gateway]) || ($routes[$gateway]['family'] ?? '') !== $rule['ipprotocol'] ||
+			    ($tier !== null && $tier !== $tiers[$gateway])) {
+				return false;
+			}
+			$tier = $tiers[$gateway];
+			$paths[$gateway] = $routes[$gateway];
+		}
+		$route = filter_sdwan_pool_route($paths);
+		return $route === null ? false : ['route' => $route, 'tier' => $tier];
 	} catch (Throwable $e) {
 		error_log('SD-WAN: bound rule ' . $tracker . ' blocked during filter generation: ' . $e->getMessage());
 	}

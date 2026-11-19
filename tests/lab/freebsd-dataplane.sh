@@ -283,6 +283,25 @@ if [ -n "${SDWAN_RENDERED_RULES:-}" ]; then
     expect_roundtrip 192.0.2.163 198.51.100.1 three-wan-control
     steer a triple-
     expect_roundtrip 192.0.2.162 198.51.100.1 three-wan-recovered
+    weighted_rule() {
+        sed -e 's/\$LABLAN/'"$lan"'/g' -e "s/labwana/$wan_a/g" -e "s/labwanb/$wan_b/g" \
+            "$SDWAN_RENDERED_RULES/weighted-$1.pf" >"$work/selected.pf"
+        load_rules
+    }
+    weighted_rule pool
+    : >"$work/weighted-replies"
+    for seq in $(jot 18); do request 192.0.2.162 "weighted-$seq" >>"$work/weighted-replies"; done
+    awk '$1=="198.51.100.1"{a++} $1=="203.0.113.1"{b++} END{exit !(NR==18 && a==6 && b==12)}' "$work/weighted-replies"
+    weighted_rule backup
+    expect_roundtrip 192.0.2.162 203.0.113.1 only-eligible-weighted
+    weighted_rule blocked
+    if request 192.0.2.162 weighted-no-member >"$work/weighted-blocked"; then
+        echo 'An empty weighted pool allowed a new connection' >&2
+        exit 1
+    fi
+    expect_roundtrip 192.0.2.163 198.51.100.1 weighted-control
+    steer a triple-
+    echo 'ok - weighted TCP sessions used both paths in a 1:2 ratio and followed SLA loss'
     # The independent incoming services must answer on the arriving WAN,
     # despite the kernel default on A and a different steering decision.
     jexec "$client" inetd -p "$work/client-inetd.pid" "$work/inetd.conf"

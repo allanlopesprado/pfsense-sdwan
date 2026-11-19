@@ -210,6 +210,42 @@ def run(php, core, output, replay, family, links, vti=False):
         print(f"ok - {family}, {links} {path_type} links: observer ({transport}) and native PF renderer "
               f"agreed across all {1 << links} availability combinations")
 
+        if family == "inet" and links == 2 and not vti:
+            # Compile the weighted pool and both degraded shapes using the same
+            # observer and native renderer as the single-gateway controls.
+            legacy = deepcopy(config)
+            policy = config["installedpackages/sdwan"]["policies"]["item"][0]
+            policy["strategy"] = "balance"
+            config["gateways/gateway_group"][0]["item"] = ["GW_A|1|", "GW_B|1|"]
+            config["gateways/gateway_item"][1]["weight"] = "2"
+            config["reload_gateways"]["GW_B"]["weight"] = "2"
+            result = json.loads(compile_rule("preview"))
+            assert not result["errors"], result
+            weighted = result["binding"]
+            weighted["group"] = [weighted["group"]]
+            for key in ("trackers", "gateways"):
+                weighted[key] = {"item": weighted[key]}
+            config["gateways/sdwan_bindings"] = {"item": [weighted]}
+            config["gateways/sdwan_bindings/item"] = [weighted]
+            for losses, label, expected in (
+                ([0, 0], "weighted-pool", ["GW_A", "GW_B"]),
+                ([100, 0], "weighted-backup", ["GW_B"]),
+                ([100, 100], "weighted-blocked", []),
+            ):
+                line = observe(losses, label)
+                state = json.loads(snapshot.read_text())["steering"]["G"]
+                assert state["pool"] == expected, state
+                if len(expected) > 1:
+                    assert line.count(next_hop("GW_A")) == 2 and line.count(next_hop("GW_B")) == 4, line
+                    assert "round-robin" in line, line
+                elif expected:
+                    assert "round-robin" not in line and f"route-to ({next_hop(expected[0])})" in line, line
+                else:
+                    assert line.startswith("block") and "route-to" not in line, line
+                rules[label] = line
+            config = legacy
+            print("ok - weighted members, one eligible next hop, and an empty SLA set reached the native filter compiler")
+
         def denied(reason):
             line = " ".join(compile_rule().split())
             assert line.startswith("block in quick") and "route-to" not in line, (reason, line)

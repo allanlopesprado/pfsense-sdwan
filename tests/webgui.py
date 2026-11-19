@@ -472,7 +472,7 @@ def run(php, classes, screenshot_dir=None):
         assert "system default gateway group" in protected and 'value="bind"' not in protected
 
         lab = request("forwarding", native=fixture, steering_abi=True, get=names)
-        assert "Experimental" in lab and 'value="bind"' in lab, lab
+        assert "Experimental" in lab and 'value="bind"' in lab and "Block · rule 50322" in lab, lab
         controls = Choices(lab)
         post = {**names, "action": "bind", "revision": controls.revisions[0], "__csrf_magic": controls.tokens[0]}
         for options, message in [({}, "previews only"), ({"steering_abi": True,
@@ -487,7 +487,7 @@ def run(php, classes, screenshot_dir=None):
         assert "Active filter" in active_page and "PBR" in active_page and 'value="unbind"' in active_page
         edit_page = request("slas", native=active, steering_abi=True, get={"edit": "01"})
         edit_controls = Choices(edit_page)
-        tuning = {"action": "save", "original": "01", "name": "01", "latency_ms": "35", "loss_pct": "1",
+        tuning = {"action": "save", "original": "01", "name": "01", "latency_ms": "35", "rttsd_ms": "1.5", "loss_pct": "1",
                   "__csrf_magic": edit_controls.tokens[0], "revision": edit_controls.revisions[0]}
         rejected = request("slas", native=active, steering_abi=True, post=tuning,
                            privileges={"/firewall_rules_edit.php": False})
