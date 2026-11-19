@@ -21,6 +21,16 @@ function sdwan_monitor_address(string $value, string $family, string $device, bo
 	return $scope === null ? $address : null;
 }
 
+function sdwan_gateway_monitor(array $gateway): ?string {
+	$family = $gateway['family'];
+	$interface = $gateway['interface'];
+	$monitor = $gateway['monitor'];
+	if ($monitor === 'dynamic') {
+		$monitor = $family === 'inet6' ? get_interface_gateway_v6($interface) : get_interface_gateway($interface);
+	}
+	return is_string($monitor) ? $monitor : null;
+}
+
 /* Match the live interface, source and target used by gwlb.inc::start_dpinger().
  * A socket with the right gateway name can outlive a DHCP change or restore. */
 function sdwan_monitor_matches(array $gateway, array $process): bool {
@@ -30,11 +40,8 @@ function sdwan_monitor_matches(array $gateway, array $process): bool {
 	if (!is_string($device) || $device === '') {
 		return false;
 	}
-	$monitor = $gateway['monitor'];
-	if ($monitor === 'dynamic') {
-		$monitor = $family === 'inet6' ? get_interface_gateway_v6($interface) : get_interface_gateway($interface);
-	}
-	if (!is_string($monitor)) {
+	$monitor = sdwan_gateway_monitor($gateway);
+	if ($monitor === null) {
 		return false;
 	}
 	$target = sdwan_monitor_address($monitor, $family, $device, true);

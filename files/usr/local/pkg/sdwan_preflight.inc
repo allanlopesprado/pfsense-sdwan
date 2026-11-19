@@ -6,6 +6,24 @@ function sdwan_preflight_error(string $message): array {
 	return ['errors' => [$message], 'binding' => null];
 }
 
+/* Native monitor setup deduplicates targets, including those outside a group. */
+function sdwan_preflight_monitor_key(array $gateway): ?string {
+	$monitor = $gateway['resolved_monitor'] ?? $gateway['monitor'] ?? null;
+	if (!is_string($monitor)) {
+		return null;
+	}
+	[$address, $scope] = array_pad(explode('%', $monitor, 2), 2, null);
+	$packed = @inet_pton($address);
+	if ($packed === false) {
+		return null;
+	}
+	if ($scope !== null && ($scope === '' || strlen($packed) !== 16 ||
+	    ord($packed[0]) !== 0xfe || (ord($packed[1]) & 0xc0) !== 0x80)) {
+		return null;
+	}
+	return inet_ntop($packed) . ($scope === null ? '' : '%' . $scope);
+}
+
 /* Resolve the Phase 1 transport from configuration, including a VIP or an IP
  * alias on CARP. An unresolved group, duplicate VIP or dependency cycle cannot
  * certify a single transport. */
@@ -230,9 +248,14 @@ function sdwan_steering_preflight(array $config, string $policy, string $group, 
 	$transports = [];
 	$vti = sdwan_preflight_vti_transports($native);
 	$uplinks = [];
+	$monitor_usage = [];
 	foreach ($native['gateways'] as $gateway) {
 		if (is_string($gateway['interface'] ?? null)) {
 			$uplinks[$gateway['interface']] = true;
+		}
+		$monitor = sdwan_preflight_monitor_key($gateway);
+		if ($monitor !== null && empty($gateway['monitor_disabled'])) {
+			$monitor_usage[$monitor] = ($monitor_usage[$monitor] ?? 0) + 1;
 		}
 	}
 	foreach ($policies[0]['members'] ?? [] as $member) {
@@ -245,6 +268,10 @@ function sdwan_steering_preflight(array $config, string $policy, string $group, 
 		    ($gateway['monitor_disabled'] ?? true) || ($gateway['action_disabled'] ?? true) ||
 		    !in_array($gateway['family'] ?? '', ['inet', 'inet6'], true)) {
 			return sdwan_preflight_error('The policy must match enabled, monitored group gateways with gateway actions enabled.');
+		}
+		$monitor = sdwan_preflight_monitor_key($gateway);
+		if ($monitor !== null && $monitor_usage[$monitor] > 1) {
+			return sdwan_preflight_error('A policy gateway shares its Monitor IP with another monitored gateway. Assign a distinct Monitor IP under System > Routing.');
 		}
 		$is_vti = str_starts_with($device, 'ipsec');
 		$transport = $is_vti ? ($vti[$device] ?? '') : $if;

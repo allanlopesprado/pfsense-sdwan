@@ -22,6 +22,9 @@ require 'config.inc';
 require $dir . '/sdwan_steering.inc';
 function filter_sdwan_binding_api(): int { global $abi; return $abi; }
 function filter_configure(): void { global $pending; $pending++; }
+function get_interface_gateway($interface): ?string {
+	return config_get_path('fixture/dynamic/' . $interface);
+}
 function verify(bool $ok, string $label): void {
 	if (!$ok) { throw new RuntimeException($label); }
 	echo "ok - {$label}\n";
@@ -51,6 +54,11 @@ $current = $disk = [
 ];
 $preview = sdwan_steering_preview($config, 'p', 'G');
 verify(!$preview['errors'] && $preview['binding']['trackers'] === ['301'] && !$writes, 'preflight is read-only on stock CE');
+$current['gateways/gateway_item'][1] += ['monitor' => 'dynamic'];
+$current['fixture/dynamic/opt1'] = '192.0.2.1';
+verify(str_contains(sdwan_steering_preview($config, 'p', 'G')['errors'][0] ?? '', 'shares its Monitor IP') &&
+    !$writes && !$pending, 'a live DHCP target resolved by pfSense is checked before binding');
+$current = $disk;
 verify(sdwan_steering_bind('p', 'G', $preview['revision']) !== [] && !$writes && !$pending, 'stock CE cannot activate forwarding');
 $abi = 1;
 verify(sdwan_steering_bind('p', 'G', str_repeat('0', 64)) !== [] && !$writes, 'optimistic revision rejects an outdated binding');
@@ -69,6 +77,11 @@ $snapshot['config_revision'] = sdwan_config_revision($config);
 $snapshot['steering'] = sdwan_steering_observations($config, $snapshot, []);
 file_put_contents(SDWAN_SNAPSHOT_PATH, json_encode($snapshot));
 verify(sdwan_steering_gateway_for_rule($raw, $rule) === 'A', 'fresh matching snapshot returns only the selected native gateway');
+$current['gateways/gateway_item'][] = ['name' => 'other', 'interface' => 'opt1', 'gateway' => '192.0.2.1'];
+verify(sdwan_steering_gateway_for_rule($raw, $rule) === null &&
+    sdwan_steering_observations($config, $snapshot, [])['G']['gateway'] === null,
+    'a new duplicate native monitor retires the saved forwarding decision');
+$current = $disk;
 foreach ([time() + 60, time() - SDWAN_MAX_SNAPSHOT_AGE - 1] as $timestamp) {
 	$mistimed = array_replace($snapshot, ['generated_at' => $timestamp]);
 	file_put_contents(SDWAN_SNAPSHOT_PATH, json_encode($mistimed));

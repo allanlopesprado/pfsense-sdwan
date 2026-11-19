@@ -15,6 +15,10 @@ jobs:
           persist-credentials: false
       - name: Verify retry after rejected native filter reload requests
         run: python3 -B tests/steering_daemon.py php
+      - name: Verify Monitor IP handling before packaging
+        run: |
+          php tests/steering_preflight.php
+          php tests/steering.php
       - uses: actions/checkout@v4
         with:
           repository: freebsd/pkg

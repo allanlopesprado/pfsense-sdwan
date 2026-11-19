@@ -201,7 +201,7 @@ elseif (!$display_form): ?>
 	if ($collection === 'members') {
 		$section->addInput(new Form_Select('gateway', gettext('Gateway'), sdwan_ui_choice($sdwan_record['gateway'] ?? ''), $gateways))
 			->setAttribute('required', 'required')
-			->setHelp(gettext('Each member uses one gateway. Configure gateways and their monitors under System > Routing.'));
+			->setHelp(gettext('Each member uses one gateway. Assign each gateway a distinct Monitor IP under System > Routing.'));
 		$section->addInput(new Form_Input('cost', gettext('Cost'), 'number', $sdwan_record['cost'] ?? '1',
 			['min' => 0, 'max' => 65535, 'required' => true]))
 			->setHelp(gettext('A smaller value is preferred by the lowest cost strategy.'));

@@ -39,6 +39,19 @@ $baseline = preflight_check($native, true, 'WAN pair');
 if ($baseline['trackers'] !== ['101'] || $baseline['gateways'] !== ['ISP_A', 'ISP_B']) {
 	throw new Exception('Binding identities must match native rules and configured candidates.');
 }
+$n = $native;
+$n['gateways']['ISP_A']['monitor'] = '192.0.2.45';
+$n['gateways']['ISP_B']['monitor'] = '192.0.2.45';
+preflight_check($n, false, 'shared static IPv4 monitor');
+$n['gateways']['ISP_B']['monitor'] = 'dynamic';
+$n['gateways']['ISP_B']['resolved_monitor'] = '192.0.2.45';
+preflight_check($n, false, 'DHCP gateway resolves to the other member monitor');
+unset($n['gateways']['ISP_B']['resolved_monitor']);
+preflight_check($n, true, 'pending DHCP gateway keeps the other path available');
+$n['gateways']['ISP_C'] = ['monitor' => '192.0.2.45', 'monitor_disabled' => false];
+preflight_check($n, false, 'another monitored gateway outside the group owns the same target');
+$n['gateways']['ISP_C']['monitor_disabled'] = true;
+preflight_check($n, true, 'a gateway with monitoring disabled cannot consume a target');
 foreach (['phase1', 'openvpn_clients', 'openvpn_servers', 'dnsupdates', 'dyndns'] as $key) {
 	$n = $native;
 	$n[$key][] = ['interface' => 'BRANCH'];
@@ -135,6 +148,15 @@ $n['rules'][0]['ipprotocol'] = 'inet6';
 $n['rules'][0]['destination'] = ['address' => '::/0'];
 $n['rules'][1] = guard_for($n['rules'][0]);
 preflight_check($n, true, 'dual-WAN IPv6 default');
+$n['gateways']['ISP_A']['monitor'] = '2001:DB8:0:0::9';
+$n['gateways']['ISP_B']['monitor'] = '2001:db8::9';
+preflight_check($n, false, 'equivalent compressed IPv6 monitors collide');
+$n['gateways']['ISP_A']['monitor'] = 'fe80::1';
+$n['gateways']['ISP_B']['monitor'] = 'fe80::1';
+preflight_check($n, false, 'duplicate unscoped link-local monitors');
+$n['gateways']['ISP_A']['monitor'] = 'fe80::1%vtnet1';
+$n['gateways']['ISP_B']['monitor'] = 'fe80::1%vtnet2';
+preflight_check($n, true, 'link-local monitors on different explicit scopes');
 $n = $native;
 $n['rules'][0]['destination'] = ['address' => '0.0.0.0/0'];
 $n['rules'][1] = guard_for($n['rules'][0]);

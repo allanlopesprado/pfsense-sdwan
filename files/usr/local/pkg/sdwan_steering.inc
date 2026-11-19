@@ -47,6 +47,12 @@ function sdwan_steering_native(): array {
 		$native[$key] = config_get_path($path, []);
 	}
 	$native['gateways'] = sdwan_gateways();
+	foreach ($native['gateways'] as &$gateway) {
+		if (!$gateway['monitor_disabled'] && $gateway['monitor'] === 'dynamic') {
+			$gateway['resolved_monitor'] = sdwan_gateway_monitor($gateway);
+		}
+	}
+	unset($gateway);
 	$native['default4'] = config_get_path('gateways/defaultgw4', '');
 	$native['default6'] = config_get_path('gateways/defaultgw6', '');
 	$native['filtermode'] = config_get_path('ipsec/filtermode', '');
