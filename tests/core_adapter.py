@@ -63,7 +63,10 @@ def test_config(work):
             "gateway": "G", "descr": "path-a"}
     guard = dict(rule, type="block", tracker="41002", descr="native-guard")
     del guard["gateway"]
-    config.update({"filter/rule": [rule, guard], "gateways/gateway_group": [{"name": "G", "item": ["GW_A|1|", "GW_B|2|"]}],
+    second = dict(rule, tracker="41003", destination={"address": "192.0.2.164", "port": "7"})
+    second_guard = dict(guard, tracker="41004", destination=second["destination"])
+    config.update({"filter/rule": [rule, guard, second, second_guard],
+                   "gateways/gateway_group": [{"name": "G", "item": ["GW_A|1|", "GW_B|2|"]}],
                    "fixture_sources": {}, "fixture_devices": {}, "reload_gateways": {}})
     config["interfaces"]["lan"] = {"enable": "", "if": "lablan"}
     for gw, network, device in zip(config["gateways/gateway_item"], ("198.51.100", "203.0.113"), ("labwana", "labwanb")):
@@ -151,7 +154,7 @@ def run(php, core, output, replay):
                 assert f"route-to ({route['interface']} {route['address']})" in normalized and "keep state" in normalized, line
                 shutil.copy(snapshot, work / ("sample-a.json" if choice == "GW_A" else "sample-b.json"))
             else:
-                assert "route-to" not in line and "keep state" not in line, line
+                assert "route-to" not in line and "keep state" not in line and "flags any" in line, line
             rules[label] = line
         assert compile_rule("control") == "unchanged"
         transport = "file replay" if replay else "AF_UNIX"
@@ -162,7 +165,9 @@ def run(php, core, output, replay):
             assert line.startswith("block in quick") and "route-to" not in line, (reason, line)
         shutil.copy(work / "sample-a.json", snapshot)
         first, same_cycle, next_cycle = json.loads(compile_rule("freeze"))
-        assert "labwana 198.51.100.2" in first and first == same_cycle and "labwanb 203.0.113.2" in next_cycle
+        assert "41001" in first and "41003" in same_cycle
+        assert all("labwana 198.51.100.2" in line for line in (first, same_cycle))
+        assert "labwanb 203.0.113.2" in next_cycle
         old = json.loads(snapshot.read_text())
         old["generated_at"] -= 300
         snapshot.write_text(json.dumps(old))
@@ -172,7 +177,7 @@ def run(php, core, output, replay):
         config["filter/rule"][0]["source"] = {"any": ""}
         denied("edited native match")
         config = deepcopy(stable)
-        config["filter/rule"].pop()
+        config["filter/rule"].pop(1)
         denied("removed adjacent guard")
         config = deepcopy(stable)
         config["gateways/gateway_group"] = []
@@ -182,11 +187,17 @@ def run(php, core, output, replay):
         config["reload_gateways"]["GW_A"]["online"] = False
         denied("native gateway down after sample")
         config = deepcopy(stable)
+        config["reload_gateways"]["GW_A"]["address"] = "224.0.0.1"
+        denied("non-unicast next hop")
+        config = deepcopy(stable)
         config["gateways/sdwan_bindings/item"].append(binding)
         denied("duplicate tracker binding")
         config = deepcopy(stable)
         (work / "sdwan_steering.inc").rename(work / "detached-provider.inc")
         denied("removed package provider")
+        config["gateways/sdwan_bindings"] = {"item": []}
+        config["gateways/sdwan_bindings/item"] = []
+        assert "$GWG" in compile_rule("rollback")
         print("ok - one decision per reload; stale samples, native drift, missing guard/provider and duplicate bindings block")
         if output:
             output.mkdir(parents=True, exist_ok=True)

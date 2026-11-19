@@ -40,7 +40,7 @@
  	global $g, $FilterIflist, $GatewaysList, $vpns_list, $use_floating_states_for_ipsec;
  	global $dummynet_name_list, $vlanprio_values, $time_based_rules;
  
-@@ -4408,6 +4418,17 @@
+@@ -4408,6 +4418,22 @@
  		$type = "pass";
  	}
  
@@ -52,13 +52,18 @@
 +			$rule['type'] = 'block';
 +			$rule['gateway'] = '';
 +			unset($rule['nat']);
++			/* A native TCP rule defaults to SYN-only matching. Deny all
++			 * stateless flags for this scope unless explicitly constrained. */
++			if (empty($rule['tcpflags2'])) {
++				$rule['tcpflags_any'] = true;
++			}
 +		}
 +	}
 +
  	if (array_path_enabled($rule, 'nat')) {
  		$nat_type = match ($rule['ipprotocol']) {
  			'inet6' => '64',
-@@ -4467,7 +4488,9 @@
+@@ -4467,7 +4493,9 @@
  	}
  	/* if user has selected a custom gateway, lets work with it */
  	else if ($rule['gateway'] <> "" && $type == "pass") {

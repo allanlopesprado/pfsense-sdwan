@@ -45,7 +45,7 @@ if ($operation === 'render') {
 	// Publishing the newer snapshot between two rule compilations must not split a binding.
 	$first = filter_generate_user_rule($rule);
 	copy($work . '/sample-b.json', $work . '/snapshot.json');
-	$second = filter_generate_user_rule($rule);
+	$second = filter_generate_user_rule(config_get_path('filter/rule')[2]);
 	filter_generate_gateways();
 	$third = filter_generate_user_rule($rule);
 	echo json_encode([$first, $second, $third], JSON_THROW_ON_ERROR);
@@ -59,6 +59,12 @@ if ($operation === 'render') {
 		throw new RuntimeException('The adjacent native deny rule changed.');
 	}
 	echo 'unchanged';
+} elseif ($operation === 'rollback') {
+	$rendered = filter_generate_user_rule($rule);
+	if ($rendered !== lab_stock_user_rule($rule)) {
+		throw new RuntimeException('Unbinding did not restore the native gateway rule.');
+	}
+	echo $rendered;
 } else {
 	throw new InvalidArgumentException('Unknown renderer test operation.');
 }
