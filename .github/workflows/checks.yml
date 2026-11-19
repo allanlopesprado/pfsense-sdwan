@@ -85,11 +85,12 @@ jobs:
       - name: Test the pinned installer and native forwarding rules in FreeBSD
         uses: vmactions/freebsd-vm@4441bea20b31bfa77329a5af583199362489567e # v1.4.9
         with:
-          release: "15.0"
+          release: "15.1"
           usesh: true
           prepare: |
             env ASSUME_ALWAYS_YES=yes pkg bootstrap
             pkg install -y php84
+            php -n -v
           run: |
             set -eu
             sh tests/freebsd-install.sh

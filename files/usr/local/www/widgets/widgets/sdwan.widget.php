@@ -95,11 +95,11 @@ $sdwanRender = static function (): void {
 					<small class="sdwan-widget-detail"><i class="fa-solid <?=$icon?>" aria-hidden="true"></i>
 						<?=$current ? $escape(sprintf(gettext('%1$d of %2$d eligible'), $eligible, $total)) : gettext('Awaiting evaluation')?></small>
 				</th>
-				<td><?php if ($requests): ?><small class="sdwan-widget-detail text-muted"><?=gettext('Recommended member')?></small><?php endif; ?>
+				<td><?php if ($requests): ?><small class="sdwan-widget-detail"><?=gettext('Recommended member')?></small><?php endif; ?>
 					<?=$escape($current && $selected !== null ? $selected : gettext('No recommendation'))?>
 					<?php foreach ($requests[$name] ?? [] as $group => $target): ?>
 						<div class="sdwan-widget-request">
-							<small class="sdwan-widget-detail text-muted"><?=$escape(sprintf(gettext('Requested gateway · %s'), $group))?></small>
+							<small class="sdwan-widget-detail"><?=$escape(sprintf(gettext('Requested gateway · %s'), $group))?></small>
 							<?=$escape($target)?>
 						</div>
 					<?php endforeach; ?>
@@ -111,7 +111,7 @@ $sdwanRender = static function (): void {
 	<?php if ($bindingError) {
 		$notice('fa-triangle-exclamation text-warning', gettext('Forwarding requests unavailable.'));
 	} ?>
-	<p class="sdwan-widget-note text-muted small"><i class="fa-regular fa-clock" aria-hidden="true"></i>
+	<p class="sdwan-widget-note small"><i class="fa-regular fa-clock" aria-hidden="true"></i>
 		<?=gettext('Last sample')?> <time datetime="<?=$escape(date(DATE_ATOM, $snapshot['generated_at']))?>"><?=$escape(date('H:i:s T', $snapshot['generated_at']))?></time></p>
 	<?php
 };

@@ -139,15 +139,34 @@ def verify_dashboard_layout(core, output, widget, fragment):
                     const panel=document.querySelector('.panel'), region=panel.querySelector('.sdwan-status-widget');
                     const nodes=[panel, region, ...region.querySelectorAll('table, tr, th, td, small')];
                     const box=panel.getBoundingClientRect();
+                    function rgba(css) {return css.match(/[0-9.]+/g).map(Number);}
+                    function over(rgb,paint) {
+                        const alpha=paint.length===4 ? paint[3] : 1;
+                        return rgb.map((v,i)=>v*(1-alpha)+paint[i]*alpha);
+                    }
+                    function luminance(rgb) {
+                        const [r,g,b]=rgb.map(v=>v/255).map(v=>v<=.04045 ? v/12.92 : ((v+.055)/1.055)**2.4);
+                        return .2126*r+.7152*g+.0722*b;
+                    }
+                    function contrast(el) {
+                        const layers=[];
+                        for(let p=el;p;p=p.parentElement) layers.unshift(rgba(getComputedStyle(p).backgroundColor));
+                        const bg=layers.reduce(over,[255,255,255]);
+                        const a=luminance(bg),b=luminance(over(bg,rgba(getComputedStyle(el).color)));
+                        return (Math.max(a,b)+.05)/(Math.min(a,b)+.05);
+                    }
+                    const readouts=region.querySelectorAll('tbody td, .sdwan-widget-detail, time');
                     return {width:box.width,height:Math.ceil(box.height),viewport:innerWidth,
                             horizontalOverflow:Math.max(...nodes.map(e=>e.scrollWidth-e.clientWidth)),
                             background:getComputedStyle(document.body).backgroundColor,
                             rows:panel.querySelectorAll('tbody tr').length,
+                            minimumReadoutContrast:Math.min(...Array.from(readouts,contrast)),
                             positiveTabindex:panel.querySelectorAll('[tabindex]:not([tabindex="-1"]):not([tabindex="0"])').length};
                 """
                 data = js(layout_script)
                 assert data["width"] == width and data["viewport"] == width and data["horizontalOverflow"] <= 1, data
                 assert data["rows"] == 3 and data["positiveTabindex"] == 0
+                assert data["minimumReadoutContrast"] >= 4.5, data
                 expected_bg = "rgb(245, 245, 245)" if theme == "light" else "rgb(33, 33, 33)"
                 assert data["background"] == expected_bg, data
                 shot = call("/goog/cdp/execute", {"cmd": "Page.captureScreenshot", "params": {

@@ -11,7 +11,7 @@ Use um clone de laboratório com acesso administrativo. O próprio firewall baix
 
 <!-- install-command -->
 ```sh
-d=$(mktemp -d /tmp/sdwan.XXXXXXXX) && (trap 'rm -rf "$d"' EXIT; p="$d/pfSense-pkg-SDWAN-0.4.0.pkg"; fetch -o "$p" 'https://raw.githubusercontent.com/allanlopesprado/pfsense-sdwan/681cc6bf7e95a62a456b39eae923a430ae251049/dist/pfSense-pkg-SDWAN-0.4.0.pkg' && sha256 -c b9300cb5ac2cf0655865aa46b2e59af2617ccb6838e9dbd5456a9d1ba8a57ce6 "$p" && pkg add "$p")
+d=$(mktemp -d /tmp/sdwan.XXXXXXXX) && (trap 'rm -rf "$d"' EXIT; p="$d/pfSense-pkg-SDWAN-0.4.0.pkg"; fetch -o "$p" 'https://raw.githubusercontent.com/allanlopesprado/pfsense-sdwan/c0372cadc2ce6be6afa7c01c0db85bba23bc26d6/dist/pfSense-pkg-SDWAN-0.4.0.pkg' && sha256 -c 67251efd7fd8841fb26b65dbfead379867ddf5274adfe456766d3db182d8c7d8 "$p" && pkg add "$p")
 ```
 
 3. No registro da versão 0.4.0, o pacote inicia o serviço ou reinicia a instância que já está rodando. Confira a versão e o estado do serviço com o comando abaixo. O resultado esperado inclui `pfSense-pkg-SDWAN-0.4.0` e a indicação de que o serviço está em execução.
