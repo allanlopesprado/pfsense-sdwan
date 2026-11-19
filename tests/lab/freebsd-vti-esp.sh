@@ -10,7 +10,7 @@ umask 077
 fw=$1 peer=$2 wan=$3 peer_wan=$4 work=$5
 test "$(uname -s)" = FreeBSD
 test -d "$work"
-outer_a=198.51.100.1 outer_b=198.51.100.2
+outer_a=$6 outer_b=$7
 inner_a=198.18.1.1 inner_b=198.18.1.2 target=192.0.2.164
 req_a=410 req_b=420 spi_ab=0x14001 spi_ba=0x14002
 jexec "$fw" ifconfig "$wan" | grep -Fq "inet $outer_a "
@@ -18,10 +18,15 @@ jexec "$peer" ifconfig "$peer_wan" | grep -Fq "inet $outer_b "
 interface_to() {
     jexec "$1" route -n get "$2" | awk '$1=="interface:" {print $2; ok=1} END {exit !ok}'
 }
-fw_other=$(interface_to "$fw" 203.0.113.2)
-peer_other=$(interface_to "$peer" 203.0.113.1)
-test "$wan" != "$fw_other"
-test "$peer_wan" != "$peer_other"
+fw_wans=''
+peer_wans=''
+for pair in '198.51.100.1 198.51.100.2' '203.0.113.1 203.0.113.2' '192.0.2.129 192.0.2.130'; do
+    read -r local_ip remote_ip <<EOF
+$pair
+EOF
+    fw_wans="$fw_wans $(interface_to "$fw" "$remote_ip")"
+    peer_wans="$peer_wans $(interface_to "$peer" "$local_ip")"
+done
 
 key_ab=$(openssl rand -hex 20)
 key_ba=$(openssl rand -hex 20)
@@ -50,12 +55,12 @@ if ! jexec "$fw" ifconfig -C | tr ' ' '\n' | grep -qx ipsec; then kldload -n ips
 # cleartext counters cover both physical links and any translated client IP.
 cat > "$work/esp-fw.pf" <<EOF
 pass in quick on $wan inet proto esp from $outer_b to $outer_a no state label "esp-in"
-pass in quick on { $wan $fw_other } inet proto icmp from $target to any icmp-type echorep no state label "clear-in"
+pass in quick on { $fw_wans } inet proto icmp from $target to any icmp-type echorep no state label "clear-in"
 pass all no state
 EOF
 cat > "$work/esp-peer.pf" <<EOF
 pass in quick on $peer_wan inet proto esp from $outer_a to $outer_b no state label "esp-in"
-pass in quick on { $peer_wan $peer_other } inet proto icmp from any to $target icmp-type echoreq no state label "clear-in"
+pass in quick on { $peer_wans } inet proto icmp from any to $target icmp-type echoreq no state label "clear-in"
 pass all no state
 EOF
 for spec in "$fw:fw" "$peer:peer"; do
@@ -76,13 +81,15 @@ all_replied() {
 }
 jexec "$peer" ifconfig lo0 inet "$target/32" alias
 alias_added=yes
+jexec "$fw" route -n add -host "$target" "$outer_b"
+route_added=yes
 probe "$outer_a"
 all_replied
 clear_fw=$(count "$fw" clear-in)
 clear_peer=$(count "$peer" clear-in)
 test "$clear_fw" -ge 3
 test "$clear_peer" -ge 3
-echo 'ok - both cleartext detectors see the pre-tunnel round trip over the underlay'
+echo "ok - pre-tunnel cleartext detected on underlay $outer_a to $outer_b"
 
 # if_ipsec(4) uses a local reqid per VTI. Each peer stores both directional
 # SAs with its own reqid. AES-GCM-128 needs 16 key bytes plus 4 salt bytes.
@@ -103,8 +110,7 @@ jexec "$peer" ifconfig "$peer_vti" inet "$inner_b/30" "$inner_a" up
 add_sas "$fw" "$req_a"
 add_sas "$peer" "$req_b"
 unset key_ab key_ba
-jexec "$fw" route -n add -host "$target" "$inner_b"
-route_added=yes
+jexec "$fw" route -n change -host "$target" "$inner_b"
 test "$(interface_to "$fw" "$target")" = "$fw_vti"
 test "$(interface_to "$peer" "$inner_a")" = "$peer_vti"
 esp_fw=$(count "$fw" esp-in)
@@ -115,7 +121,7 @@ test "$(count "$fw" esp-in)" -ge "$((esp_fw+3))"
 test "$(count "$peer" esp-in)" -ge "$((esp_peer+3))"
 test "$(count "$fw" clear-in)" -eq "$clear_fw"
 test "$(count "$peer" clear-in)" -eq "$clear_peer"
-echo 'ok - three echo replies via the VTI, bidirectional ESP on the physical link and no protected ICMP in clear'
+echo "ok - VTI on $outer_a: three replies, bidirectional ESP and no protected ICMP in clear"
 
 no_sa() {
     jexec "$fw" netstat -s -p ipsec |

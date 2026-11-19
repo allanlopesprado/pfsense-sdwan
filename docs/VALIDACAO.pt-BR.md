@@ -24,6 +24,18 @@ O alvo é o pfSense CE 2.9.1. O pacote usa os gateways, o dpinger, os privilégi
 
 A coluna **RTTsd** exibe o desvio padrão do RTT que o dpinger mede. O SLA do pacote usa RTT médio e perda. Produtos que calculam jitter com outra metodologia ou usam sondas por aplicação exigem comparação de métricas e de janela antes de reaproveitar limites numéricos. [Gateway Status](https://docs.netgate.com/pfsense/en/latest/monitoring/status/gateways.html) · [Formato do dpinger](https://github.com/dennypage/dpinger/blob/master/README.md)
 
+## Matriz de impacto no pfSense
+
+| Área | Verificação automatizada e limite |
+|---|---|
+| WAN IPv4 e IPv6 | O observador lê três processos dpinger reais enquanto alterna todas as oito combinações de perda total. Políticas simultâneas de um, dois e três links confirmam caminhos elegíveis e recuperação. Um link permite observação. O gerador nativo e o PF da VM exercitam encaminhamento com dois e três links. O IPv6 inclui gateway link-local. |
+| NAT e conexões recebidas | O peer verifica o endereço traduzido de cada WAN e a continuidade de uma sessão durante troca da regra. Os redirecionamentos de portas de B e C testam ida e volta na WAN em que entraram, com rota padrão em A. O laboratório usa NAT de saída por interface. NAT híbrido, manual, 1:1, reflection, NAT64 e CGNAT precisam de topologias próprias. [NAT e Multi-WAN](https://docs.netgate.com/pfsense/en/latest/multiwan/nat.html) |
+| IPsec VTI e IKEv2 | O gerador verifica grupos VTI de dois e três links, para IPv4 e IPv6, com todas as combinações de disponibilidade. A VM FreeBSD verifica ESP e ausência de tráfego em claro ao retirar uma SA manual. O Actions negocia, renova, retira e restaura IKEv2 em um, dois e três links no strongSwan. A sequência completa com seleção, VTI e IKEv2 em um pfSense CE exige um peer real. |
+| VPN por política, OpenVPN, WireGuard, GRE e GIF | A pré-validação verifica a coexistência de interfaces independentes e recusa delegar tipos de túnel que o adaptador não suporta. O gerador compara as regras de OpenVPN, WireGuard e IPsec por política com o original. Ensaios de conexão e reconexão de OpenVPN e WireGuard, e tráfego de GRE e GIF, ficam para um clone com cada serviço instalado. [Regras de VPN](https://docs.netgate.com/pfsense/en/latest/vpn/firewall-rules.html) |
+| Interfaces e dependências | VLAN, QinQ, LAGG, bridge e PPPoE são verificadas com inventário de configuração. Caminhos com uma porta física em comum são recusados. Mudanças de dependências invalidam a aprovação do vínculo. DHCP, PPPoE e IPv6-PD ainda precisam de ensaios de renovação real e mudança de endereço. |
+| Serviços e regras independentes | O gerador compara regras de DNS, limitador, estados, WAN e VPN com o original. A VM preserva a rota padrão e confirma tráfego fora da política durante a perda de todos os caminhos. Regras explícitas para redes locais, estáticas e VPN devem vir antes de um vínculo WAN que use destino amplo. [Ordem das regras e exceções de roteamento](https://docs.netgate.com/pfsense/en/latest/multiwan/policy-route.html) |
+| Serviços com configuração dinâmica | Roteamento dinâmico FRR, Captive Portal, proxies, IDS/IPS, HA XMLRPC, DNS Resolver/Forwarder, DHCP, RA e serviços originados no firewall precisam de homologação com cada serviço ativo. Incluir reinício, perda parcial, troca de endereço, MTU/MSS, VPN sobre NAT, regras de entrada e recuperação da sessão da aplicação. [Serviços locais e Multi-WAN](https://docs.netgate.com/pfsense/en/latest/multiwan/considerations.html) |
+
 ## Evidências exigidas
 
 | Cenário | Evidência |

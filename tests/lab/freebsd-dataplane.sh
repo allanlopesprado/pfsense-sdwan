@@ -387,4 +387,6 @@ if [ "${SDWAN_REAL_DPINGER:-0}" = 1 ]; then
 fi
 
 sh "$repo/tests/lab/freebsd-vti-no-sa.sh" "$firewall" "$remote" "$wan_a" "$remote_a" "$work"
-sh "$repo/tests/lab/freebsd-vti-esp.sh" "$firewall" "$remote" "$wan_a" "$remote_a" "$work"
+sh "$repo/tests/lab/freebsd-vti-esp.sh" "$firewall" "$remote" "$wan_a" "$remote_a" "$work" 198.51.100.1 198.51.100.2
+sh "$repo/tests/lab/freebsd-vti-esp.sh" "$firewall" "$remote" "$wan_b" "${wan_b%?}b" "$work" 203.0.113.1 203.0.113.2
+sh "$repo/tests/lab/freebsd-vti-esp.sh" "$firewall" "$remote" "$wan_c" "$remote_c" "$work" 192.0.2.129 192.0.2.130
