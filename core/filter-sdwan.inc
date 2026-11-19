@@ -58,8 +58,8 @@ function filter_sdwan_begin_reload(): void {
 
 /* Look up by tracker even after the regular gateway group editor has removed the
  * gateway field from a rule. Unmatched rules retain the native generator path.
- * false means render the bound rule as block; a string is the validated route. */
-function filter_sdwan_rule_route(array $rule, array $routes): string|false|null {
+ * false means block. A selected route includes its actual native failover tier. */
+function filter_sdwan_rule_route(array $rule, array $routes): array|false|null {
 	global $sdwan_filter_cycle;
 	$tracker = $rule['tracker'] ?? null;
 	if ((!is_int($tracker) && !is_string($tracker)) ||
@@ -110,8 +110,9 @@ function filter_sdwan_rule_route(array $rule, array $routes): string|false|null 
 			return false;
 		}
 		foreach (reset($native)['item'] ?? [] as $entry) {
-			if (is_string($entry) && explode('|', $entry, 2)[0] === $chosen) {
-				return $routes[$chosen]['route'];
+			$parts = is_string($entry) ? explode('|', $entry, 3) : [];
+			if (($parts[0] ?? null) === $chosen && in_array($parts[1] ?? null, ['1', '2', '3', '4', '5'], true)) {
+				return ['route' => $routes[$chosen]['route'], 'tier' => $parts[1]];
 			}
 		}
 	} catch (Throwable $e) {

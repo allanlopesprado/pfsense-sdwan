@@ -63,13 +63,14 @@
  	if (array_path_enabled($rule, 'nat')) {
  		$nat_type = match ($rule['ipprotocol']) {
  			'inet6' => '64',
-@@ -4467,7 +4493,9 @@
+@@ -4467,7 +4493,10 @@
  	}
  	/* if user has selected a custom gateway, lets work with it */
  	else if ($rule['gateway'] <> "" && $type == "pass") {
 -		if (isset($GatewaysList[$rule['gateway']])) {
-+		if (is_string($sdwan_route)) {
-+			$aline['route'] = $sdwan_route;
++		if (is_array($sdwan_route)) {
++			$aline['route'] = $sdwan_route['route'];
++			$labels[] = make_rule_label_item($sdwan_route['tier'] . ':' . $rule['gateway'], RULE_LABEL_KEY_GATEWAY);
 +		} elseif (isset($GatewaysList[$rule['gateway']])) {
  			/* Add the load balanced gateways */
  			$aline['route'] = " \$GW{$rule['gateway']} ";

@@ -230,3 +230,4 @@ baseline >"$work/final"
 cmp "$work/baseline" "$work/final"
 echo 'ok - baseline PF rules, NAT rules and kernel default route survived the path changes'
 sh "$repo/tests/lab/freebsd-vti-no-sa.sh" "$firewall" "$remote" "$wan_a" "$remote_a" "$work"
+sh "$repo/tests/lab/freebsd-vti-esp.sh" "$firewall" "$remote" "$wan_a" "$remote_a" "$work"

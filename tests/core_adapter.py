@@ -152,6 +152,8 @@ def run(php, core, output, replay):
             if choice:
                 route = config["reload_gateways"][choice]
                 assert f"route-to ({route['interface']} {route['address']})" in normalized and "keep state" in normalized, line
+                tier = 1 if choice == "GW_A" else 2
+                assert f'label "gw={tier}:G"' in normalized, line
                 shutil.copy(snapshot, work / ("sample-a.json" if choice == "GW_A" else "sample-b.json"))
             else:
                 assert "route-to" not in line and "keep state" not in line and "flags any" in line, line
