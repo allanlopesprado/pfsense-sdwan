@@ -15,3 +15,17 @@ jobs:
         env:
           REQUIRE_NATIVE_SOCKET_TEST: "1"
         run: sh tests/run.sh
+  freebsd:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Check published installer with FreeBSD fetch, sha256 and pkg
+        uses: vmactions/freebsd-vm@4441bea20b31bfa77329a5af583199362489567e # v1.4.9
+        with:
+          release: "15.0"
+          usesh: true
+          prepare: env ASSUME_ALWAYS_YES=yes pkg bootstrap
+          run: sh tests/freebsd-install.sh
