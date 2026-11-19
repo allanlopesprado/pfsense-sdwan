@@ -16,9 +16,20 @@ spl_autoload_register(function ($name) use ($classes) {
 		require_once($file);
 	}
 });
-// The upstream renderer reads unset optional attributes with warnings masked by the WebGUI.
+// Supply the preference normally loaded by guiconfig.inc. The pinned upstream
+// Form classes also read optional attributes and two uninitialized display variables.
+$user_settings = ['webgui' => ['webguileftcolumnhyper' => false]];
 set_error_handler(function ($severity, $message, $file) use ($classes) {
-	return str_starts_with($file, $classes . '/') && str_starts_with($message, 'Undefined array key');
+	if ($severity === E_DEPRECATED && $file === $classes . '/Form/Group.class.php' &&
+	    str_starts_with($message, 'strtolower(): Passing null to parameter #1')) {
+		return true;
+	}
+	if ($severity !== E_WARNING || !str_starts_with($file, $classes . '/Form/')) {
+		return false;
+	}
+	return str_starts_with($message, 'Undefined array key') ||
+	    ($file === $classes . '/Form/Group.class.php' && $message === 'Undefined variable $hidden') ||
+	    ($file === $classes . '/Form/Input.class.php' && $message === 'Undefined variable $help');
 });
 function display_top_tabs($tabs, $nodrop) {}
 function print_info_box($message, $class, $button = false) { echo htmlspecialchars($message); }
