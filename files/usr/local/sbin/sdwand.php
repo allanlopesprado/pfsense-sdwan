@@ -30,12 +30,12 @@ function sdwan_sample_socket(array $process, string $name): ?array {
 	return sdwan_parse_dpinger_line($line, $name);
 }
 
-function sdwan_gateway_observations(array $config, array $inventory): array {
+function sdwan_gateway_observations(array $names, array $inventory): array {
 	$processes = running_dpinger_processes();
 	$settings = array_column(config_get_path('gateways/gateway_item', []), null, 'name');
 	$defaults = return_dpinger_defaults();
 	$observations = [];
-	foreach (array_unique(array_column($config['members'], 'gateway')) as $name) {
+	foreach (array_unique($names) as $name) {
 		$gateway = $inventory[$name] ?? null;
 		if ($gateway === null || $gateway['monitor_disabled']) {
 			continue;
@@ -95,9 +95,15 @@ function sdwan_observe_once(): void {
 		$config = sdwan_get_config();
 		$started = time();
 		$inventory = sdwan_gateways();
-		$observations = sdwan_gateway_observations($config, $inventory);
+		$members = array_column($config['members'], 'gateway');
+		$observations = sdwan_gateway_observations($members ?: array_keys($inventory), $inventory);
 		$snapshot = sdwan_evaluate($config, $observations, $started, $inventory);
 		$snapshot['config_revision'] = sdwan_config_revision($config);
+		if (!$members) {
+			// Show native gateways on the dashboard before any members are configured.
+			$snapshot['gateways'] = array_map('sdwan_member_sample', $observations);
+			$snapshot['gateway_inventory_revision'] = sdwan_config_revision($inventory);
+		}
 		$receipt = SDWAN_SNAPSHOT_PATH . '.forwarded';
 		$reload = false;
 		$invalid_bindings = false;

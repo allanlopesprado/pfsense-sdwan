@@ -226,6 +226,16 @@ def run(binary, require_unix):
         assert all(member["status"] == "down" for member in outage["members"].values())
         print("ok - monitor start-up, wrong socket identity and complete loss fail closed")
 
+        without_members = fixture(sandbox)
+        del without_members["installedpackages/sdwan"]
+        native = observe(without_members, healthy)
+        assert native["members"] == native["policies"] == []
+        assert native["gateways"]["GW_A"]["rtt_ms"] == 20
+        assert native["gateways"]["GW_B"]["loss_pct"] == 0
+        assert len(native["gateway_inventory_revision"]) == 64
+        assert json.loads(php(binary, "-r", read)) == native
+        print("ok - native gateways publish real measurements before SD-WAN members exist")
+
         second["generated_at"] -= 300
         snapshot.write_text(json.dumps(second))
         assert json.loads(php(binary, "-r", read)) is None

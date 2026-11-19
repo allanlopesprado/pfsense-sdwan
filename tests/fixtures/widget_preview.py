@@ -127,17 +127,17 @@ def verify_dashboard_layout(core, output, widget, fragment):
                 # Drive the real fragment callback, including its HTTP method and parameter names.
                 updated = call("/execute/async", {"args": [], "script": """
                     const done=arguments[0], w=ajaxspecs[0];
-                    document.querySelector('time').textContent='pending-test';
+                    document.querySelector('.sdwan-widget-rtt').textContent='pending-test';
                     $.post(w.url,w.parms).done(html=>{
                         w.callback(html);
-                        done(document.querySelector('time').textContent!=='pending-test');
+                        done(document.querySelector('.sdwan-widget-rtt').textContent==='23.45 ms');
                     }).fail(()=>done(false));
                 """})
                 assert updated and js("return document.activeElement.getAttribute('href')") == expected[-1]
                 js("document.activeElement.blur();")
                 layout_script = """
                     const panel=document.querySelector('.panel'), region=panel.querySelector('.sdwan-status-widget');
-                    const nodes=[panel, region, ...region.querySelectorAll('table, tr, th, td, small')];
+                    const nodes=[panel, region, ...region.querySelectorAll('table, tr, th, td, small, p')];
                     const box=panel.getBoundingClientRect();
                     function rgba(css) {return css.match(/[0-9.]+/g).map(Number);}
                     function over(rgb,paint) {
@@ -155,21 +155,24 @@ def verify_dashboard_layout(core, output, widget, fragment):
                         const a=luminance(bg),b=luminance(over(bg,rgba(getComputedStyle(el).color)));
                         return (Math.max(a,b)+.05)/(Math.min(a,b)+.05);
                     }
-                    const readouts=region.querySelectorAll('tbody th a, tbody td, .sdwan-widget-detail, time');
+                    const readouts=region.querySelectorAll('tbody th, tbody a, tbody td, .sdwan-widget-note, .sdwan-widget-note a');
                     const rows=region.querySelectorAll('tbody tr');
                     return {width:box.width,height:Math.ceil(box.height),viewport:innerWidth,
                             horizontalOverflow:Math.max(...nodes.map(e=>e.scrollWidth-e.clientWidth)),
                             background:getComputedStyle(document.body).backgroundColor,
                             rows:rows.length,
                             neutralStatusCells:Array.from(rows).every(row=>Array.from(row.cells).every(c=>!c.className.includes('bg-'))),
-                            pathRatios:Array.from(rows).map(row=>row.lastElementChild.querySelector('[aria-hidden]').textContent),
+                            gatewayStates:Array.from(rows).map(row=>row.lastElementChild.textContent.trim()),
+                            latency:Array.from(rows).map(row=>row.querySelector('.sdwan-widget-rtt').textContent.trim()),
+                            timestamps:region.querySelectorAll('time').length,
                             minimumReadoutContrast:Math.min(...Array.from(readouts,contrast)),
                             positiveTabindex:panel.querySelectorAll('[tabindex]:not([tabindex="-1"]):not([tabindex="0"])').length};
                 """
                 data = js(layout_script)
                 assert data["width"] == width and data["viewport"] == width and data["horizontalOverflow"] <= 1, data
                 assert data["rows"] == 3 and data["positiveTabindex"] == 0
-                assert data["neutralStatusCells"] and data["pathRatios"] == ["2/2", "1/2", "0/2"]
+                assert data["neutralStatusCells"] and data["gatewayStates"] == ["Warning", "Online", "Down"]
+                assert data["latency"] == ["23.45 ms", "9.8 ms", "—"] and data["timestamps"] == 0
                 assert data["minimumReadoutContrast"] >= 4.5, data
                 expected_bg = "rgb(245, 245, 245)" if theme == "light" else "rgb(33, 33, 33)"
                 assert data["background"] == expected_bg, data
@@ -179,7 +182,7 @@ def verify_dashboard_layout(core, output, widget, fragment):
                 png = base64.b64decode(shot["data"], validate=True)
                 assert png[:8] == b"\x89PNG\r\n\x1a\n" and struct.unpack(">II", png[16:24]) == (width, data["height"])
                 (output / f"widget-{theme}-{width}.png").write_bytes(png)
-                js("""document.querySelector('tbody th a').textContent='X'.repeat(32);
+                js("""document.querySelector('tbody th').firstChild.textContent='X'.repeat(32);
                       document.querySelector('.sdwan-widget-detail').append('Y'.repeat(96));""")
                 stress = js(layout_script)["horizontalOverflow"]
                 assert stress <= 1, (theme, width, stress)

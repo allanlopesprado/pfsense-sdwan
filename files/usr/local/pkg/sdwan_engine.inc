@@ -242,7 +242,13 @@ function sdwan_read_snapshot(): ?array {
 	    !preg_match('/^[a-f0-9]{64}$/D', $data['config_revision'])) {
 		return null;
 	}
-	foreach ($data['members'] as $sample) {
+	$gateways = $data['gateways'] ?? [];
+	if (array_key_exists('gateways', $data) && (!is_array($data['gateways']) ||
+	    !is_string($data['gateway_inventory_revision'] ?? null) ||
+	    !preg_match('/^[a-f0-9]{64}$/D', $data['gateway_inventory_revision']))) {
+		return null;
+	}
+	foreach (array_merge(array_values($data['members']), array_values($gateways)) as $sample) {
 		if (!is_array($sample) || !in_array($sample['status'] ?? null,
 		    ['online', 'degraded', 'down', 'unknown'], true)) {
 			return null;

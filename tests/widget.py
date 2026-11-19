@@ -3,7 +3,6 @@
 import argparse
 import json
 from pathlib import Path
-import shutil
 import tempfile
 import time
 
@@ -12,8 +11,6 @@ from daemon_integration import ROOT, php, stage
 
 def check(binary, directory):
     stage(directory)
-    for name in ("sdwan_steering.inc", "sdwan_preflight.inc"):
-        shutil.copy(ROOT / "files/usr/local/pkg" / name, directory / name)
     widget = ROOT / "files/usr/local/www/widgets"
     source = (widget / "widgets/sdwan.widget.php").read_text()
     (directory / "sdwan.widget.php").write_text(source.replace("/usr/local/pkg/", f"{directory}/"))
@@ -24,10 +21,7 @@ function isAllowedPage($page) {
     $role = $GLOBALS['allowed'];
     return match ($page) {
         '/sdwan/status.php' => $role !== 'no',
-        '/sdwan/diagnostics.php' => in_array($role, ['view', 'manage', 'rules-only', 'groups-only'], true),
-        '/sdwan/forwarding.php' => in_array($role, ['manage', 'rules-only', 'groups-only'], true),
-        '/firewall_rules.php' => in_array($role, ['manage', 'rules-only'], true),
-        '/system_gateway_groups.php' => in_array($role, ['manage', 'groups-only'], true),
+        '/sdwan/diagnostics.php' => $role === 'view',
         default => false,
     };
 }
@@ -57,6 +51,10 @@ echo json_encode([http_response_code() ?: 200, $body, $sdwan_title_link,
         return json.loads(php(binary, "-d", f"include_path={directory}",
                               "-r", script, "--", mode, allowed, key))
 
+    def package_value(expression):
+        return php(binary, "-d", f"include_path={directory}", "-r",
+                   "require 'sdwan.inc'; require 'config.inc'; echo " + expression + ";")
+
     for mode, code in (("embed", 200), ("ajax", 403)):
         status, body, link, loaded = render(mode, allowed="no")
         assert status == code and link == "" and not loaded and "permission" in body, mode
@@ -67,88 +65,94 @@ echo json_encode([http_response_code() ?: 200, $body, $sdwan_title_link,
 
     status, body, link, _ = render("embed")
     assert status == 200 and link == "/sdwan/status.php" and "register_ajax" in body
-    assert "Waiting for current" in body
-    def package_value(expression):
-        return php(binary, "-d", f"include_path={directory}", "-r",
-                   "require 'sdwan_steering.inc'; require 'config.inc'; echo " + expression + ";")
+    assert "GW_A" in body and "GW_B" in body and body.count("No data") == 2
+    assert "<time" not in body and "Last sample" not in body
 
     config = directory / "fixture.json"
     fixture = json.loads(config.read_text())
-    rules = fixture["installedpackages/sdwan"]["policies"]["item"]
+    settings = fixture["installedpackages/sdwan"]
+    rules = settings["policies"]["item"]
     rules[0]["name"] = "Voice"
     rules.extend([dict(rules[0], name="BranchVPN"), dict(rules[0], name="Backups")])
-    members = fixture["installedpackages/sdwan"]["members"]["item"]
-    members[0]["name"] = "Fiber"
-    members[1]["name"] = "Broadband"
-    for rule in rules:
-        rule["members"] = {"item": ["Fiber", "Broadband"]}
-    config.write_text(json.dumps(fixture))
-    raw_binding = {"group": "Branch_WAN", "policy": "Voice", "gateways": {"item": ["GW_A", "GW_B"]},
-                   "trackers": {"item": ["42"]}, "policy_revision": package_value(
-                       "sdwan_steering_policy_revision(sdwan_get_config(), 'Voice')"),
-                   "rules_revision": "1" * 64}
-    fixture["gateways/sdwan_bindings"] = {"item": [raw_binding]}
+    fixture["interfaces"]["opt3"] = {"enable": ""}
+    fixture["gateways/gateway_item"].append({"name": "GW_C", "gateway": "203.0.113.1", "interface": "opt3"})
+    settings["members"]["item"].append({"name": "c", "gateway": "GW_C", "cost": "30"})
+    fixture["gateways/sdwan_bindings"] = {"item": [{"group": "PrivateForwardingGroup"}]}
     config.write_text(json.dumps(fixture))
     revision = package_value("sdwan_config_revision(sdwan_get_config())")
-    binding_revision = package_value("sdwan_config_revision(sdwan_steering_bindings()['Branch_WAN'])")
     runtime = directory / "snapshot.json"
-    sample = {"status": "online", "rtt_ms": 2, "rttsd_ms": 0, "loss_pct": 0}
-    def policy(selected, fiber, broadband):
-        return {"selected": selected, "reason": "SLA evaluation",
-                "candidates": {"Fiber": fiber, "Broadband": broadband}}
+    samples = {
+        "a": {"status": "degraded", "rtt_ms": 23.45, "rttsd_ms": 11.4, "loss_pct": 2},
+        "b": {"status": "online", "rtt_ms": 9.8, "rttsd_ms": 0, "loss_pct": 0},
+        "c": {"status": "down", "rtt_ms": 0, "rttsd_ms": 0, "loss_pct": 100},
+    }
+
+    def policy(selected, a, b):
+        return {"selected": selected, "reason": "SLA evaluation", "candidates": {"a": a, "b": b}}
+
     snapshot = {
-        "generated_at": int(time.time()), "config_revision": revision,
-        "members": {"Fiber": sample, "Broadband": sample},
-        "policies": {"Voice": policy("Fiber", "Eligible", "Eligible"),
-                     "BranchVPN": policy("Broadband", "High RTT", "Eligible"),
+        "generated_at": int(time.time()), "config_revision": revision, "members": samples,
+        "policies": {"Voice": policy("a", "Eligible", "Eligible"),
+                     "BranchVPN": policy("b", "High RTT", "Eligible"),
                      "Backups": policy(None, "High RTT", "Packet loss")},
-        "steering": {"Branch_WAN": {"revision": binding_revision, "gateway": "GW_B"}},
+        "steering": {"PrivateForwardingGroup": {"gateway": "PrivateGateway"}},
     }
     runtime.write_text(json.dumps(snapshot))
     status, body, _, _ = render("ajax")
-    assert status == 200 and "Voice" in body and "<script>" not in body
-    assert all(label in body for label in ("2 of 2 eligible", "1 of 2 eligible", "0 of 2 eligible", "No recommendation"))
-    assert all(icon in body for icon in ("fa-circle-check text-success", "fa-triangle-exclamation text-warning",
-                                         "fa-circle-xmark text-danger"))
-    assert 'class="bg-' not in body and all(f'>{count}/2</span>' in body for count in (0, 1, 2))
-    assert 'class="table table-striped table-hover table-condensed"' in body
-    assert "Requested gateway" not in body and "Branch_WAN" not in body and "<time datetime=" in body
-    assert 'scope="row"' in body and "aria-hidden=" in body and 'href="/sdwan/diagnostics.php?policy=Voice"' in body
-    assert 'href="/sdwan/diagnostics.php?' not in render("ajax", "status")[1]
-    managed = render("ajax", "manage")[1]
-    assert "Recommended member" in managed and "Requested gateway · Branch_WAN" in managed and "Branch_WAN: GW_B" in managed
-    assert "Forwarding requests unavailable." not in managed
-    for allowed in ("rules-only", "groups-only"):
-        restricted = render("ajax", allowed)[1]
-        assert "Voice" in restricted and "Branch_WAN" not in restricted and "GW_B" not in restricted
-    preview = render("embed", "manage")[1]
-    for changed_state, expected in [
-        ({"revision": binding_revision, "gateway": None}, "No gateway requested"),
-        ({"revision": binding_revision, "gateway": "<em>foreign</em>"}, "Awaiting request"),
-        ({"revision": "0" * 64, "gateway": "GW_B"}, "Awaiting request"),
-        ({}, "Awaiting request"),
-    ]:
-        runtime.write_text(json.dumps(dict(snapshot, steering={"Branch_WAN": changed_state})))
-        text = render("ajax", "manage")[1]
-        assert expected in text and "<em>" not in text and "GW_B" not in text
-    raw_binding["group"] = "<b>changed</b>"
-    config.write_text(json.dumps(fixture))
-    text = render("ajax", "manage")[1]
-    assert "&lt;b&gt;changed&lt;/b&gt;" in text and "<b>changed</b>" not in text
-    fixture["gateways/sdwan_bindings"] = {"broken": True}
-    config.write_text(json.dumps(fixture))
-    assert "Forwarding requests unavailable." in render("ajax", "manage")[1]
-    assert "Forwarding requests unavailable." not in render("ajax", "view")[1]
+    assert status == 200 and "<script>" not in body
+    for label in ("GW_A", "GW_B", "GW_C", "23.45 ms", "9.8 ms", "2%", "0%", "100%",
+                  "Warning", "Online", "Down", "Preferred:", "No eligible path:"):
+        assert label in body, label
+    assert ">0 ms<" not in body
+    assert 'class="table table-striped table-hover table-condensed"' in body and 'scope="row"' in body
+    assert all(label not in body for label in ("<time", "Last sample", "Requested gateway",
+                                               "PrivateForwardingGroup", "PrivateGateway", "Forwarding requests"))
+    assert 'href="/sdwan/diagnostics.php?policy=Voice"' in body
+    restricted = render("ajax", "status")[1]
+    assert 'href="/sdwan/diagnostics.php?' not in restricted and "Voice" in restricted
+    preview = render("embed")[1]
+
     for changed in (dict(snapshot, generated_at=int(time.time()) - 300),
                     dict(snapshot, config_revision="0" * 64)):
         runtime.write_text(json.dumps(changed))
-        assert "Waiting for current" in render("ajax")[1]
+        stale = render("ajax")[1]
+        assert stale.count("No data") == 3
+        assert "23.45 ms" not in stale and "Preferred:" not in stale and "No eligible path:" not in stale
+
+    runtime.write_text(json.dumps(snapshot))
+    fixture["gateways/gateway_item"][0]["monitor_disable"] = ""
+    fixture["gateways/gateway_item"][1]["force_down"] = ""
+    del fixture["interfaces"]["opt3"]
+    config.write_text(json.dumps(fixture))
+    unavailable = render("ajax")[1]
+    assert "Unmonitored" in unavailable and unavailable.count("> Down</td>") == 2
+    assert all(label not in unavailable for label in ("23.45 ms", "9.8 ms", "100%", "Preferred:"))
+
+    fixture["gateways/gateway_item"][0].pop("monitor_disable")
+    fixture["gateways/gateway_item"][1].pop("force_down")
+    fixture.pop("installedpackages/sdwan")
+    config.write_text(json.dumps(fixture))
+    native = {"generated_at": int(time.time()), "members": [], "policies": [],
+              "config_revision": package_value("sdwan_config_revision(sdwan_get_config())"),
+              "gateway_inventory_revision": package_value("sdwan_config_revision(sdwan_gateways())"),
+              "gateways": {"GW_A": samples["a"], "GW_B": samples["b"]}}
+    runtime.write_text(json.dumps(native))
+    native_dashboard = render("ajax")[1]
+    assert "GW_A" in native_dashboard and "GW_B" in native_dashboard and "23.45 ms" in native_dashboard
+    assert "GW_C" not in native_dashboard and "Preferred:" not in native_dashboard
+    assert "<time" not in native_dashboard
+    runtime.write_text(json.dumps(dict(native, gateways={"GW_A": dict(samples["a"], loss_pct=800)})))
+    assert "23.45 ms" not in render("ajax")[1]
+    fixture["gateways/gateway_item"][0]["monitor"] = "192.0.2.2"
+    config.write_text(json.dumps(fixture))
+    runtime.write_text(json.dumps(native))
+    assert render("ajax")[1].count("No data") == 2
     config.write_text("{}")
-    assert "No SD-WAN policies configured." in render("ajax")[1]
+    assert "No available gateways." in render("ajax")[1]
     config.write_text(json.dumps({"installedpackages/sdwan": {"version": "invalid"}}))
     assert "cannot be read" in render("ajax")[1]
-    print("ok - path health, role-scoped requests, stale decisions, unavailable and malformed data")
-    return preview, managed
+    print("ok - gateway telemetry with or without policies, SLA hints, stale data and role-scoped diagnostic links")
+    return preview, body
 
 
 if __name__ == "__main__":
