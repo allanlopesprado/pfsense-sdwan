@@ -1,6 +1,6 @@
 # pfSense rule generator integration
 
-ABI 1 lets an administrator-approved ingress rule select a next hop measured by the package. This release uses public source identified as `2.9.0-DEVELOPMENT` at revision `9363ac5b8651a1c7a333180425ce7719070f95f9`. Compatibility with a CE 2.9.1 appliance image requires separate verification. [Pinned rule generator source](https://github.com/pfsense/pfsense/blob/9363ac5b8651a1c7a333180425ce7719070f95f9/src/etc/inc/filter.inc)
+ABI 2 adds weighted round-robin across eligible next hops for approved ingress rules. The package still supports a single active next hop on ABI 1. This release uses public source identified as `2.9.0-DEVELOPMENT` at revision `9363ac5b8651a1c7a333180425ce7719070f95f9`. Compatibility with a CE 2.9.1 appliance image requires separate verification. [Pinned rule generator source](https://github.com/pfsense/pfsense/blob/9363ac5b8651a1c7a333180425ce7719070f95f9/src/etc/inc/filter.inc)
 
 ## Prepare source on the build host
 
@@ -23,7 +23,7 @@ To prepare a copy off the appliance, use `--ce-291-lab` on a tree containing the
 
 ## Forwarding scope
 
-The generator uses the next hops that pfSense calculated for the current reload. A binding identifies the approved rule trackers, address family, dedicated group, members, and revision of the match conditions. It uses the same gateway across all trackers in a full rule generation. Without a valid sample, recompiling the filter turns a bound rule into a block. Preflight also requires a permanent native block with the same scope immediately after the pass rule, for cases in which pfSense omits a rule.
+The generator uses the next hops that pfSense calculated for the current reload. A binding identifies the approved rule trackers, address family, dedicated group, members, and revision of the match conditions. It uses the same gateway or weighted pool across all trackers in a full rule generation. Without a valid sample, recompiling the filter turns a bound rule into a block. Preflight also requires a permanent native block with the same scope immediately after the pass rule, for cases in which pfSense omits a rule.
 
 Wide destinations can trigger pfSense exceptions for VPN and static-route networks. Inspect the `negate_networks` table and effective rule order. To preserve local services when all members fail, put the required exceptions in native rules above the pass/block pair. If no usable path exists, the TCP block also covers stateless segments. Explicit TCP flag constraints on the rule remain part of the selector.
 

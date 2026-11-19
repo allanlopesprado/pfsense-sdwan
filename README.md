@@ -9,7 +9,7 @@ An experimental package for monitoring links, comparing gateways against SLAs, a
 ## What the package does
 
 - **Dashboard** shows each gateway's IP address, RTT, RTT standard deviation, loss, and status.
-- **Policies** rank paths by latency, packet loss, and cost. **Diagnostics** explains how each candidate was evaluated.
+- **Policies** select a path by latency or cost, or distribute new connections across healthy links with the native forwarding adapter. **Diagnostics** shows SLA and DNS or HTTPS results.
 - **Status → Services** lists the `sdwan` service with native controls. Events appear under **Status → System Logs → General**.
 - **Updates** checks GitHub, verifies the SHA-256 checksum, and installs the published release from the WebGUI.
 
@@ -31,7 +31,7 @@ An experimental package for monitoring links, comparing gateways against SLAs, a
 
 <!-- install-command -->
 ```sh
-d=$(mktemp -d /tmp/sdwan.XXXXXXXX) && (trap 'rm -rf "$d"' EXIT; p="$d/pfSense-pkg-SDWAN-0.4.22.pkg"; fetch -o "$p" 'https://raw.githubusercontent.com/allanlopesprado/pfsense-sdwan/24fbccabe90bcc809e01e92c3a601fef79435221/dist/pfSense-pkg-SDWAN-0.4.22.pkg' && sha256 -c e62bbd29cf5e1278c910448c921d9b29dc55fc7a5d033561b8dce18b1193b365 "$p" && pkg add "$p")
+d=$(mktemp -d /tmp/sdwan.XXXXXXXX) && (trap 'rm -rf "$d"' EXIT; p="$d/pfSense-pkg-SDWAN-0.4.23.pkg"; fetch -o "$p" 'https://raw.githubusercontent.com/allanlopesprado/pfsense-sdwan/b1a38ce18866a861df06f6f55cfb377455d8057a/dist/pfSense-pkg-SDWAN-0.4.23.pkg' && sha256 -c 8ac0be43834a260f406eebad79b043a4a708da1a14661b0078d886f40f4945c9 "$p" && pkg add "$p")
 ```
 
 3. Open **Services → SD-WAN**. Check the service under **Status → Services** and the installed version under **SD-WAN → Updates**.
@@ -41,8 +41,8 @@ If installation defers WebGUI registration, wait for PHP-FPM to return and run `
 ## Configure and update
 
 1. Confirm measurements in **Status → Gateways** and add the links under **Services → SD-WAN → Members**.
-2. Set RTT and packet loss limits in **Performance SLAs**, then assign the links to a policy in **Policies**.
-3. Review the decision in **Status** and **Diagnostics**. Under **Status → Dashboard**, use **+ → SD-WAN** to add the widget.
+2. Set RTT, loss and optional RTT standard deviation limits in **Performance SLAs**. To monitor application reachability, configure DNS or HTTPS checks in **Members** with dedicated native host routes.
+3. Select a strategy in **Policies** and review **Diagnostics**. Use **Forwarding** to inspect the gateway group, paired rules and active PF paths. Under **Status → Dashboard**, use **+ → SD-WAN** to add the widget.
 
 For installations running **0.4.8** or later, open **SD-WAN → Updates**, click **Check GitHub**, and select **Upgrade to …** when a release is available. This action uses the native package installation privilege.
 
