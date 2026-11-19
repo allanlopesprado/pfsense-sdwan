@@ -125,8 +125,52 @@ verify(sdwan_steering_signature($t1) === sdwan_steering_signature($t2), 'pending
 /* Flat write fixture exposes child lookups separately, as config_get_path does. */
 $disk[SDWAN_BINDINGS_PATH . '/item'] = $disk[SDWAN_BINDINGS_PATH]['item'];
 verify(sdwan_save_config($changed, sdwan_config_revision($config)) !== [] && $writes === 1, 'SD-WAN-only editors cannot change bound policy inputs');
+$frozen = $disk;
+$fail = true;
+verify(sdwan_save_config($changed, sdwan_config_revision($config), true) !== [] &&
+    $disk === $frozen && $current === $disk, 'failed save rolls back both policy and binding revision');
+$fail = false;
+$disk['filter/rule'][0]['source']['address'] = '10.23.1.0/24';
+$disk['filter/rule'][1]['source']['address'] = '10.23.1.0/24';
+verify(sdwan_save_config($changed, sdwan_config_revision($config), true) !== [] && $writes === 1,
+    'editing policy inputs cannot approve native rule drift');
+$disk = $frozen;
+verify(sdwan_save_config($changed, sdwan_config_revision($config), true) === [] && $writes === 2 && $pending === 1,
+    'authorized cost edit updates an active binding and policy in a single write');
+$edited_binding = sdwan_steering_decode($disk[SDWAN_BINDINGS_PATH]['item'][0]);
+verify($edited_binding === array_replace($bindings['G'], [
+	'policy_revision' => sdwan_steering_policy_revision($changed, 'p'),
+]) && $disk['filter/rule'] === $frozen['filter/rule'] && $disk['gateways/gateway_group'] === $frozen['gateways/gateway_group'],
+    'cost revision changes with the native group and rule scope intact');
+$disk[SDWAN_BINDINGS_PATH . '/item'] = $disk[SDWAN_BINDINGS_PATH]['item'];
+$revision = sdwan_config_revision($changed);
+$reordered = $changed;
+$reordered['policies'][0]['members'] = ['b', 'a'];
+verify(sdwan_save_config($reordered, $revision, true) === [] &&
+    sdwan_steering_decode($disk[SDWAN_BINDINGS_PATH]['item'][0])['gateways'] === ['B', 'A'],
+    'reordering the same gateways retains approval and keeps tie preference');
+$disk[SDWAN_BINDINGS_PATH . '/item'] = $disk[SDWAN_BINDINGS_PATH]['item'];
+$reduced = $reordered;
+$reduced['policies'][0]['members'] = ['a'];
+verify(sdwan_save_config($reduced, sdwan_config_revision($reordered), true) !== [] && $writes === 3,
+    'removing an approved path still requires reviewing the binding');
 unset($disk[SDWAN_BINDINGS_PATH . '/item']);
+
+$runtime = ['revision' => sdwan_config_revision($edited_binding), 'gateway' => 'A'];
+$inventory = ['A' => ['device' => 'igb0', 'address' => '192.0.2.1']];
+$loaded = ['pass in quick on igb2 route-to (igb0 192.0.2.1) inet all label "descr=Test" ridentifier 301'];
+verify(sdwan_steering_pf_status($edited_binding, $runtime, $inventory, $loaded) === 'applied',
+    'active PF verifies expected tracker and exact next hop');
+verify(sdwan_steering_pf_status($edited_binding, $runtime, $inventory, [str_replace('192.0.2.1', '192.0.2.2', $loaded[0])]) === 'pending' &&
+    sdwan_steering_pf_status($edited_binding, $runtime, $inventory, [$loaded[0] . '0']) === 'pending' &&
+    sdwan_steering_pf_status($edited_binding, [], $inventory, $loaded) === 'pending',
+    'wrong next hop, wrong tracker and stale samples are never shown as applied');
+$runtime['gateway'] = null;
+verify(sdwan_steering_pf_status($edited_binding, $runtime, $inventory, ['block drop in quick on igb2 inet all ridentifier 301']) === 'blocked' &&
+    sdwan_steering_pf_status($edited_binding, $runtime, $inventory, $loaded) === 'pending' &&
+    sdwan_steering_pf_status($edited_binding, $runtime, $inventory, null) === 'unavailable',
+    'blocking is verified from PF and missing output is explicit');
 $abi = 0;
 $current = $disk;
 verify(sdwan_steering_unbind('G', sdwan_steering_revision()) === [] && !sdwan_steering_bindings() &&
-    $pending === 1 && $writes === 2, 'stock firmware can remove orphaned binding metadata without PF operations');
+    $pending === 1 && $writes === 4, 'stock firmware can remove orphaned binding metadata without PF operations');

@@ -482,6 +482,21 @@ def run(php, classes, screenshot_dir=None):
         bound = request("forwarding", native=fixture, post=post, steering_abi=True, capture_bindings=True)
         assert json.loads(bound.split("SAVED=")[1])[0] == 1, bound
         data = json.loads(bound.split("BINDINGS=")[1].split("\nSAVED=")[0])
+        active = {**fixture, "gateways/sdwan_bindings": data, "gateways/sdwan_bindings/item": data["item"]}
+        active_page = request("forwarding", native=active, steering_abi=True)
+        assert "Active filter" in active_page and "PBR" in active_page and 'value="unbind"' in active_page
+        edit_page = request("slas", native=active, steering_abi=True, get={"edit": "01"})
+        edit_controls = Choices(edit_page)
+        tuning = {"action": "save", "original": "01", "name": "01", "latency_ms": "35", "loss_pct": "1",
+                  "__csrf_magic": edit_controls.tokens[0], "revision": edit_controls.revisions[0]}
+        rejected = request("slas", native=active, steering_abi=True, post=tuning,
+                           privileges={"/firewall_rules_edit.php": False})
+        assert "Editing an active forwarding policy requires access" in rejected and 'SAVED=[0,' in rejected
+        tuned = request("slas", native=active, steering_abi=True, post=tuning, capture_bindings=True)
+        assert json.loads(tuned.split("SAVED=")[1])[0] == 1
+        new_binding = json.loads(tuned.split("BINDINGS=")[1].split("\nSAVED=")[0])["item"][0]
+        assert new_binding["policy_revision"] != data["item"][0]["policy_revision"]
+        assert new_binding["rules_revision"] == data["item"][0]["rules_revision"]
         orphan = {**fixture, "gateways/sdwan_bindings": data, "gateways/gateway_group": []}
         rollback = request("forwarding", native=orphan)
         assert 'value="unbind"' in rollback and 'value="bind"' not in rollback, rollback

@@ -14,7 +14,7 @@ if (!sdwan_can_view_forwarding()) {
 	return;
 }
 
-$native_edit = isAllowedPage('/firewall_rules_edit.php') && isAllowedPage('/system_gateway_groups_edit.php');
+$native_edit = sdwan_can_edit_forwarding();
 $supported = sdwan_steering_supported();
 $is_post = $_SERVER['REQUEST_METHOD'] === 'POST';
 $form_source = $is_post ? $_POST : $_GET;
@@ -31,6 +31,11 @@ try {
 	print_input_errors([$error->getMessage()]);
 	include('foot.inc');
 	return;
+}
+if (!$is_post && $group_name === '' && $policy_name === '' && count($bindings_by_group) === 1) {
+	$only = reset($bindings_by_group);
+	$group_name = $only['group'];
+	$policy_name = $only['policy'];
 }
 $binding = $bindings_by_group[$group_name] ?? null;
 $preview = null;
@@ -76,6 +81,14 @@ $gateway_name = $member_gateways[$winner ?? ''] ?? null;
 $steering = $sample['steering'][$group_name] ?? [];
 $target = $binding !== null && ($steering['revision'] ?? null) === sdwan_config_revision($binding) &&
     in_array($steering['gateway'] ?? null, $binding['gateways'], true) ? $steering['gateway'] : null;
+$pf_labels = [
+	'applied' => gettext('Applied to new connections'),
+	'blocked' => gettext('Blocked by the active filter'),
+	'pending' => gettext('Waiting for a matching filter rule'),
+	'unavailable' => gettext('Filter verification unavailable'),
+];
+$filter_status = $binding === null ? null : sdwan_steering_pf_status($binding, $steering, sdwan_gateways(),
+    $supported ? sdwan_steering_pf_rules() : null);
 $default_families = [];
 foreach (['defaultgw4' => 'IPv4', 'defaultgw6' => 'IPv6'] as $key => $family) {
 	if ($group !== null && config_get_path('gateways/' . $key) === $group_name) {
@@ -98,7 +111,9 @@ foreach ($policy_names as $name) {
 }
 $group_options = ['' => gettext('Select a gateway group')];
 foreach ($groups_by_name as $item) {
-	$group_options[sdwan_ui_choice($item['name'])] = $item['name'];
+	$is_default = in_array($item['name'], [config_get_path('gateways/defaultgw4'), config_get_path('gateways/defaultgw6')], true);
+	$group_options[sdwan_ui_choice($item['name'])] = $is_default
+	    ? sprintf(gettext('%s (system default, preview only)'), $item['name']) : $item['name'];
 }
 $form = new Form(false);
 $form->setAction('/sdwan/forwarding.php')->setMethod('get');
@@ -114,6 +129,9 @@ if (!$policy_names || !$groups_by_name) {
 	$preview_button->setAttribute('disabled', 'disabled');
 }
 print $form;
+if (!$bindings_by_group && $supported && $native_edit) {
+	print_info_box(gettext('Use a dedicated gateway group with the same gateways as the policy. In Firewall Rules, assign it to the ingress pass rule and put a block for the same traffic immediately below it. Keep local and VPN exceptions above both rules. Preview the group before binding.'), 'info', false);
+}
 if (!$policy_names || !$groups_by_name) {
 	print_info_box(gettext('A forwarding preview requires an SD-WAN policy and a native gateway group.'), 'info', false);
 }
@@ -131,7 +149,8 @@ if ($preview !== null):
 			<dt><?=gettext('Recommendation')?></dt><dd><?=sdwan_ui_escape($gateway_name ?? gettext('No current eligible gateway'))?></dd>
 			<dt><?=gettext('Bound policy')?></dt><dd><?=sdwan_ui_escape($binding['policy'] ?? gettext('None'))?></dd>
 			<?php if ($binding !== null): ?>
-			<dt><?=gettext('Observer target')?></dt><dd><?=sdwan_ui_escape($target ?? gettext('No current target'))?></dd>
+			<dt><?=gettext('Selected gateway')?></dt><dd><?=sdwan_ui_escape($target ?? gettext('No current target'))?></dd>
+			<dt><?=gettext('Active filter')?></dt><dd><?=sdwan_ui_escape($pf_labels[$filter_status])?></dd>
 			<?php endif; ?>
 			<?php if ($default_families): ?>
 			<dt><?=gettext('Default gateway')?></dt><dd><?=sdwan_ui_escape(implode(', ', $default_families))?></dd>
@@ -187,7 +206,7 @@ if ($bindings_by_group): ?>
 		<thead><tr><th scope="col"><?=gettext('Gateway Group')?></th><th scope="col"><?=gettext('Policy')?></th><th scope="col"><?=gettext('Actions')?></th></tr></thead><tbody>
 		<?php $revision = sdwan_steering_revision();
 		foreach ($bindings_by_group as $item): ?>
-		<tr><td><?=sdwan_ui_escape($item['group'])?></td><td><?=sdwan_ui_escape($item['policy'])?></td>
+		<tr><td><a href="<?=sdwan_ui_escape('/sdwan/forwarding.php?' . http_build_query(['group' => $item['group'], 'policy' => $item['policy']]))?>"><?=sdwan_ui_escape($item['group'])?></a></td><td><?=sdwan_ui_escape($item['policy'])?></td>
 		<td><?php if ($native_edit): ?>
 		<form method="post" action="/sdwan/forwarding.php" class="form-inline">
 			<input type="hidden" name="group" value="<?=sdwan_ui_escape($item['group'])?>">

@@ -77,7 +77,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 	if (!$errors) {
 		$candidate = $sdwan;
 		$candidate[$collection] = array_values($rows);
-		$errors = sdwan_save_config($candidate, $expected_revision);
+		$errors = sdwan_save_config($candidate, $expected_revision, sdwan_can_edit_forwarding());
 		if (!$errors) {
 			header('Location: ' . $url . '?saved=1', true, 303);
 			exit;
