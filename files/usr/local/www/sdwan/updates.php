@@ -116,5 +116,4 @@ if ($available): ?>
 	});
 	</script>
 <?php endif;
-sdwan_ui_actions(['/pkg_mgr_installed.php' => [gettext('Installed Packages'), 'fa-box-archive']]);
 include('foot.inc');

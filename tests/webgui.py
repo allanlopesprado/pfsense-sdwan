@@ -260,12 +260,11 @@ def run(php, classes, screenshot_dir=None):
         assert 'form="sdwan-system-logs"' not in request("diagnostics", privileges={"/status_logs.php": False})
         updates = request("updates")
         assert Choices(updates).posts == 1 and len(Choices(updates).tokens) == 1
-        assert "/pkg_mgr_installed.php" in Choices(updates).links
-        assert "/pkg_mgr_installed.php" not in Choices(request("updates", privileges={"/pkg_mgr_installed.php": False})).links
+        assert "/pkg_mgr_installed.php" not in Choices(updates).links and "Installed Packages" not in updates
         assert 'name="upgrade_release"' not in updates
         checked = {"check_release": "1", "__csrf_magic": Choices(updates).tokens[0]}
         offered = request("updates", post=checked)
-        assert "Upgrade to 0.4.8" in offered
+        assert "Upgrade to 0.4.8" in offered and "/pkg_mgr_installed.php" not in Choices(offered).links
         offered_form = Choices(offered).forms[0][1]
         action = {k: offered_form[k] for k in ("__csrf_magic", "target_version", "target_sha256")}
         action["upgrade_release"] = "1"
