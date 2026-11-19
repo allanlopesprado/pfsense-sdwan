@@ -171,7 +171,8 @@ def verify_dashboard_layout(core, output, widget, fragment):
                             rows:rows.length,
                             statusBackgrounds:Array.from(rows).map(row=>getComputedStyle(row.lastElementChild).backgroundColor),
                             rowBackgrounds:Array.from(rows).map(row=>getComputedStyle(row.firstElementChild).backgroundColor),
-                            addresses:addresses.length, wrappedAddresses:addresses.filter(wraps).length,
+                            addresses:addresses.length, wrappedAddresses:addresses.filter(wraps).map(el=>({text:el.textContent.trim(), font:getComputedStyle(el).font,
+                                width:el.getBoundingClientRect().width})),
                             iconWidth:rows[0].cells[0].getBoundingClientRect().width,
                             nameWidth:rows[0].cells[1].getBoundingClientRect().width,
                             gatewayStates:Array.from(rows).map(row=>row.lastElementChild.textContent.trim()),
@@ -186,7 +187,7 @@ def verify_dashboard_layout(core, output, widget, fragment):
                 assert data["rows"] == 3 and data["positiveTabindex"] == 0
                 assert data["gatewayStates"] == ["Warning", "Online", "Down"] and data["addresses"] == 3, data
                 assert data["iconWidth"] <= width * .09 and data["nameWidth"] > data["iconWidth"] * 2, data
-                assert data["wrappedAddresses"] == 0, data
+                assert not data["wrappedAddresses"], data
                 assert len(set(data["statusBackgrounds"])) == 3, data
                 assert all(a != b for a, b in zip(data["statusBackgrounds"], data["rowBackgrounds"])), data
                 assert data["latency"] == ["23.450ms", "9.800ms", "—"] and data["timestamps"] == 0 and not data["wrappedLabels"], data

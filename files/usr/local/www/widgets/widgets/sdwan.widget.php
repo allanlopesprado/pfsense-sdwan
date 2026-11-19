@@ -197,11 +197,11 @@ $sdwanBodyId = 'sdwan-status-' . $widgetkey;
 	.sdwan-status-widget .table { font-size: 12px; }
 	.sdwan-status-widget .table > thead > tr > th,
 	.sdwan-status-widget .table > tbody > tr > th,
-	.sdwan-status-widget .table > tbody > tr > td { padding-right: 3px; padding-left: 3px; }
+	.sdwan-status-widget .table > tbody > tr > td { padding-right: 2px; padding-left: 2px; }
 	.sdwan-status-widget .sdwan-widget-icon { width: 20px; }
 	.sdwan-status-widget .sdwan-widget-address { font-size: .9em; }
-	.sdwan-status-widget .sdwan-widget-latency { width: 19%; }
-	.sdwan-status-widget .sdwan-widget-loss { width: 15%; }
+	.sdwan-status-widget .sdwan-widget-latency { width: 18.5%; }
+	.sdwan-status-widget .sdwan-widget-loss { width: 14.5%; }
 	.sdwan-status-widget .sdwan-widget-state { width: 16.5%; }
 }
 .sdwan-status-widget .sdwan-widget-note { padding: .4em .5em; margin: 0; overflow-wrap: anywhere; }
