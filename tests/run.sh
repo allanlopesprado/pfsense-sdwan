@@ -12,6 +12,7 @@ find files tests -type f \( -name '*.php' -o -name '*.inc' \) -print0 |
     xargs -0 -n 1 "$PHP_BIN" -l
 "$PHP_BIN" tests/behavior.php
 "$PHP_BIN" tests/policy_topology.php
+"$PHP_BIN" tests/core_routes.php
 "$PHP_BIN" tests/steering_preflight.php
 "$PHP_BIN" tests/steering.php
 python3 -B tests/steering_daemon.py "$PHP_BIN"

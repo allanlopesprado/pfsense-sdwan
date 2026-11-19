@@ -35,14 +35,26 @@ jobs:
           php tests/pfsense_core.php "$GITHUB_WORKSPACE/pfsense-core-fixture"
           php tests/lab/native-group-removal.php "$GITHUB_WORKSPACE/pfsense-core-fixture"
           python3 tests/webgui.py --classes "$GITHUB_WORKSPACE/pfsense-core-fixture/src/usr/local/www/classes"
+      - name: Generate native PF rules from the daemon's gateway samples
+        run: python3 -B tests/core_adapter.py --core pfsense-core-fixture --emit-dir "$RUNNER_TEMP/sdwan-rules"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-filter-rules
+          path: ${{ runner.temp }}/sdwan-rules/*.pf
+          if-no-files-found: error
   freebsd:
+    needs: offline
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - name: Check published installer with FreeBSD fetch, sha256 and pkg
+      - uses: actions/download-artifact@v4
+        with:
+          name: native-filter-rules
+          path: lab-rendered
+      - name: Test the pinned installer and native forwarding rules in FreeBSD
         uses: vmactions/freebsd-vm@4441bea20b31bfa77329a5af583199362489567e # v1.4.9
         with:
           release: "15.0"
@@ -52,4 +64,4 @@ jobs:
             set -eu
             sh tests/freebsd-install.sh
             sh tests/lab/freebsd-carp.sh
-            sh tests/lab/freebsd-dataplane.sh
+            SDWAN_RENDERED_RULES="$PWD/lab-rendered" sh tests/lab/freebsd-dataplane.sh
