@@ -13,7 +13,20 @@ function sdwan_log_emit(int $priority, string $message): void {
 			try {
 				syslog(LOG_DAEMON | $priority, 'SD-WAN ' . $line);
 			} finally {
-				closelog();
+				if (PHP_SAPI === 'cli' && defined('SDWAN_LOG_DEDICATED_CLI') && SDWAN_LOG_DEDICATED_CLI === true) {
+					/* FreeBSD can discard unread datagrams when a connected
+					 * sender closes while the receiver's shared queue contains
+					 * data. Keep one socket until this worker exits. Reset its
+					 * identity so native routines log under PHP's own settings. */
+					$facility = strtoupper((string)ini_get('syslog.facility'));
+					if (!str_starts_with($facility, 'LOG_')) {
+						$facility = 'LOG_' . $facility;
+					}
+					openlog((string)ini_get('syslog.ident'), 0,
+					    defined($facility) ? constant($facility) : LOG_USER);
+				} else {
+					closelog();
+				}
 			}
 		}
 	} catch (Throwable $ignored) {

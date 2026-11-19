@@ -1,6 +1,6 @@
 # SD-WAN para pfSense CE
 
-A versão pública **0.4.0** acompanha gateways e recomenda caminhos na WebGUI do pfSense. O pacote está disponível em `main` com maturidade **experimental**. O alvo de homologação é o **pfSense CE 2.9.1**. O projeto é independente do pfSense e da Netgate.
+A versão pública **0.4.1** acompanha gateways e recomenda caminhos na WebGUI do pfSense. O pacote está disponível em `main` com maturidade **experimental**. O alvo de homologação é o **pfSense CE 2.9.1**. O projeto é independente do pfSense e da Netgate.
 
 ## Como instalar pelo Diagnostics → Command Prompt
 
@@ -11,10 +11,10 @@ Use um clone de laboratório com acesso administrativo. O próprio firewall baix
 
 <!-- install-command -->
 ```sh
-d=$(mktemp -d /tmp/sdwan.XXXXXXXX) && (trap 'rm -rf "$d"' EXIT; p="$d/pfSense-pkg-SDWAN-0.4.0.pkg"; fetch -o "$p" 'https://raw.githubusercontent.com/allanlopesprado/pfsense-sdwan/c0372cadc2ce6be6afa7c01c0db85bba23bc26d6/dist/pfSense-pkg-SDWAN-0.4.0.pkg' && sha256 -c 67251efd7fd8841fb26b65dbfead379867ddf5274adfe456766d3db182d8c7d8 "$p" && pkg add "$p")
+d=$(mktemp -d /tmp/sdwan.XXXXXXXX) && (trap 'rm -rf "$d"' EXIT; p="$d/pfSense-pkg-SDWAN-0.4.1.pkg"; fetch -o "$p" 'https://raw.githubusercontent.com/allanlopesprado/pfsense-sdwan/f3f669217300c2ebd126119cb87bfcf34ef3d94a/dist/pfSense-pkg-SDWAN-0.4.1.pkg' && sha256 -c 764cd8edfa8984b5ec717b6d0a371b76fade2651297453d96764c1669ad91670 "$p" && pkg add "$p")
 ```
 
-3. No registro da versão 0.4.0, o pacote inicia o serviço ou reinicia a instância que já está rodando. Confira a versão e o estado do serviço com o comando abaixo. O resultado esperado inclui `pfSense-pkg-SDWAN-0.4.0` e a indicação de que o serviço está em execução.
+3. No registro da versão 0.4.1, o pacote inicia o serviço ou reinicia a instância que já está rodando. Confira a versão e o estado do serviço com o comando abaixo. O resultado esperado inclui `pfSense-pkg-SDWAN-0.4.1` e a indicação de que o serviço está em execução.
 
 ```sh
 pkg query '%n-%v' pfSense-pkg-SDWAN && /usr/local/etc/rc.d/sdwand.sh status
@@ -22,7 +22,7 @@ pkg query '%n-%v' pfSense-pkg-SDWAN && /usr/local/etc/rc.d/sdwand.sh status
 
 4. Recarregue a WebGUI e abra **Services → SD-WAN**. Se a saída indicar que o registro foi adiado porque o PHP-FPM estava parado, aguarde a WebGUI voltar e execute `/usr/local/bin/php -f /etc/rc.packages pfSense-pkg-SDWAN POST-INSTALL`. Confira de novo o menu e o serviço.
 
-[Pacote experimental 0.4.0](dist/pfSense-pkg-SDWAN-0.4.0.pkg) · [SHA-256](dist/pfSense-pkg-SDWAN-0.4.0.pkg.sha256) · [Command Prompt na documentação Netgate](https://docs.netgate.com/pfsense/en/latest/diagnostics/command-prompt.html)
+[Pacote experimental 0.4.1](dist/pfSense-pkg-SDWAN-0.4.1.pkg) · [SHA-256](dist/pfSense-pkg-SDWAN-0.4.1.pkg.sha256) · [Command Prompt na documentação Netgate](https://docs.netgate.com/pfsense/en/latest/diagnostics/command-prompt.html)
 
 ## Monitorar gateways e comparar caminhos
 
@@ -41,9 +41,9 @@ O serviço lê os sockets do monitor de gateways do pfSense. Uma amostra ausente
 
 Em **Status → Dashboard**, clique em **+** e selecione **SD-WAN**. Para cada política, o widget mostra quantos membros atendem ao SLA, o membro recomendado e a hora da amostra. Quem tem acesso à página **Forwarding** também vê o gateway solicitado para cada grupo vinculado. O título abre a página **Status** do pacote. Para retirar o widget do painel, clique no **×**.
 
-![Prévia do widget SD-WAN no tema claro do pfSense, com a recomendação e os membros elegíveis por política](https://github.com/allanlopesprado/pfsense-sdwan/releases/download/v0.4.0/widget-light-640.png)
+![Prévia do widget SD-WAN no tema claro do pfSense, com a recomendação e os membros elegíveis por política](https://github.com/allanlopesprado/pfsense-sdwan/releases/download/v0.4.1/widget-light-640.png)
 
-[Ver no tema escuro](https://github.com/allanlopesprado/pfsense-sdwan/releases/download/v0.4.0/widget-dark-640.png) · [Ver em tela de 360 px](https://github.com/allanlopesprado/pfsense-sdwan/releases/download/v0.4.0/widget-light-360.png)
+[Ver no tema escuro](https://github.com/allanlopesprado/pfsense-sdwan/releases/download/v0.4.1/widget-dark-640.png) · [Ver em tela de 360 px](https://github.com/allanlopesprado/pfsense-sdwan/releases/download/v0.4.1/widget-light-360.png)
 
 ## Consultar eventos no log do pfSense
 
@@ -75,13 +75,14 @@ test ! -e /usr/local/www/sdwan/status.php && test ! -e /usr/local/www/widgets/wi
 
 | Versão | Distribuição e recursos |
 |---|---|
-| 0.4.0 | Publicação experimental em `main`. Revisão da WebGUI e do widget, eventos SD-WAN no log geral do pfSense e consulta de versão com indicação de maturidade. |
+| 0.4.1 | Publicação no GitHub Releases. O serviço mantém a conexão com o syslog para preservar eventos consecutivos durante uma pausa do leitor. |
+| 0.4.0 | Pacote experimental disponibilizado em `main`. Revisão da WebGUI e do widget, eventos SD-WAN no log geral do pfSense e consulta de versão com indicação de maturidade. |
 | 0.3.0 | Versão de laboratório com prévia na instalação padrão e encaminhamento opcional em imagem com a ABI do core. [Revisão publicada](https://github.com/allanlopesprado/pfsense-sdwan/tree/439f140540b5493408c15f89d90a13f316993ab1) |
 | 0.2.0 | Observação da saúde dos gateways, SLAs e recomendação de caminhos. [Revisão publicada](https://github.com/allanlopesprado/pfsense-sdwan/tree/ef7d32da3a09cd5d33867eccae07588276e0cb4b) |
 
 ## Evidências de laboratório
 
-Veja os resultados da troca de WAN, do tráfego de retorno com NAT, da transferência do VIP e dos testes de túnel, com links para os jobs e as limitações do ambiente. [Resultados da versão 0.3.0](docs/RESULTADOS.pt-BR.md)
+Veja os resultados da troca de WAN, do tráfego de retorno com NAT, da transferência do VIP e dos testes de túnel, com links para os jobs e as limitações do ambiente. [Resultados de laboratório](docs/RESULTADOS.pt-BR.md)
 
 ## Verificação de desenvolvimento
 

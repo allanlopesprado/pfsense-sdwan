@@ -1,6 +1,8 @@
 #!/usr/local/bin/php
 <?php
 
+const SDWAN_LOG_DEDICATED_CLI = true;
+
 require_once('config.inc');
 require_once('gwlb.inc');
 require_once('/usr/local/pkg/sdwan.inc');

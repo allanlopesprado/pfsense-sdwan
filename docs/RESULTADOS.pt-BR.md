@@ -17,13 +17,19 @@ A VM executou FreeBSD 15. A fonte pública do gerador do pfSense usada nos ensai
 
 ## Widget e WebGUI da versão 0.4.0
 
-O pacote publicado para esta versão ocupa **28.924 bytes** e tem SHA-256 `67251efd7fd8841fb26b65dbfead379867ddf5274adfe456766d3db182d8c7d8`. Duas construções independentes produziram os mesmos bytes. O instalador verifica esse valor antes de chamar o gerenciador de pacotes. [Arquivo fixado no instalador](https://github.com/allanlopesprado/pfsense-sdwan/blob/c0372cadc2ce6be6afa7c01c0db85bba23bc26d6/dist/pfSense-pkg-SDWAN-0.4.0.pkg)
+O pacote 0.4.0 disponibilizado em `main` ocupa **28.924 bytes** e tem SHA-256 `67251efd7fd8841fb26b65dbfead379867ddf5274adfe456766d3db182d8c7d8`. Duas construções independentes produziram os mesmos bytes. O instalador verifica esse valor antes de chamar o gerenciador de pacotes. [Arquivo fixado no instalador](https://github.com/allanlopesprado/pfsense-sdwan/blob/c0372cadc2ce6be6afa7c01c0db85bba23bc26d6/dist/pfSense-pkg-SDWAN-0.4.0.pkg)
 
 No Chromium, o widget usou o CSS dos temas claro e escuro do pfSense a 360 e 640 px. Nas quatro combinações, os dados de teste e os identificadores longos couberam sem rolagem horizontal. O foco do teclado permaneceu na política selecionada após a atualização AJAX. O contraste mínimo medido nos valores e legendas foi de 12:1 no tema claro e 10,05:1 no escuro. Os formulários e links foram testados com a navegação, os filtros de logs, a verificação de privilégios e a proteção CSRF da fonte de referência. [Amostras visuais e métricas](https://github.com/allanlopesprado/pfsense-sdwan/actions/runs/44461547088/artifacts/14500182251)
 
 ## Eventos em System Logs
 
 O teste extraiu o emissor do pacote 0.4.0 e o executou com o `syslogd` do FreeBSD 15.1. O leitor usado pela página General reconheceu cinco eventos distintos do processo `sdwan` no formato RFC 3164 e cinco no RFC 5424 com a severidade padrão. Com o limite ajustado para `warning`, dois eventos ficaram visíveis. Uma sequência de 25 falhas idênticas gerou um único erro. A mensagem do processo de controle `dpinger` seguiu para o log de gateways. A prova exercita o emissor, as regras de roteamento de logs e o parser reais. A visita à página em um appliance CE 2.9.1 permanece na matriz de homologação. [Log completo da execução](https://github.com/allanlopesprado/pfsense-sdwan/actions/runs/44462039273/job/135351197785)
+
+## Correção do transporte de logs na versão 0.4.1
+
+Uma repetição do teste da versão 0.4.0 registrou apenas o primeiro evento de uma sequência. O processo do pacote abria e fechava uma conexão local por mensagem. No FreeBSD, ao desconectar um emissor de datagramas Unix, o kernel pode descartar mensagens pendentes se a fila compartilhada do receptor já tiver dados. A versão 0.4.1 mantém uma conexão no serviço dedicado e restaura a identificação do PHP entre chamadas. [Comportamento no kernel do FreeBSD 15.1](https://github.com/freebsd/freebsd-src/blob/releng/15.1/sys/kern/uipc_usrreq.c#L3230-L3266)
+
+O teste da 0.4.1 compara nove combinações de formato, severidade e ciclo de execução. Na terceira rodada, pausa o syslogd antes do primeiro evento, envia a sequência uma única vez e retoma a leitura. Verifica cada mensagem recebida, os eventos que o log geral deve exibir e a identificação de uma mensagem posterior do PHP. O pacote mede **29.140 bytes** e produziu o mesmo SHA-256 em duas construções independentes. [Arquivo fixado no instalador](https://github.com/allanlopesprado/pfsense-sdwan/blob/f3f669217300c2ebd126119cb87bfcf34ef3d94a/dist/pfSense-pkg-SDWAN-0.4.1.pkg)
 
 ## Negociação IKEv2 com dois caminhos
 

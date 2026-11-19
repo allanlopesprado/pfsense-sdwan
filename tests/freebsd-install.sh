@@ -37,11 +37,22 @@ version=$(awk '$1=="PORTVERSION="{print $2}' Makefile)
 test -n "$version"
 head -c 80 "$PWD/dist/$package-$version.pkg" > "$root/interrupted.pkg"
 
-# Direct upgrades from both the main observer and the earlier lab release.
-for baseline in 0.2.0 0.3.0; do
+# Cover both update channels and the previous patch level.
+for baseline in 0.2.0 0.3.0 0.4.0; do
     test "$(run_pkg version -t "$baseline" "$version")" = '<'
+    checksum=$(awk '{print $1}' "$PWD/dist/$package-$baseline.pkg.sha256")
+    sha256 -c "$checksum" "$PWD/dist/$package-$baseline.pkg" || exit 1
     run_pkg add -I "$PWD/dist/$package-$baseline.pkg"
     test "$(run_pkg query '%v' "$package")" = "$baseline"
+    if [ "$baseline" = 0.4.0 ]; then
+        php -n -r '
+            require $argv[1];
+            $release = sdwan_release_parse(file_get_contents($argv[2]));
+            exit(is_array($release) && $release["version"] === $argv[3] &&
+                $release["sha256"] === hash_file("sha256", $argv[4]) &&
+                $release["maturity"] === "experimental" ? 0 : 1);
+        ' "$dbroot/usr/local/pkg/sdwan_release.inc" "$PWD/dist/release.json" "$version" "$PWD/dist/$package-$version.pkg"
+    fi
     if run_pkg add -I "$root/interrupted.pkg"; then exit 1; fi
     test "$(run_pkg query '%v' "$package")" = "$baseline"
     run_pkg check -s "$package"
@@ -66,7 +77,11 @@ for baseline in 0.2.0 0.3.0; do
     # Roll back by removing the new package first. Do not force pkg past ABI checks.
     run_pkg add -I "$PWD/dist/$package-$baseline.pkg"
     test "$(run_pkg query '%v' "$package")" = "$baseline"
-    test ! -e "$dbroot/usr/local/pkg/sdwan_log.inc"
+    if [ "$baseline" = 0.4.0 ]; then
+        test -f "$dbroot/usr/local/pkg/sdwan_log.inc"
+    else
+        test ! -e "$dbroot/usr/local/pkg/sdwan_log.inc"
+    fi
     run_pkg check -s "$package"
     run_pkg delete -Dy "$package"
 done
@@ -89,4 +104,4 @@ sh "$root/sdwand.sh" stop
 test -f "$root/invalidated"
 if sh "$root/sdwand.sh" status; then exit 1; fi
 echo "Verified FreeBSD service start, restart and stop with a fixture worker."
-echo "Verified checksum rejection, download failure, direct upgrades from 0.2.0 and 0.3.0 to $version, removal, rollback to each prior version and reinstall (hooks disabled)."
+echo "Verified checksum rejection, download failure, direct upgrades from 0.2.0, 0.3.0 and 0.4.0 to $version, removal, rollback to each prior version and reinstall (hooks disabled)."

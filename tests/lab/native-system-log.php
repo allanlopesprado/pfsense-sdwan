@@ -83,6 +83,10 @@ demand(!str_contains($text, 'CREDENTIAL_CANARY') && !str_contains($text, 'below-
     !str_contains($text, 'separate-program'), 'Unexpected sensitive, below-threshold, or separately routed log data');
 $gateways = file_get_contents($work . '/var/log/gateways.log');
 $input = file_get_contents($work . '/var/log/fixture-input.log');
+$nativeIdentity = $format === 'rfc5424'
+    ? '/^<13>1 [^\n]* php [^\n]* native-ident-control$/m'
+    : '/ php(?:\[[0-9]+\])?: native-ident-control$/m';
+demand(preg_match($nativeIdentity, $input) === 1, 'Native PHP tag or facility was not restored');
 foreach (['below-default', 'separate-program'] as $marker) {
 	demand(str_contains($input, $marker), "Isolated syslogd input did not receive control {$marker}");
 }
