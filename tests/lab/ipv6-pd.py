@@ -50,24 +50,32 @@ def exercise(work, stack):
     run(["ip", "-n", router, "-6", "route", "add", "default", "via", WAN + "1", "dev", "wan0"])
     old_lan = None
     duid = ""
+    token = work.name
+    for path in ("/run/kea", "/var/lib/kea", "/var/lib/dhcp"):
+        Path(path).mkdir(exist_ok=True)
     for index, subnet in enumerate(POOLS):
         prefix = ip_network(subnet)
-        lease = work / f"router-{index}.leases"
+        # Use the standard service locations allowed by the Ubuntu profiles.
+        # All files belonging to the isolated example use a unique basename.
+        lease = Path(f"/var/lib/dhcp/dhclient6.{token}-{index}.leases")
+        conf = Path(f"/etc/kea/kea-dhcp6-{token}-{index}.conf")
+        state = Path(f"/var/lib/kea/kea-leases6.{token}-{index}.csv")
+        pid = Path(f"/run/dhclient6.{token}.pid")
+        kea_pid = Path(f"/run/kea/{conf.stem}.kea-dhcp6.pid")
+        for artifact in (lease, lease.with_name(lease.name + "~"), conf, state, kea_pid, pid):
+            stack.callback(artifact.unlink, missing_ok=True)
         if duid:
             lease.write_text(duid + "\n")
-        conf = work / f"kea-{index}.json"
         conf.write_text(json.dumps({"Dhcp6": {
             "interfaces-config": {"interfaces": ["wan0"]},
-            "lease-database": {"type": "memfile", "persist": True, "name": str(work / f"kea-{index}.leases")},
+            "lease-database": {"type": "memfile", "persist": False, "name": str(state)},
             "renew-timer": 60, "rebind-timer": 90, "preferred-lifetime": 120, "valid-lifetime": 180,
             "subnet6": [{"id": 1, "interface": "wan0", "subnet": WAN + "/64",
                          "pd-pools": [{"prefix": str(prefix.network_address),
                                        "prefix-len": prefix.prefixlen, "delegated-len": prefix.prefixlen}]}],
         }}))
-        kea = launch(stack, work, upstream, f"kea-{index}", "env", f"KEA_PIDFILE_DIR={work}",
-                     "kea-dhcp6", "-c", str(conf))
-        pid = str(work / "dhclient.pid")
-        request = ["dhclient", "-6", "-P", "-v", "-lf", str(lease), "-pf", pid, "-sf", "/bin/true"]
+        kea = launch(stack, work, upstream, f"kea-{index}", "kea-dhcp6", "-c", str(conf))
+        request = ["dhclient", "-6", "-P", "-v", "-lf", str(lease), "-pf", str(pid), "-sf", "/bin/true"]
         agent = launch(stack, work, router, f"dhclient-{index}", *request, "-d", "wan0")
 
         def granted():
