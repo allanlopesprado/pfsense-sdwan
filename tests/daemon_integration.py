@@ -244,6 +244,18 @@ def run(binary, require_unix):
             assert observed["members"]["a"]["status"] == expected_status, case
         print("ok - missing, retargeted, disabled and forced-down gateways cannot win")
 
+        changed = fixture(sandbox)
+        changed["gateways/gateway_item"][0].update(latencylow="10", latencyhigh="15")
+        high_delay = observe(changed, healthy)
+        assert high_delay["members"]["a"]["status"] == "down"
+        assert high_delay["policies"]["calls"]["selected"] == "b"
+        changed["gateways/gateway_item"][0]["action_disable"] = ""
+        action_disabled = observe(changed, healthy)
+        assert action_disabled["members"]["a"]["status"] == "degraded"
+        assert action_disabled["policies"]["calls"]["selected"] == "a"
+        assert action_disabled["gateway_inventory_revision"] != high_delay["gateway_inventory_revision"]
+        print("ok - native alarm action changes eligibility while SD-WAN SLA still applies")
+
         for sample in ("GW_A 0 0 0", "OTHER 20000 1000 0"):
             observed = observe(baseline, dict(healthy, GW_A=sample))
             assert observed["members"]["a"]["status"] == "unknown", sample
