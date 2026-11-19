@@ -294,6 +294,43 @@ def run(binary, require_unix):
         assert json.loads(php(binary, "-r", read)) is None
         print("ok - the snapshot reader rejects an expired observation")
 
+        snapshot.unlink()
+        config_path.write_text(json.dumps(offline_config))
+        observer = subprocess.Popen([binary, "-n", "-d", f"include_path={sandbox}", str(sandbox / "sdwand.php")],
+                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+
+        def wait_for_choice(wanted, timeout):
+            deadline = time.monotonic() + timeout
+            while time.monotonic() < deadline and observer.poll() is None:
+                if snapshot.is_file():
+                    status = json.loads(snapshot.read_text())
+                    if status["policies"]["calls"]["selected"] == wanted:
+                        return status
+                time.sleep(0.15)
+            raise AssertionError(f"The running observer did not choose {wanted!r}")
+
+        try:
+            before_wan = wait_for_choice(None, 6)
+            assert all(member["status"] == "unknown" for member in before_wan["members"].values())
+            for listener in listeners.values():
+                listener.settimeout(15)
+            responders = [workers.submit(answer, listeners[name], sample) for name, sample in healthy.items()]
+            config_path.write_bytes(original_config)
+            recovered = wait_for_choice("a", 16)
+            assert recovered["generated_at"] > before_wan["generated_at"]
+            assert all(member["status"] == "online" for member in recovered["members"].values())
+            for responder in responders:
+                responder.result()
+            assert config_path.read_bytes() == original_config and observer.poll() is None
+        finally:
+            observer.terminate()
+            try:
+                observer.communicate(timeout=5)
+            except subprocess.TimeoutExpired:
+                observer.kill()
+                observer.communicate(timeout=5)
+        print("ok - the live observer started before the WAN monitors and recovered on the same process")
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)

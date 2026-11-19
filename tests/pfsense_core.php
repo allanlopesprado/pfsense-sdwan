@@ -83,6 +83,47 @@ foreach ([sdwan_empty_config(), $single] as $fixture) {
 }
 echo "ok - upstream backup/restore parser preserves single-item policy lists alongside IPsec and NAT\n";
 
+require_once $local . '/pkg/sdwan_engine.inc';
+$system['interfaces'] = ['wan' => ['enable' => '', 'if' => 'em0']];
+$system['gateways']['gateway_item'] = [['name' => 'GW', 'interface' => 'wan', 'gateway' => '192.0.2.1']];
+$import = static function (array $system) use ($temp): void {
+	file_put_contents($temp . '/config.xml', dump_xml_config($system, 'pfsense'));
+	$restored = parse_xml_config($temp . '/config.xml', 'pfsense');
+	$GLOBALS['test_config'] = [
+	    SDWAN_CONFIG_PATH => $restored['installedpackages']['sdwan'] ?? null,
+	    'interfaces' => $restored['interfaces'] ?? [],
+	    'gateways/gateway_item' => $restored['gateways']['gateway_item'] ?? [],
+	];
+};
+$import($system);
+$original = sdwan_gateways();
+verify(($original['GW']['device'] ?? null) === 'em0', 'Imported configuration has the original adapter');
+$original_revision = sdwan_gateway_inventory_revision(sdwan_get_config(), $original);
+$system['interfaces']['wan']['if'] = 'vtnet0';
+$import($system);
+$remapped = sdwan_gateways();
+verify(sdwan_get_config() === $single && ($remapped['GW']['device'] ?? null) === 'vtnet0', 'Remap preserves the logical member');
+verify(sdwan_gateway_inventory_revision(sdwan_get_config(), $remapped) !== $original_revision, 'Remap invalidates old measurements');
+
+$system['gateways']['gateway_item'][0]['name'] = 'NEW_GW';
+$import($system);
+$renamed = sdwan_gateways();
+verify(sdwan_get_config() === $single && !isset($renamed['GW']) && isset($renamed['NEW_GW']), 'Missing member is preserved for editing');
+$other_sample = ['status' => 'online', 'substatus' => 'none', 'delay' => '1ms', 'stddev' => '0ms', 'loss' => '0%'];
+$observed = sdwan_evaluate(sdwan_get_config(), ['NEW_GW' => $other_sample], time(), $renamed);
+verify($observed['policies']['calls']['selected'] === null, 'Restoring does not silently adopt a different logical gateway');
+$repaired = $single;
+$repaired['members'][0]['gateway'] = 'NEW_GW';
+verify(sdwan_validate_config($repaired, $renamed, $single) === [], 'Administrator can explicitly remap the member');
+$observed = sdwan_evaluate($repaired, ['NEW_GW' => $other_sample], time(), $renamed);
+verify($observed['policies']['calls']['selected'] === 'wan', 'A fresh reading restores eligibility after explicit remapping');
+
+unset($system['installedpackages']);
+$import($system);
+verify(sdwan_get_config() === sdwan_empty_config(), 'A backup without packages starts with empty settings');
+unset($GLOBALS['test_config']);
+echo "ok - native XML recovery covers physical remapping, renamed gateways, explicit repair and backups without packages\n";
+
 $view = $priv_list['page-services-sdwan-view']['match'];
 $manage = $priv_list['page-services-sdwan-manage']['match'];
 $role = $view;

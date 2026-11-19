@@ -91,8 +91,10 @@ attach "$second" 192.0.2.3 "$client" "$lan_bridge"
 second_if=$peer
 attach "$first" 198.51.100.2 "$remote" "$wan_bridge"
 first_wan=$peer
+first_wire=$link
 attach "$second" 198.51.100.3 "$remote" "$wan_bridge"
 second_wan=$peer
+second_wire=$link
 first_sync=$(ifconfig epair create)
 second_sync=${first_sync%a}b
 links="$first_sync $second_sync $links"
@@ -180,7 +182,7 @@ transaction() {
 
 wait_reply() {
     for attempt in 1 2 3 4 5; do
-        if grep -Fqx "$wan_vip $2" "$work/$1.out"; then return 0; fi
+        if grep -Fqx "${3:-$wan_vip} $2" "$work/$1.out"; then return 0; fi
         sleep 1
     done
     echo "TCP reply missing for $2 on the open $1 connection" >&2
@@ -190,11 +192,11 @@ wait_reply() {
 open_session() {
     mkfifo "$work/$1.in"
     # This nc process opens the socket once. Keep its stdin open across the outage.
-    jexec "$client" nc -n -N -w 45 -p "$2" "$remote_ip" 7 <"$work/$1.in" >"$work/$1.out" &
+    jexec "$client" nc -n -N -w 60 -p "$2" "${3:-$remote_ip}" 7 <"$work/$1.in" >"$work/$1.out" &
     session_pid=$!
     exec 3>"$work/$1.in"
     printf '%s\n' "$1-before" >&3
-    wait_reply "$1" "$1-before"
+    wait_reply "$1" "$1-before" "${4:-$wan_vip}"
 }
 
 close_session() {
@@ -205,8 +207,8 @@ close_session() {
 }
 
 session_state() {
-    jexec "$1" pfctl -vv -ss | awk -v source="192.0.2.4:$2" -v target="$remote_ip:7" -v translation="$wan_vip:" '
-        /^[^[:space:]]/ { match_flow = index($0, source) && index($0, target) && index($0, translation) &&
+    jexec "$1" pfctl -vv -ss | awk -v source="192.0.2.4:$2" -v target="${3:-$remote_ip}:7" -v translation="${4-$wan_vip:}" '
+        /^[^[:space:]]/ { match_flow = index($0, source) && index($0, target) && (translation=="" || index($0, translation)) &&
                                         /ESTABLISHED:ESTABLISHED/ }
         match_flow && $1 == "id:" && $3 == "creatorid:" { print $2 "/" $4; match_flow = 0 }
     '
@@ -299,3 +301,126 @@ probe "$client" "$vip"
 probe "$fresh" "$vip"
 transaction "$client" recovered
 echo 'ok - preferred peer recovered and both independent LAN clients reached the VIP'
+
+# Reuse the CARP topology for a protected flow. Install separate lab SAs for
+# each owner to model tunnel restoration without sharing keys or ESP sequence numbers.
+protected=198.18.2.10
+inner_cluster=198.18.1.1
+inner_peer=198.18.1.2
+reqid=411
+if ! jexec "$first" ifconfig -C | tr ' ' '\n' | grep -qx ipsec; then kldload -n ipsec; fi
+create_vti() {
+    vti=$(jexec "$1" ifconfig ipsec create)
+    jexec "$1" ifconfig "$vti" reqid "$reqid"
+    jexec "$1" ifconfig "$vti" inet tunnel "$2" "$3"
+    jexec "$1" ifconfig "$vti" inet "$4/30" "$5" up
+    printf '%s\n' "$vti"
+}
+first_vti=$(create_vti "$first" "$wan_vip" "$remote_ip" "$inner_cluster" "$inner_peer")
+second_vti=$(create_vti "$second" "$wan_vip" "$remote_ip" "$inner_cluster" "$inner_peer")
+peer_vti=$(create_vti "$remote" "$remote_ip" "$wan_vip" "$inner_peer" "$inner_cluster")
+jexec "$remote" ifconfig lo0 inet "$protected/32" alias
+jexec "$remote" route -n add -net 192.0.2.0/29 "$inner_cluster"
+
+for node in "$first" "$second"; do
+    if [ "$node" = "$first" ]; then
+        vti=$first_vti lan_if=$first_if underlay=$first_wan
+    else
+        vti=$second_vti lan_if=$second_if underlay=$second_wan
+    fi
+    jexec "$node" route -n add -host "$protected" "$inner_peer"
+    jexec "$node" route -n get "$protected" | awk -v device="$vti" '$1=="interface:" && $2==device {ok=1} END {exit !ok}'
+    cp "$work/$node.pf" "$work/$node-ipsec.pf"
+    cat >>"$work/$node-ipsec.pf" <<EOF
+block drop out quick on $underlay inet from 192.0.2.0/29 to $protected label "protected-clear"
+pass quick on $underlay inet proto esp no state
+pass in quick on $lan_if inet proto tcp to $protected port 7 flags S/SA keep state
+pass quick on $vti inet proto tcp from any to any no state
+EOF
+    jexec "$node" pfctl -nf "$work/$node-ipsec.pf"
+    jexec "$node" pfctl -f "$work/$node-ipsec.pf"
+done
+
+cat >"$work/ipsec-peer.pf" <<EOF
+block drop in quick on { $wan_bridge $first_wire $second_wire } inet from any to $protected label "protected-clear"
+pass in quick on { $wan_bridge $first_wire $second_wire } inet proto esp from $wan_vip to $remote_ip no state label "protected-esp"
+pass all no state
+EOF
+jexec "$remote" pfctl -nf "$work/ipsec-peer.pf"
+jexec "$remote" pfctl -f "$work/ipsec-peer.pf"
+jexec "$remote" pfctl -e
+
+count_label() {
+    jexec "$1" pfctl -s labels | awk -v label="$2" '
+        $1==label {count+=$3; ok=1} END {if (!ok) exit 1; print count+0}'
+}
+install_pair() {
+    key_to_peer=$(openssl rand -hex 20)
+    key_from_peer=$(openssl rand -hex 20)
+    for instance in "$1" "$remote"; do
+        {
+            printf 'add %s %s esp %s -m tunnel -u %s -E aes-gcm-16 0x%s;\n' "$wan_vip" "$remote_ip" "$2" "$reqid" "$key_to_peer"
+            printf 'add %s %s esp %s -m tunnel -u %s -E aes-gcm-16 0x%s;\n' "$remote_ip" "$wan_vip" "$3" "$reqid" "$key_from_peer"
+        } | jexec "$instance" setkey -c >/dev/null
+    done
+    unset key_to_peer key_from_peer
+}
+retire_pair() {
+    for instance in "$1" "$remote"; do
+        {
+            printf 'delete %s %s esp %s;\n' "$wan_vip" "$remote_ip" "$2"
+            printf 'delete %s %s esp %s;\n' "$remote_ip" "$wan_vip" "$3"
+        } | jexec "$instance" setkey -c >/dev/null
+    done
+}
+protected_transaction() {
+    reply=$(printf '%s\n' "$1" | jexec "$client" nc -n -N -w 3 "$protected" 7)
+    test "$reply" = "192.0.2.4 $1"
+}
+
+install_pair "$first" 0x14101 0x14102
+protected_transaction ipsec-primary
+test "$(count_label "$remote" protected-esp)" -gt 0
+open_session protected 34242 "$protected" 192.0.2.4
+state=$(session_state "$first" 34242 "$protected" '')
+test -n "$state"
+for attempt in 1 2 3 4 5; do
+    if [ "$(session_state "$second" 34242 "$protected" '')" = "$state" ]; then break; fi
+    sleep 1
+done
+test "$(session_state "$second" 34242 "$protected" '')" = "$state"
+
+retire_pair "$first" 0x14101 0x14102
+jexec "$first" ifconfig "$first_sync" down
+disable_preferred_data
+if protected_transaction ipsec-no-sa; then
+    echo 'A protected request succeeded before the new tunnel was ready.' >&2
+    exit 1
+fi
+echo 'ok - the standby held the PF state and new protected requests failed before tunnel restoration'
+esp_before=$(count_label "$remote" protected-esp)
+install_pair "$second" 0x14201 0x14202
+printf 'protected-takeover\n' >&3
+wait_reply protected protected-takeover 192.0.2.4
+protected_transaction ipsec-backup
+test "$(session_state "$second" 34242 "$protected" '')" = "$state"
+test "$(count_label "$remote" protected-esp)" -gt "$esp_before"
+test "$(count_label "$remote" protected-clear)" -eq 0
+echo 'ok - the same protected TCP socket and a new connection succeeded after CARP takeover and installation of fresh ESP SAs'
+
+retire_pair "$second" 0x14201 0x14202
+jexec "$first" ifconfig "$first_sync" up
+jexec "$first" ifconfig "$first_if" up
+jexec "$first" ifconfig "$first_wan" up
+wait_roles MASTER BACKUP
+esp_before=$(count_label "$remote" protected-esp)
+install_pair "$first" 0x14301 0x14302
+printf 'protected-failback\n' >&3
+wait_reply protected protected-failback 192.0.2.4
+protected_transaction ipsec-recovered
+test "$(count_label "$remote" protected-esp)" -gt "$esp_before"
+test "$(count_label "$remote" protected-clear)" -eq 0
+test "$(count_label "$first" protected-clear)" -eq 0
+test "$(count_label "$second" protected-clear)" -eq 0
+close_session
+echo 'ok - CARP failback restored the encrypted flow using new SAs with zero protected cleartext observed'
