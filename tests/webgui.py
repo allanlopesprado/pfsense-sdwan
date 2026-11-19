@@ -73,13 +73,13 @@ def screenshots(directory, www, pages):
         def do_POST(self):
             body = self.rfile.read(int(self.headers["Content-Length"])).decode("utf-8")
             requests.put((self.path, parse_qs(body)))
-            self.send_response(200)
+            self.send_response(409 if self.path == "/status_services.php" else 200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.end_headers()
             self.wfile.write(b"<title>Native system log fixture</title>")
     with tempfile.TemporaryDirectory() as folder:
         site = Path(folder)
-        for assets in ("css", "js", "vendor/bootstrap", "vendor/font-awesome", "vendor/jquery", "vendor/jquery-ui"):
+        for assets in ("css", "csrf", "js", "vendor/bootstrap", "vendor/font-awesome", "vendor/jquery", "vendor/jquery-ui"):
             source = www / assets
             if not source.is_dir():
                 raise RuntimeError(f"Missing upstream pfSense assets: {source}")
@@ -150,6 +150,25 @@ def screenshots(directory, www, pages):
                 assert fields.get("filterlogentries_process") == ["sdwan"] and fields.get("filterlogentries_submit") == ["1"]
                 assert fields.get("__csrf_magic")
                 print("ok - the browser submits a native System Logs POST with its filter and CSRF token")
+                (site / "sdwan").mkdir()
+                for mode, page_name in (("startservice", "status-stopped"), ("stopservice", "status"), ("restartservice", "status")):
+                    page = pages[page_name]
+                    token = Choices(page).tokens[0]
+                    footer = '<script>var csrfMagicToken = ' + json.dumps(token) + ';</script>'
+                    scripts = ("/csrf/csrf-magic.js", *native_scripts, "/js/pfSenseHelpers.js")
+                    footer += "".join(f'<script src="{url}"></script>' for url in scripts)
+                    footer += f'<script>events.push(function () {{ document.getElementById("{mode}-sdwan").click(); }});</script>'
+                    filename = f"sdwan/{mode}.html"
+                    (site / filename).write_text(page.replace("</body>", footer + "</body>"))
+                    subprocess.run([chrome, "--headless", "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage",
+                                    f"--user-data-dir={folder}/chrome", "--virtual-time-budget=1000", "--dump-dom",
+                                    f"http://127.0.0.1:{server.server_port}/{filename}"],
+                                   capture_output=True, check=True, timeout=35)
+                    path, fields = requests.get(timeout=5)
+                    assert path == "/status_services.php" and fields.get("ajax") == ["ajax"], (path, fields)
+                    assert fields.get("mode") == [mode] and fields.get("service") == ["sdwan"], fields
+                    assert fields.get("__csrf_magic") == [token], fields
+                print("ok - native start, stop and restart buttons submit CSRF-protected requests to Status Services")
                 page = pages["updates"].replace("</head>", "<script>var events = [];</script></head>").replace(
                     "</body>", '<script>events.forEach(function (init) { init(); });'
                     'document.getElementById("upgrade_release").click();</script></body>')
@@ -188,10 +207,24 @@ def run(php, classes, screenshot_dir=None):
         for name in ("pfsense-utils.inc", "pkg-utils.inc"):
             (root / name).touch()
         (root / "phpsessionmanager.inc").write_text("<?php function phpsession_end() {}")
-        (root / "head.inc").write_text('<!doctype html><html lang="en"><head><meta charset="utf-8">'
+        service_source = (classes.parents[3] / "etc/inc/service-utils.inc").read_text()
+        service_functions = ("find_service_by_name", "get_service_status", "is_service_enabled", "get_service_control_links")
+        service_functions = [re.search(r"^function " + name + r"\(.*?^\}", service_source, re.M | re.S)[0]
+                             for name in service_functions]
+        (root / "service-utils.inc").write_text("<?php\n" + "\n".join(service_functions))
+        shortcut_source = (classes.parent / "shortcuts.inc").read_text()
+        shortcut_functions = [re.search(r"^function get_shortcut_" + name + r"_link\(.*?^\}", shortcut_source, re.M | re.S)[0]
+                              for name in ("main", "status", "log")]
+        (root / "shortcuts.inc").write_text("<?php\n" + "\n".join(shortcut_functions))
+        shutil.copyfile(SOURCE / "pkg/shortcuts/pkg_sdwan.inc", root / "pkg_sdwan.inc")
+        toolbar = (classes.parent / "head.inc").read_text().split("/* Determine shortcut section for XML-based packages */", 1)[1].split("?>", 1)[0]
+        (root / "head.inc").write_text('<?php require_once "service-utils.inc"; require "shortcuts.inc"; require "pkg_sdwan.inc"; '
+                                      '$hide_service_status = false; $xmlfile = null; ?>'
+                                      '<!doctype html><html lang="en"><head><meta charset="utf-8">'
                                       '<meta name="viewport" content="width=device-width, initial-scale=1">'
                                       '<script>var events = [];</script></head>'
-                                      '<body><main class="container"><header class="header"><?=genhtmltitle($pgtitle)?></header>')
+                                      '<body><main class="container"><header class="header"><?=genhtmltitle($pgtitle)?>'
+                                      '<ul class="list-inline pull-right"><?php ' + toolbar + ' ?></ul></header>')
         (root / "foot.inc").write_text("</main></body></html>")
 
         native = {"interfaces": {"wan": {"enable": ""}}, "gateways/gateway_item": [
@@ -267,6 +300,18 @@ def run(php, classes, screenshot_dir=None):
         assert "Waiting for current gateway measurements" in stale and "2 of 2" not in stale
         print("ok - native CSRF verifies form posts; status checks permissions, path diversity and sample freshness")
         assert "Multiple eligible paths" in fresh and 'class="bg-success"' in fresh
+        assert "SD-WAN service" in fresh and "Running" in fresh and "/status_services.php" in Choices(fresh).links
+        assert 'id="restartservice-sdwan"' in fresh and 'id="stopservice-sdwan"' in fresh and 'id="startservice-sdwan"' not in fresh
+        stopped = request("status", snapshot=snapshot, service_state="stopped")
+        assert "> Stopped" in stopped and 'id="startservice-sdwan"' in stopped and 'id="stopservice-sdwan"' not in stopped
+        assert "Multiple eligible paths" not in stopped and "Waiting for current gateway measurements" not in stopped
+        missing = request("status", snapshot=snapshot, service_state="unregistered")
+        assert "Not registered" in missing and 'service-sdwan"' not in missing and "Multiple eligible paths" not in missing
+        read_only = request("status", snapshot=snapshot, privileges={"/status_services.php": False})
+        assert "/status_services.php" not in Choices(read_only).links and 'service-sdwan"' not in read_only and "Running" in read_only
+        past = request("diagnostics", snapshot=snapshot, service_state="stopped")
+        assert "The SD-WAN service is stopped." in past and "2.00%" not in past
+        print("ok - native service state distinguishes running, stopped, unregistered and read-only access")
         assert 'data-sortable' in fresh and "RTTsd" in fresh and 'class="action-buttons"' in fresh
         event_form = next((form for form in Choices(fresh).forms if form[0].get("action") == "/status_logs.php"), None)
         assert event_form is not None
@@ -343,6 +388,7 @@ def run(php, classes, screenshot_dir=None):
                      for page in ("status", "diagnostics", "members", "updates")}
             pages["members-edit"] = request("members", get={"edit": "1"})
             pages["updates"] = offered.split("</html>", 1)[0] + "</html>"
+            pages["status-stopped"] = request("status", config=demo, snapshot=demo_snapshot, service_state="stopped")
 
         native_group = {"name": "PBR", "item": ["GW1|1|address", "GW2|2|address"]}
         rule = {"tracker": "50321", "interface": "lan", "gateway": "PBR", "ipprotocol": "inet", "type": "pass",

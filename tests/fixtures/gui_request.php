@@ -80,7 +80,19 @@ if ($page === 'updates') {
 		echo "\nUPGRADES=" . $GLOBALS['upgrade_calls'] . ' HTTP=' . http_response_code() . "\n";
 	});
 }
-function isAllowedPage($url) { global $request; return $request['privileges'][$url] ?? $request['inspect'] ?? true; }
+function isAllowedPage($url) {
+	global $request;
+	return $request['privileges'][$url] ?? $request['privileges']['/' . ltrim($url, '/')] ?? $request['inspect'] ?? true;
+}
+
+function get_services(): array {
+	return ($GLOBALS['request']['service_state'] ?? 'running') === 'unregistered' ? [] :
+	    [['name' => 'sdwan', 'rcfile' => 'sdwand.sh']];
+}
+
+function is_service_running($name): bool {
+	return $name === 'sdwan' && ($GLOBALS['request']['service_state'] ?? 'running') === 'running';
+}
 function get_interface_gateway($interface) { return config_get_path('fixture_dynamic_targets', [])[$interface] ?? null; }
 function get_interface_gateway_v6($interface) { return get_interface_gateway($interface); }
 if ($request['steering_abi'] ?? false) {

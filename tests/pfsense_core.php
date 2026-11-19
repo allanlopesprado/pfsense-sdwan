@@ -114,8 +114,8 @@ $_SERVER['REQUEST_URI'] = '/status_services.php';
 require $temp . '/shortcuts.inc';
 $shortcut = get_shortcut_by_service_name($gui['service'][0]['name']);
 verify($shortcut === 'sdwan' && get_shortcut_by_service_name('sdwand') === null, 'Shortcut bound to the registered service');
-verify(str_contains(get_shortcut_main_link($shortcut), 'href="sdwan/members.php"') &&
-    str_contains(get_shortcut_status_link($shortcut), 'href="sdwan/status.php"'), 'Native settings and status icons');
+verify(str_contains(get_shortcut_main_link($shortcut), 'href="/sdwan/members.php"') &&
+    str_contains(get_shortcut_status_link($shortcut), 'href="/sdwan/status.php"'), 'Native settings and status icons');
 $log_link = get_shortcut_log_link($shortcut);
 preg_match('/href="([^"]+)"/', $log_link, $href);
 verify(str_contains($log_link, 'Related log entries') && isset($href[1]), 'Native log icon');
@@ -128,11 +128,17 @@ $role = array_merge($view, ['status_logs.php']);
 require $local . '/pkg/shortcuts/pkg_sdwan.inc';
 verify(get_shortcut_main_link($shortcut) === '' && str_contains(get_shortcut_status_link($shortcut), 'sdwan/status.php'),
     'View-only accounts only see allowed SD-WAN shortcuts');
-verify(!isAllowedPage($log_url) && str_contains(get_shortcut_log_link($shortcut), 'href="status_logs.php"'),
+verify(!isAllowedPage($log_url) && str_contains(get_shortcut_log_link($shortcut), 'href="/status_logs.php"'),
     'Exact native System Logs privilege gets its authorized URL');
 $role = $manage;
 require $local . '/pkg/shortcuts/pkg_sdwan.inc';
 verify(get_shortcut_log_link($shortcut) === '', 'Missing log privilege hides the log shortcut');
+$role = ['*'];
+foreach (['status.php' => 'status', 'members.php' => 'main', 'diagnostics.php' => 'log'] as $page => $hidden) {
+	$_SERVER['REQUEST_URI'] = '/sdwan/' . $page . '?probe=1';
+	require $local . '/pkg/shortcuts/pkg_sdwan.inc';
+	verify($shortcuts['sdwan'][$hidden] === '', 'Subpage avoids own or duplicate shortcut');
+}
 $www = $packagewww;
 echo "ok - native service shortcut loader renders SD-WAN settings, status and authorized log links\n";
 
