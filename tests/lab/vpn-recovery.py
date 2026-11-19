@@ -88,7 +88,7 @@ def capture(work, wire, stage, port):
             dev = f"tap{path.name}0"
             pcap = work / f"{stage}-{dev}.pcap"
             name = f"{stage}-{dev}"
-            process = start(stack, work, wire, name, "tcpdump", "--immediate-mode", "-p", "-U", "-nn", "-i", dev,
+            process = start(stack, work, wire, name, "tcpdump", "--immediate-mode", "-p", "-U", "-nn", "-B", "4096", "-s", "128", "-i", dev,
                             "-w", str(pcap), f"udp port {port} or tcp port {HTTP_PORT}")
             wait_for(f"capture on {dev}", lambda: process.poll() is None and
                      "listening on" in (work / (name + ".log")).read_text(), 7)
