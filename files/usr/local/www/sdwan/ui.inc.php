@@ -64,8 +64,8 @@ function sdwan_ui_metric($number, string $unit): string {
 function sdwan_ui_gateway_state(?string $state): array {
 	return match ($state) {
 		'online' => ['bg-success', gettext('Online')],
-		'degraded' => ['bg-warning', gettext('Degraded')],
-		'down' => ['bg-danger', gettext('Down')],
+		'degraded' => ['bg-warning', gettext('Warning')],
+		'down' => ['bg-danger', gettext('Offline')],
 		default => ['bg-info', gettext('Unknown')],
 	};
 }
