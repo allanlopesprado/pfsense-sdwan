@@ -52,24 +52,19 @@ $sdwanRender = static function (): void {
 		$samples = $snapshot['gateways'] ?? [];
 	}
 
-	$preferred = [];
 	$unavailable = [];
 	foreach ($config['policies'] as $policy) {
 		$name = $policy['name'];
 		$result = $snapshot['policies'][$name] ?? null;
+		if ($result === null || $result['selected'] !== null) {
+			continue;
+		}
 		$candidates = $result['candidates'] ?? [];
 		if (count($candidates) !== count($policy['members']) ||
 		    array_diff($policy['members'], array_keys($candidates))) {
 			continue;
 		}
-		$selected = $result['selected'];
-		if (isset($members[$selected]) && isset($inventory[$members[$selected]]) &&
-		    !$inventory[$members[$selected]]['monitor_disabled'] &&
-		    !$inventory[$members[$selected]]['force_down']) {
-			$preferred[$members[$selected]][] = $name;
-		} elseif ($selected === null) {
-			$unavailable[] = $name;
-		}
+		$unavailable[] = $name;
 	}
 	$defaults = [
 		'inet' => config_get_path('gateways/defaultgw4', ''),
@@ -144,11 +139,6 @@ $sdwanRender = static function (): void {
 					<?php if ($display_address): ?>
 						<strong class="sdwan-widget-address"><?=$escape($address)?></strong>
 					<?php endif; ?>
-					<?php if (isset($preferred[$gateway])): ?>
-						<small class="sdwan-widget-detail">
-							<?=sprintf($escape(gettext('Preferred: %s')), $policyLinks($preferred[$gateway]))?>
-						</small>
-					<?php endif; ?>
 				</th>
 				<td class="sdwan-widget-rtt"><?=$metric($rtt, 3, 'ms')?></td>
 				<td class="sdwan-widget-rttsd"><?=$metric($rttsd, 3, 'ms')?></td>
@@ -187,8 +177,7 @@ $sdwanBodyId = 'sdwan-status-' . $widgetkey;
 .sdwan-status-widget .sdwan-widget-rtt,
 .sdwan-status-widget .sdwan-widget-rttsd,
 .sdwan-status-widget .sdwan-widget-loss { font-variant-numeric: tabular-nums; }
-.sdwan-status-widget .sdwan-widget-address,
-.sdwan-status-widget .sdwan-widget-detail { display: block; }
+.sdwan-status-widget .sdwan-widget-address { display: block; }
 @container (max-width: 439px) {
 	.sdwan-status-widget .table { font-size: 12px; }
 	.sdwan-status-widget .table > thead > tr > th,

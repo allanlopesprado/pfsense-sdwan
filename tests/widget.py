@@ -105,7 +105,7 @@ echo json_encode([http_response_code() ?: 200, $body, $sdwan_title_link,
     status, body, _, _ = render("ajax")
     assert status == 200 and "<script>" not in body
     for label in ("GW_A", "GW_B", "GW_C", ">RTT<", ">RTTsd<", "23.450ms", "9.800ms", "11.400ms",
-                  "0.000ms", "2.0%", "0.0%", "100.0%", "Warning", "Online", "Down", "Preferred:", "No eligible path:"):
+                  "0.000ms", "2.0%", "0.0%", "100.0%", "Warning", "Online", "Down", "No eligible path:"):
         assert label in body, label
     assert "198.51.100.1</strong>" in body and "198.51.100.22" not in body
     assert body.count("fa-globe") == 1 and "Configured default gateway" in body
@@ -115,23 +115,25 @@ echo json_encode([http_response_code() ?: 200, $body, $sdwan_title_link,
     assert 'class="table table-striped table-hover table-condensed"' in body and 'scope="row"' in body
     assert all(label not in body for label in ("<time", "Last sample", "Requested gateway",
                                                "PrivateForwardingGroup", "PrivateGateway", "Forwarding requests"))
-    assert 'href="/sdwan/diagnostics.php?policy=Voice"' in body
     restricted = render("ajax", "status")[1]
-    assert 'href="/sdwan/diagnostics.php?' not in restricted and "Voice" in restricted
+    assert 'href="/sdwan/diagnostics.php?' not in restricted and "No eligible path: Backups" in restricted
     preview = render("embed")[1]
+    for rendered in (body, preview):
+        assert all(label not in rendered for label in ("Preferred:", "Voice", "BranchVPN"))
+        assert 'href="/sdwan/diagnostics.php?policy=Backups"' in rendered
 
     for changed in (dict(snapshot, generated_at=int(time.time()) - 300),
                     dict(snapshot, config_revision="0" * 64)):
         runtime.write_text(json.dumps(changed))
         stale = render("ajax")[1]
         assert stale.count("No data") == 3
-        assert "23.450ms" not in stale and "Preferred:" not in stale and "No eligible path:" not in stale
+        assert "23.450ms" not in stale and "No eligible path:" not in stale
 
     runtime.write_text(json.dumps(snapshot))
     fixture["gateways/gateway_item"][0]["monitor"] = "192.0.2.55"
     config.write_text(json.dumps(fixture))
     retargeted = render("ajax")[1]
-    assert "23.450ms" not in retargeted and "Preferred:" not in retargeted
+    assert "23.450ms" not in retargeted and "No eligible path:" not in retargeted
     fixture["gateways/gateway_item"][0].pop("monitor")
     fixture["gateways/gateway_item"][0]["monitor_disable"] = ""
     fixture["gateways/gateway_item"][1]["force_down"] = ""
@@ -139,7 +141,7 @@ echo json_encode([http_response_code() ?: 200, $body, $sdwan_title_link,
     config.write_text(json.dumps(fixture))
     unavailable = render("ajax")[1]
     assert "Monitor off" in unavailable and unavailable.count(">Down</td>") == 2
-    assert all(label not in unavailable for label in ("23.450ms", "9.800ms", "100.0%", "Preferred:"))
+    assert all(label not in unavailable for label in ("23.450ms", "9.800ms", "100.0%"))
 
     fixture["gateways/gateway_item"][0].pop("monitor_disable")
     fixture["gateways/gateway_item"][1].pop("force_down")
@@ -152,7 +154,7 @@ echo json_encode([http_response_code() ?: 200, $body, $sdwan_title_link,
     runtime.write_text(json.dumps(native))
     native_dashboard = render("ajax")[1]
     assert "GW_A" in native_dashboard and "GW_B" in native_dashboard and "23.450ms" in native_dashboard
-    assert "GW_C" not in native_dashboard and "Preferred:" not in native_dashboard
+    assert "GW_C" not in native_dashboard
     assert "<time" not in native_dashboard
     runtime.write_text(json.dumps(dict(native, gateways={"GW_A": dict(samples["a"], loss_pct=800)})))
     assert "23.450ms" not in render("ajax")[1]
@@ -174,7 +176,7 @@ echo json_encode([http_response_code() ?: 200, $body, $sdwan_title_link,
     assert "No available gateways." in render("ajax")[1]
     config.write_text(json.dumps({"installedpackages/sdwan": {"version": "invalid"}}))
     assert "cannot be read" in render("ajax")[1]
-    print("ok - gateway telemetry with or without policies, SLA hints, stale data and role-scoped diagnostic links")
+    print("ok - gateway telemetry with or without policies, SLA warnings, stale data and role-scoped diagnostic links")
     return preview, body
 
 

@@ -118,12 +118,13 @@ def verify_dashboard_layout(core, output, widget, fragment):
                      "const done=arguments[0]; document.fonts.ready.then(()=>done(true));"})
                 js("document.querySelector('.panel-title a').focus()")
                 tabs = []
-                for _ in range(5):
+                for _ in range(3):
                     call("/actions", {"actions": [{"type": "key", "id": "keyboard", "actions":
                          [{"type": "keyDown", "value": "\ue004"}, {"type": "keyUp", "value": "\ue004"}]}]})
                     tabs.append(js("return document.activeElement.getAttribute('href')"))
-                expected = [f"/sdwan/diagnostics.php?policy={p}" for p in ("Voice", "BranchVPN", "Backups")]
-                assert tabs[-3:] == expected, tabs
+                warning_link = "/sdwan/diagnostics.php?policy=Backups"
+                assert tabs[-1] == warning_link, tabs
+                assert js("return !document.querySelector('.sdwan-status-widget tbody a')")
                 # Drive the real fragment callback, including its HTTP method and parameter names.
                 updated = call("/execute/async", {"args": [], "script": """
                     const done=arguments[0], w=ajaxspecs[0];
@@ -133,7 +134,7 @@ def verify_dashboard_layout(core, output, widget, fragment):
                         done(document.querySelector('.sdwan-widget-rtt').textContent==='23.450ms');
                     }).fail(()=>done(false));
                 """})
-                assert updated and js("return document.activeElement.getAttribute('href')") == expected[-1]
+                assert updated and js("return document.activeElement.getAttribute('href')") == warning_link
                 js("document.activeElement.blur();")
                 layout_script = """
                     const panel=document.querySelector('.panel'), region=panel.querySelector('.sdwan-status-widget');
@@ -203,7 +204,7 @@ def verify_dashboard_layout(core, output, widget, fragment):
                 (output / f"widget-{theme}-{width}.png").write_bytes(png)
                 js("""document.querySelector('.sdwan-widget-label').textContent='X'.repeat(32);
                       document.querySelector('.sdwan-widget-address').textContent='2001:db8:abcd:abcd:abcd:abcd:abcd:abcd%vlan100';
-                      document.querySelector('.sdwan-widget-detail').append('Y'.repeat(96));""")
+                      document.querySelector('.sdwan-widget-note a').append('Y'.repeat(96));""")
                 stress = js(layout_script)["horizontalOverflow"]
                 assert stress <= 1, (theme, width, stress)
                 metrics.append(dict(data, theme=theme, tabOrder=tabs, focusRetainedAfterRefresh=True,
