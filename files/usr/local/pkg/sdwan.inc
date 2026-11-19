@@ -66,6 +66,13 @@ function sdwan_get_config(): array {
 	return sdwan_decode_config(config_get_path(SDWAN_CONFIG_PATH));
 }
 
+/* A binding exposes native rule and gateway-group information. Apply the same
+ * WebGUI permission check on the page, its tab, and Dashboard refreshes. */
+function sdwan_can_view_forwarding(): bool {
+	return isAllowedPage('/sdwan/forwarding.php') && isAllowedPage('/firewall_rules.php') &&
+	    isAllowedPage('/system_gateway_groups.php');
+}
+
 /* Only report a VTI transport when its Phase 1 names an assigned interface.
  * A gateway group, VIP or unrecognized tunnel has no known single transport. */
 function sdwan_vti_transports(array $interfaces, array $phases1, array $phases2): array {

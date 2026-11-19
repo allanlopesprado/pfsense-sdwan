@@ -26,10 +26,17 @@ class Choices(HTMLParser):
         self.links = []
         self.posts = 0
         self.gets = 0
+        self.forms = []
+        self.form = None
         self.feed(html)
 
     def handle_starttag(self, tag, attrs):
         attrs = dict(attrs)
+        if tag == "form":
+            self.form = (attrs, {})
+            self.forms.append(self.form)
+        if tag == "input" and self.form is not None and "name" in attrs and "value" in attrs:
+            self.form[1][attrs["name"]] = attrs["value"]
         if tag == "a" and "href" in attrs:
             self.links.append(attrs["href"])
         if tag == "select":
@@ -49,6 +56,8 @@ class Choices(HTMLParser):
     def handle_endtag(self, tag):
         if tag == "select":
             self.field = None
+        if tag == "form":
+            self.form = None
 
 
 def screenshots(directory, www, pages):
@@ -188,18 +197,26 @@ def run(php, classes, screenshot_dir=None):
         print("ok - native CSRF verifies form posts; status checks permissions, path diversity and sample freshness")
         assert "Multiple eligible paths" in fresh and 'class="bg-success"' in fresh
         assert 'data-sortable' in fresh and "RTTsd" in fresh and 'class="action-buttons"' in fresh
-        event_url = next(url for url in Choices(fresh).links if "filterlogentries_process" in url)
+        event_form = next((form for form in Choices(fresh).forms if form[0].get("action") == "/status_logs.php"), None)
+        assert event_form is not None
+        event_attrs, event_post = event_form
+        assert event_attrs.get("method") == "post" and event_attrs.get("id") == "sdwan-system-logs"
+        assert 'form="sdwan-system-logs"' in fresh and "__csrf_magic" in event_post
+        assert event_post["logfile"] == "system" and event_post["filterlogentries_process"] == "sdwan"
+        delegated = request("status", privileges={"/firewall_rules.php": False}, snapshot=snapshot)
+        assert "/sdwan/forwarding.php" not in Choices(delegated).links and 'form="sdwan-system-logs"' in delegated
         diagnostics = request("diagnostics", get={"policy": "VOICE"}, snapshot=snapshot)
         assert "Maximum RTT" in diagnostics and "Maximum loss" in diagnostics and "1.00 ms" in diagnostics
         diagnostic_form = Choices(diagnostics)
-        assert diagnostic_form.gets == 1 and not diagnostic_form.tokens
+        assert diagnostic_form.gets == 1 and diagnostic_form.posts == 1 and len(diagnostic_form.tokens) == 1
+        assert all("__csrf_magic" not in values for form, values in diagnostic_form.forms if form.get("method") == "get")
         assert diagnostic_form.fields["policy"] == [(":VOICE", True)]
         assert "fa-solid fa-search" in diagnostics
         numeric = {**config, "policies": [{**config["policies"][0], "name": n} for n in ("1", "01")]}
         numeric_options = Choices(request("diagnostics", config=numeric, get={"policy": ":01"})).fields["policy"]
         assert numeric_options == [(":1", False), (":01", True)], numeric_options
         assert "no longer configured" in request("diagnostics", get={"policy": "deleted"})
-        assert event_url not in Choices(request("diagnostics", privileges={event_url: False})).links
+        assert 'form="sdwan-system-logs"' not in request("diagnostics", privileges={"/status_logs.php": False})
         updates = request("updates")
         assert Choices(updates).posts == 1 and len(Choices(updates).tokens) == 1
         assert "/pkg_mgr_installed.php" in Choices(updates).links
@@ -242,20 +259,22 @@ def run(php, classes, screenshot_dir=None):
         tracker_url = next(url for url in Choices(stock).links if "filterlogentries_tracker" in url)
         visible = request("forwarding", native=fixture, get=names, privileges={tracker_url: False})
         assert tracker_url not in Choices(visible).links and "50321" in visible
-        # Exercise pfSense's GET readers with the precise query from each rendered link.
+        # Exercise pfSense's native readers with the rendered POST and GET fields.
         common = (classes.parent / "status_logs_common.inc").read_text()
-        for url, routine, field in ((event_url, "log_filter_form_system_submit", "process"),
-                                    (tracker_url, "log_filter_form_firewall_submit", "tracker")):
+        tracker_query = {key: values[0] for key, values in parse_qs(urlsplit(tracker_url).query).items()}
+        for submitted, method, routine, field in (
+            (event_post, "post", "log_filter_form_system_submit", "process"),
+            (tracker_query, "get", "log_filter_form_firewall_submit", "tracker"),
+        ):
             handler = re.search(r"^function " + routine + r"\(.*?^\}", common, re.M | re.S)[0]
             getter = re.search(r"^function getGETPOSTsettingvalue\(.*?^\}", upstream, re.M | re.S)[0]
             defaults = {key: "" for key in re.findall(r"getGETPOSTsettingvalue\('([^']+)'", handler)}
-            query = {key: values[0] for key, values in parse_qs(urlsplit(url).query).items()}
-            data = json.dumps([defaults | query, defaults])
+            data = json.dumps([defaults | submitted, defaults] if method == "get" else [defaults, defaults | submitted])
             output = subprocess.run([php, "-r", getter + handler + "; [$_GET,$_POST]=json_decode(stream_get_contents(STDIN),true);"
                                      + routine + "(); echo json_encode([$filter_active,$filterfieldsarray]);"],
                                     input=data, capture_output=True, text=True, check=True)
             active, filters = json.loads(output.stdout)
-            assert active and filters[field] == query["filterlogentries_" + field] and not output.stderr
+            assert active and filters[field] == submitted["filterlogentries_" + field] and not output.stderr
         print("ok - native log filters open on the observer process and enabled rule tracker with page privilege checks")
         denied = request("forwarding", native=fixture, get=names, privileges={"/firewall_rules.php": False})
         assert "Access to Firewall" in denied and "50321" not in denied

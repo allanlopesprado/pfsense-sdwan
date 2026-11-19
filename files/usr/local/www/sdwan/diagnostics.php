@@ -69,8 +69,7 @@ if ($policy !== null):
 </div>
 <?php endif;
 sdwan_ui_actions([
-	SDWAN_UI_EVENT_LOG => [gettext('System Logs'), 'fa-list'],
 	'/status_logs.php?logfile=gateways' => [gettext('Gateway Logs'), 'fa-list'],
 	'/diag_packet_capture.php' => [gettext('Packet Capture'), 'fa-magnifying-glass'],
-]);
+], true);
 include('foot.inc');

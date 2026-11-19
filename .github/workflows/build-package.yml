@@ -1,0 +1,51 @@
+name: Build pfSense package
+on:
+  push:
+    branches: ['build/**']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  package:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: freebsd/pkg
+          ref: 337d510a47f8716fb9c644262ada3db8d7f85e05 # 2.9.3
+          path: freebsd-pkg
+          persist-credentials: false
+      - name: Build the Linux version of FreeBSD pkg
+        env:
+          CC: clang-18
+          CXX: clang++-18
+          CC_FOR_BUILD: clang-18
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -yq --no-install-recommends clang-18 fakeroot libarchive-dev \
+            libssl-dev libsqlite3-dev libbsd-dev liblzma-dev liblua5.2-dev liblzo2-dev \
+            libattr1-dev libacl1-dev zlib1g-dev libbz2-dev pkg-config m4
+          mkdir "$RUNNER_TEMP/pkg-build"
+          cd "$RUNNER_TEMP/pkg-build"
+          "$GITHUB_WORKSPACE/freebsd-pkg/configure" --prefix="$RUNNER_TEMP/pkg-install" --with-libarchive.pc --with-openssl.pc
+          make -j"$(nproc)"
+          make install
+      - name: Verify two identical package builds
+        run: |
+          set -eu
+          builder="$RUNNER_TEMP/pkg-install/sbin/pkg"
+          fakeroot python3 tools/build-lab-pkg.py --pkg "$builder" --output package-out
+          fakeroot python3 tools/build-lab-pkg.py --pkg "$builder" --output "$RUNNER_TEMP/package-rebuild"
+          for file in package-out/*; do
+            cmp "$file" "$RUNNER_TEMP/package-rebuild/${file##*/}"
+          done
+          (cd package-out && sha256sum --check ./*.sha256)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sdwan-package
+          path: package-out/
+          if-no-files-found: error

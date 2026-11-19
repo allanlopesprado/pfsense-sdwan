@@ -31,7 +31,7 @@ set_error_handler(function ($severity, $message, $file) use ($classes) {
 	    ($file === $classes . '/Form/Group.class.php' && $message === 'Undefined variable $hidden') ||
 	    ($file === $classes . '/Form/Input.class.php' && $message === 'Undefined variable $help');
 });
-function pkg_exec($query, &$stdout, &$stderr) { $stdout = '0.4.2'; $stderr = ''; return 0; }
+function pkg_exec($query, &$stdout, &$stderr) { $stdout = '0.4.3'; $stderr = ''; return 0; }
 function isAllowedPage($url) { global $request; return $request['privileges'][$url] ?? $request['inspect'] ?? true; }
 if ($request['steering_abi'] ?? false) {
 	// Emulate the optional hook in the WebGUI test. A separate test exercises the actual core patch.

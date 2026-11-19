@@ -5,8 +5,7 @@ require_once(__DIR__ . '/ui.inc.php');
 require_once('/usr/local/pkg/sdwan_steering.inc');
 
 $pgtitle = [gettext('Services'), gettext('SD-WAN'), gettext('Forwarding')];
-$native_view = isAllowedPage('/firewall_rules.php') && isAllowedPage('/system_gateway_groups.php');
-if (!$native_view) {
+if (!sdwan_can_view_forwarding()) {
 	http_response_code(403);
 	include('head.inc');
 	sdwan_ui_tabs('forwarding');

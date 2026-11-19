@@ -83,7 +83,6 @@ if (!$sdwan['members']) {
 <?php
 sdwan_ui_actions([
 	'/status_gateways.php' => [gettext('Gateways'), 'fa-network-wired'],
-	SDWAN_UI_EVENT_LOG => [gettext('System Logs'), 'fa-list'],
 	'/status_services.php' => [gettext('Services'), 'fa-gears'],
-]);
+], true);
 include('foot.inc');

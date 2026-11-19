@@ -46,7 +46,7 @@ $sdwanRender = static function (): void {
 	}
 	$requests = [];
 	$bindingError = false;
-	if (isAllowedPage('/sdwan/forwarding.php')) {
+	if (sdwan_can_view_forwarding()) {
 		require_once('/usr/local/pkg/sdwan_steering.inc');
 		try {
 			foreach (sdwan_steering_bindings() as $binding) {

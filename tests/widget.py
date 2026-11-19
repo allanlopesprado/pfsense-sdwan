@@ -24,8 +24,10 @@ function isAllowedPage($page) {
     $role = $GLOBALS['allowed'];
     return match ($page) {
         '/sdwan/status.php' => $role !== 'no',
-        '/sdwan/diagnostics.php' => in_array($role, ['view', 'manage'], true),
-        '/sdwan/forwarding.php' => $role === 'manage',
+        '/sdwan/diagnostics.php' => in_array($role, ['view', 'manage', 'rules-only', 'groups-only'], true),
+        '/sdwan/forwarding.php' => in_array($role, ['manage', 'rules-only', 'groups-only'], true),
+        '/firewall_rules.php' => in_array($role, ['manage', 'rules-only'], true),
+        '/system_gateway_groups.php' => in_array($role, ['manage', 'groups-only'], true),
         default => false,
     };
 }
@@ -113,6 +115,9 @@ echo json_encode([http_response_code() ?: 200, $body, $sdwan_title_link,
     managed = render("ajax", "manage")[1]
     assert "Recommended member" in managed and "Requested gateway · Branch_WAN" in managed and "GW_B" in managed
     assert "Forwarding requests unavailable." not in managed
+    for allowed in ("rules-only", "groups-only"):
+        restricted = render("ajax", allowed)[1]
+        assert "Voice" in restricted and "Branch_WAN" not in restricted and "GW_B" not in restricted
     preview = render("embed", "manage")[1]
     for changed_state, expected in [
         ({"revision": binding_revision, "gateway": None}, "No gateway requested"),

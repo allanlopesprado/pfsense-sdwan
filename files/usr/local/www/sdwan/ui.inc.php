@@ -8,8 +8,6 @@ if (!defined('SDWAN_GUI')) {
 require_once('/usr/local/pkg/sdwan.inc');
 require_once('/usr/local/pkg/sdwan_engine.inc');
 
-const SDWAN_UI_EVENT_LOG = '/status_logs.php?logfile=system&filterlogentries_submit=1&filterlogentries_process=sdwan';
-
 function sdwan_ui_escape($text): string {
 	return htmlspecialchars((string)$text, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
 }
@@ -26,6 +24,9 @@ function sdwan_ui_tabs(string $current): void {
 	];
 	$tabs = [];
 	foreach ($labels as $page => $label) {
+		if ($page === 'forwarding' && !sdwan_can_view_forwarding()) {
+			continue;
+		}
 		$tabs[] = [$label, $page === $current, '/sdwan/' . $page . '.php'];
 	}
 	display_top_tabs($tabs);
@@ -71,8 +72,14 @@ function sdwan_ui_gateway_state(?string $state): array {
 }
 
 /* Follow the action toolbar below native Gateway Groups and Firewall Aliases. */
-function sdwan_ui_actions(array $links): void {
+function sdwan_ui_actions(array $links, bool $events = false): void {
 	$buttons = [];
+	$can_view_events = $events && isAllowedPage('/status_logs.php');
+	if ($can_view_events) {
+		$buttons[] = '<button type="submit" form="sdwan-system-logs" class="btn btn-info btn-sm">' .
+		    '<i class="fa-solid fa-list icon-embed-btn" aria-hidden="true"></i> ' .
+		    sdwan_ui_escape(gettext('System Logs')) . '</button>';
+	}
 	foreach ($links as $url => [$label, $icon]) {
 		if (isAllowedPage($url)) {
 			$buttons[] = '<a class="btn btn-info btn-sm" role="button" href="' . sdwan_ui_escape($url) . '">' .
@@ -83,6 +90,15 @@ function sdwan_ui_actions(array $links): void {
 	if ($buttons) {
 		echo '<nav class="action-buttons" aria-label="' . sdwan_ui_escape(gettext('Related pages')) . '">' .
 		    implode(' ', $buttons) . '</nav>';
+	}
+	if ($can_view_events) {
+		// System Logs has an exact native page privilege. Filtering via its
+		// regular POST form keeps the URL authorized and uses the native CSRF token.
+		echo '<form method="post" action="/status_logs.php" id="sdwan-system-logs" hidden>' .
+		    '<input type="hidden" name="logfile" value="system">' .
+		    '<input type="hidden" name="filterlogentries_submit" value="1">' .
+		    '<input type="hidden" name="filterlogentries_process" value="sdwan">' .
+		    '</form>';
 	}
 }
 
