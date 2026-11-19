@@ -33,6 +33,8 @@ set_error_handler(function ($severity, $message, $file) use ($classes) {
 });
 function pkg_exec($query, &$stdout, &$stderr) { $stdout = '0.4.3'; $stderr = ''; return 0; }
 function isAllowedPage($url) { global $request; return $request['privileges'][$url] ?? $request['inspect'] ?? true; }
+function get_interface_gateway($interface) { return config_get_path('fixture_dynamic_targets', [])[$interface] ?? null; }
+function get_interface_gateway_v6($interface) { return get_interface_gateway($interface); }
 if ($request['steering_abi'] ?? false) {
 	// Emulate the optional hook in the WebGUI test. A separate test exercises the actual core patch.
 	function filter_sdwan_binding_api() { return 1; }

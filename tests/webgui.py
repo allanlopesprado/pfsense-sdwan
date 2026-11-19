@@ -158,8 +158,8 @@ def run(php, classes, screenshot_dir=None):
             data = {"native": native, "config": config, **params}
             result = subprocess.run([php, str(ROOT / "tests/fixtures/gui_request.php"), str(root),
                                      str(classes), page], input=json.dumps(data), text=True,
-                                    capture_output=True, check=True)
-            assert not result.stderr, result.stderr
+                                    capture_output=True)
+            assert result.returncode == 0 and not result.stderr, result.stderr or result.stdout[-1500:]
             return result.stdout
 
         html = request("policies", get={"edit": "VOICE"})
@@ -271,6 +271,9 @@ def run(php, classes, screenshot_dir=None):
         stock = request("forwarding", native=fixture, get=names)
         assert "matches the native group" in stock and "50321" in stock and "Voice &lt;A&gt;" in stock, stock
         assert "Preview mode" in stock and 'value="bind"' not in stock
+        shared_monitor = dict(fixture, fixture_dynamic_targets={"wan": "192.0.2.1", "opt1": "192.0.2.1"})
+        blocked = request("forwarding", native=shared_monitor, get=names, steering_abi=True)
+        assert "shares its Monitor IP" in blocked and 'value="bind"' not in blocked
         generated_selection = request("forwarding", native=fixture, get={"policy": ":VOICE", "group": ":PBR"})
         assert "matches the native group" in generated_selection
         assert Choices(generated_selection).fields["group"] == [("", False), (":PBR", True)]
