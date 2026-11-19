@@ -1,27 +1,27 @@
-# Histórico de versões
+# Changelog
 
-Versões em ordem numérica, da mais recente para a mais antiga. Os pacotes de laboratório e seus checksums ficam em [dist](dist/). A distribuição atual está em [GitHub Releases](https://github.com/allanlopesprado/pfsense-sdwan/releases/latest).
+Versions are listed newest first, in numeric order. The [dist directory](dist/) contains the lab packages and their checksums. The current distribution is available from [GitHub Releases](https://github.com/allanlopesprado/pfsense-sdwan/releases/latest).
 
-| Versão | Principais mudanças | Notas |
+| Version | Main changes | Notes |
 | --- | --- | --- |
-| 0.4.16 | Amostras expiradas após mudanças nos gateways monitorados e matriz de impacto de configurações nativas. | [Notas](docs/releases/v0.4.16.md) |
-| 0.4.15 | Remoção da linha de serviço do topo da aba Status. | [Notas](docs/releases/v0.4.15.md) |
-| 0.4.14 | Diagnóstico por gateway com recomendação, motivo, limites de SLA e medições destacadas. | [Notas](docs/releases/v0.4.14.md) |
-| 0.4.13 | Controles nativos de serviço na barra do SD-WAN e estado do observador em Status. | [Notas](docs/releases/v0.4.13.md) |
-| 0.4.12 | Serviço registrado como `sdwan` e atalhos nativos em Status → Services. | [Notas](docs/releases/v0.4.12.md) |
-| 0.4.11 | Correção do foco inicial do botão System Logs. | [Notas](docs/releases/v0.4.11.md) |
-| 0.4.10 | Remoção do atalho Installed Packages na aba Updates. | [Notas](docs/releases/v0.4.10.md) |
-| 0.4.9 | Widget no padrão de monitoramento de gateways, com IP, RTTsd e estado. | [Notas](docs/releases/v0.4.9.md) |
-| 0.4.8 | Atualização do pacote pela aba Updates, com validação do arquivo e do serviço. | [Notas](docs/releases/v0.4.8.md) |
-| 0.4.7 | Uma linha por gateway no widget, com RTT, perda e estado. | [Notas](docs/releases/v0.4.7.md) |
-| 0.4.6 | Validação de dependências físicas, destino protegido para VTI e matriz de um a três enlaces. | [Notas](docs/releases/v0.4.6.md) |
-| 0.4.5 | Revisão do widget, validação de Monitor IP e ensaio com dpinger real. | [Notas](docs/releases/v0.4.5.md) |
-| 0.4.4 | Nova tentativa após falha na recarga do filtro, suporte do core de laboratório e tráfego IPv6 com dois caminhos. | [Notas](docs/releases/v0.4.4.md) |
-| 0.4.3 | Filtro nativo de logs para perfis delegados, permissões de encaminhamento uniformes e publicação após a matriz do Actions. | [Notas](docs/releases/v0.4.3.md) |
-| 0.4.2 | Tabelas, editores e diagnósticos no padrão visual do pfSense CE 2.9.1. | [Notas](docs/releases/v0.4.2.md) |
-| 0.4.1 | Publicação no GitHub Releases e preservação de eventos consecutivos no syslog. | [Notas](docs/releases/v0.4.1.md) |
-| 0.4.0 | Revisão da WebGUI e do widget, eventos no log Geral e consulta de versões em `main`. | [Notas](docs/releases/v0.4.0.md) |
-| 0.3.0 | Prévia de encaminhamento e integração opcional com o core de laboratório. | [Notas](docs/releases/v0.3.0.md) |
-| 0.2.0 | Observação de gateways, SLAs e recomendação de caminhos. | [Revisão](https://github.com/allanlopesprado/pfsense-sdwan/tree/ef7d32da3a09cd5d33867eccae07588276e0cb4b) |
-| 0.1.1 | Pacote de laboratório com checksum fixado. | [Pacote](dist/pfSense-pkg-SDWAN-0.1.1.pkg) |
-| 0.1.0 | Primeira distribuição reproduzível para laboratório. | [Pacote](dist/pfSense-pkg-SDWAN-0.1.0.pkg) |
+| 0.4.16 | Invalidate samples after changes to monitored gateways and document the impact of native settings. | [Notes](docs/releases/v0.4.16.md) |
+| 0.4.15 | Remove the service banner from the Status tab. | [Notes](docs/releases/v0.4.15.md) |
+| 0.4.14 | Show the recommendation, decision reason, SLA limits, and highlighted measurements in gateway diagnostics. | [Notes](docs/releases/v0.4.14.md) |
+| 0.4.13 | Add native service controls to the SD-WAN toolbar and show observer state in Status. | [Notes](docs/releases/v0.4.13.md) |
+| 0.4.12 | Register the service as `sdwan` and add native shortcuts under Status → Services. | [Notes](docs/releases/v0.4.12.md) |
+| 0.4.11 | Fix initial focus on the System Logs button. | [Notes](docs/releases/v0.4.11.md) |
+| 0.4.10 | Remove the Installed Packages shortcut from Updates. | [Notes](docs/releases/v0.4.10.md) |
+| 0.4.9 | Use the native gateway monitoring layout for the widget, including IP address, RTTsd, and status. | [Notes](docs/releases/v0.4.9.md) |
+| 0.4.8 | Upgrade from the Updates tab, with package and service verification. | [Notes](docs/releases/v0.4.8.md) |
+| 0.4.7 | Show one row per gateway in the widget, with RTT, loss, and status. | [Notes](docs/releases/v0.4.7.md) |
+| 0.4.6 | Validate physical dependencies, require a protected VTI destination, and test one to three links. | [Notes](docs/releases/v0.4.6.md) |
+| 0.4.5 | Revise the widget, validate the Monitor IP, and test with real dpinger processes. | [Notes](docs/releases/v0.4.5.md) |
+| 0.4.4 | Retry failed filter reloads, support the lab core, and test two-path IPv6 traffic. | [Notes](docs/releases/v0.4.4.md) |
+| 0.4.3 | Add native log filtering for delegated accounts, align forwarding permissions, and publish after the Actions matrix passes. | [Notes](docs/releases/v0.4.3.md) |
+| 0.4.2 | Align tables, editors, and diagnostics with the pfSense CE 2.9.1 WebGUI. | [Notes](docs/releases/v0.4.2.md) |
+| 0.4.1 | Publish on GitHub Releases and preserve consecutive syslog events. | [Notes](docs/releases/v0.4.1.md) |
+| 0.4.0 | Revise the WebGUI and widget, write events to General logs, and check versions on `main`. | [Notes](docs/releases/v0.4.0.md) |
+| 0.3.0 | Preview forwarding with optional lab core integration. | [Notes](docs/releases/v0.3.0.md) |
+| 0.2.0 | Add gateway monitoring, SLAs, and path recommendations. | [Revision](https://github.com/allanlopesprado/pfsense-sdwan/tree/ef7d32da3a09cd5d33867eccae07588276e0cb4b) |
+| 0.1.1 | Lab package with a pinned checksum. | [Package](dist/pfSense-pkg-SDWAN-0.1.1.pkg) |
+| 0.1.0 | First reproducible lab distribution. | [Package](dist/pfSense-pkg-SDWAN-0.1.0.pkg) |

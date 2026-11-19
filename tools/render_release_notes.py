@@ -33,8 +33,8 @@ def render_release(index, changes, repository, tags, run_id=None):
     previous = previous_release(version, tags)
     if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository):
         raise ValueError("Expected GitHub repository in owner/name format")
-    maturity = {"experimental": "experimental", "stable": "estável"}.get(index["maturity"])
-    if not maturity or index["package"] != "pfSense-pkg-SDWAN" or not re.fullmatch(r"[a-f0-9]{64}", index["sha256"]):
+    maturity = index["maturity"]
+    if maturity not in ("experimental", "stable") or index["package"] != "pfSense-pkg-SDWAN" or not re.fullmatch(r"[a-f0-9]{64}", index["sha256"]):
         raise ValueError("Invalid version index for release notes")
     if not changes.strip():
         raise ValueError("Release notes are empty")
@@ -43,34 +43,34 @@ def render_release(index, changes, repository, tags, run_id=None):
     repo_url = f"https://github.com/{repository}"
     assets = f"{repo_url}/releases/download/{tag}"
     package = f"{index['package']}-{version}.pkg"
-    install = f"{repo_url}/blob/{tag}/README.md#como-instalar-pelo-diagnostics--command-prompt"
+    install = f"{repo_url}/blob/{tag}/README.md#install-from-diagnostics--command-prompt"
     evidence = [
         f"[GitHub Actions]({repo_url}/actions/runs/{run_id})" if run_id else
         f"[GitHub Actions]({repo_url}/actions/workflows/checks.yml)",
         f"[SHA-256]({assets}/{package}.sha256)",
     ]
     if previous:
-        evidence.append(f"[Comparar {previous} com {tag}]({repo_url}/compare/{previous}...{tag})")
+        evidence.append(f"[Compare {previous} with {tag}]({repo_url}/compare/{previous}...{tag})")
 
     return "\n".join([
-        f"Pacote {maturity} para **pfSense CE 2.9.1** em amd64.",
+        f"{maturity.capitalize()} package for **pfSense CE 2.9.1** on amd64.",
         "",
-        "## O que mudou",
+        "## What changed",
         "",
         changes.strip(),
         "",
-        "## Instalar ou atualizar",
+        "## Install or upgrade",
         "",
-        f"[Baixar {package}]({assets}/{package}) · [Instruções de instalação]({install})",
+        f"[Download {package}]({assets}/{package}) · [Installation instructions]({install})",
         "",
-        "Para atualizar pela WebGUI, abra **Services → SD-WAN → Updates**, clique em **Check GitHub** e selecione **Upgrade to …**.",
+        "To upgrade from the WebGUI, open **Services → SD-WAN → Updates**, click **Check GitHub**, and select **Upgrade to …**.",
         "",
-        "## Capturas",
+        "## Screenshots",
         "",
-        f"[Dashboard claro]({assets}/widget-light-554.png) · [Dashboard escuro]({assets}/widget-dark-554.png) · "
+        f"[Light dashboard]({assets}/widget-light-554.png) · [Dark dashboard]({assets}/widget-dark-554.png) · "
         f"[Status]({assets}/status-pfSense.png) · [Updates]({assets}/updates-pfSense.png)",
         "",
-        "## Validação",
+        "## Validation",
         "",
         " · ".join(evidence),
         "",

@@ -28,6 +28,12 @@ body = render(index, changes, "allanlopesprado/pfsense-sdwan", ["v0.1.0"], 42)
 assert changes.strip() in body and f"v0.1.0...{tag}" in body
 assert f"releases/download/{tag}/pfSense-pkg-SDWAN-{index['version']}.pkg.sha256" in body
 assert f"releases/download/{tag}/widget-dark-554.png" in body and "/actions/runs/42" in body
+assert "## Install or upgrade" in body and "## Validation" in body
+install_anchor = "install-from-diagnostics--command-prompt"
+assert f"blob/{tag}/README.md#{install_anchor}" in body
+readme = (root / "README.md").read_text(encoding="utf-8")
+heading = next(line for line in readme.splitlines() if line.startswith("## Install from "))
+assert re.sub(r"[^a-z0-9 -]", "", heading.casefold()).strip().replace(" ", "-") == install_anchor
 
 history = (root / "CHANGELOG.md").read_text(encoding="utf-8")
 versions = re.findall(r"^\| (\d+\.\d+\.\d+) \|", history, re.M)

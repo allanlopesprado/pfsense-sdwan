@@ -1,57 +1,60 @@
-# SD-WAN para pfSense CE
+# SD-WAN for pfSense CE
 
-Pacote experimental para monitorar links, comparar gateways por SLA e acompanhar as recomendações de caminho na WebGUI do **pfSense CE 2.9.1**. Projeto independente da Netgate.
+An experimental package for monitoring links, comparing gateways against SLAs, and viewing path recommendations in the **pfSense CE 2.9.1** WebGUI. This project is independent of Netgate.
 
-[Baixar a release mais recente](https://github.com/allanlopesprado/pfsense-sdwan/releases/latest) · [Instalação](#como-instalar-pelo-diagnostics--command-prompt) · [Histórico](CHANGELOG.md) · [Resultados de laboratório](docs/RESULTADOS.pt-BR.md)
+[Download the latest release](https://github.com/allanlopesprado/pfsense-sdwan/releases/latest) · [Installation](#install-from-diagnostics--command-prompt) · [Changelog](CHANGELOG.md) · [Lab results](docs/RESULTS.md)
 
-[![Testes do pacote](https://github.com/allanlopesprado/pfsense-sdwan/actions/workflows/checks.yml/badge.svg?branch=main)](https://github.com/allanlopesprado/pfsense-sdwan/actions/workflows/checks.yml)
+[![Package checks](https://github.com/allanlopesprado/pfsense-sdwan/actions/workflows/checks.yml/badge.svg?branch=main)](https://github.com/allanlopesprado/pfsense-sdwan/actions/workflows/checks.yml)
 
-## O que o pacote faz
+## What the package does
 
-- **Dashboard** mostra IP, latência, variação do RTT, perda e estado por gateway.
-- **Políticas** classificam os caminhos por latência, perda e custo. **Diagnostics** explica a avaliação de cada candidato.
-- **Status → Services** registra o serviço `sdwan` com controles nativos. Seus eventos aparecem em **Status → System Logs**, no log Geral.
-- **Updates** consulta o GitHub, verifica o SHA-256 e instala a versão publicada pela WebGUI.
+- **Dashboard** shows each gateway's IP address, RTT, RTT standard deviation, loss, and status.
+- **Policies** rank paths by latency, packet loss, and cost. **Diagnostics** explains how each candidate was evaluated.
+- **Status → Services** lists the `sdwan` service with native controls. Events appear under **Status → System Logs → General**.
+- **Updates** checks GitHub, verifies the SHA-256 checksum, and installs the published release from the WebGUI.
 
-![Widget SD-WAN com métricas e estado de três gateways no tema claro](https://github.com/allanlopesprado/pfsense-sdwan/releases/latest/download/widget-light-554.png)
+![SD-WAN widget showing metrics and status for three gateways in the light theme](https://github.com/allanlopesprado/pfsense-sdwan/releases/latest/download/widget-light-554.png)
 
-[Widget no tema escuro](https://github.com/allanlopesprado/pfsense-sdwan/releases/latest/download/widget-dark-554.png) · [Tela Status](https://github.com/allanlopesprado/pfsense-sdwan/releases/latest/download/status-pfSense.png) · [Tela Updates](https://github.com/allanlopesprado/pfsense-sdwan/releases/latest/download/updates-pfSense.png)
+[Dark-theme widget](https://github.com/allanlopesprado/pfsense-sdwan/releases/latest/download/widget-dark-554.png) · [Status screen](https://github.com/allanlopesprado/pfsense-sdwan/releases/latest/download/status-pfSense.png) · [Updates screen](https://github.com/allanlopesprado/pfsense-sdwan/releases/latest/download/updates-pfSense.png)
 
-| Ambiente | Uso |
+| Environment | Use |
 | --- | --- |
-| **pfSense CE 2.9.1 padrão** | Monitoramento de gateways, avaliação de SLAs e recomendação de caminho. |
-| **pfSense CE 2.9.1 com o core de laboratório** | Ensaio de encaminhamento por política com o [adaptador do core](core/README.md) e um grupo nativo dedicado. |
+| **Stock pfSense CE 2.9.1** | Gateway monitoring, SLA evaluation, and path recommendations. |
+| **pfSense CE 2.9.1 with the lab core** | Policy-based forwarding experiments with the [core adapter](core/README.md) and a dedicated native gateway group. |
 
-## Como instalar pelo Diagnostics → Command Prompt
+<a id="como-instalar-pelo-diagnostics--command-prompt"></a>
 
-1. Em um clone de laboratório, abra **Diagnostics → Command Prompt** com acesso administrativo. Use `cat /etc/version && pkg config ABI` para conferir o **CE 2.9.1** e o ABI **FreeBSD:16:amd64**.
-2. Execute a linha abaixo. Ela baixa o pacote de uma revisão fixa em um diretório temporário, valida seu SHA-256 e instala com `pkg`.
+## Install from Diagnostics → Command Prompt
+
+1. On a lab clone, open **Diagnostics → Command Prompt** with administrative access. Run `cat /etc/version && pkg config ABI` to confirm **CE 2.9.1** and **FreeBSD:16:amd64**.
+2. Run the line below. It downloads the package from a pinned revision to a temporary directory, verifies SHA-256, and installs it with `pkg`.
 
 <!-- install-command -->
 ```sh
 d=$(mktemp -d /tmp/sdwan.XXXXXXXX) && (trap 'rm -rf "$d"' EXIT; p="$d/pfSense-pkg-SDWAN-0.4.16.pkg"; fetch -o "$p" 'https://raw.githubusercontent.com/allanlopesprado/pfsense-sdwan/60d7c1299ac03eedafad9e6782070d6486750c59/dist/pfSense-pkg-SDWAN-0.4.16.pkg' && sha256 -c 2a9f9cefe0a8faa2a88fa6b930735ae985cd83e8c3e4bf7f3742af3a449377fe "$p" && pkg add "$p")
 ```
 
-3. Abra **Services → SD-WAN**. Confira o serviço em **Status → Services** e a versão instalada em **SD-WAN → Updates**.
+3. Open **Services → SD-WAN**. Check the service under **Status → Services** and the installed version under **SD-WAN → Updates**.
 
-Se o registro da WebGUI for adiado durante a instalação, aguarde o PHP-FPM voltar e execute `/usr/local/bin/php -f /etc/rc.packages pfSense-pkg-SDWAN POST-INSTALL`. [Instalação e verificação em laboratório](docs/LAB.pt-BR.md#construção-e-instalação)
+If installation defers WebGUI registration, wait for PHP-FPM to return and run `/usr/local/bin/php -f /etc/rc.packages pfSense-pkg-SDWAN POST-INSTALL`. [Lab installation and verification](docs/LAB.md#build-and-install)
 
-## Configurar e atualizar
+## Configure and update
 
-1. Confirme as medições em **Status → Gateways** e adicione os links em **Services → SD-WAN → Members**.
-2. Defina os limites de RTT e perda em **Performance SLAs** e associe os links a uma política em **Policies**.
-3. Acompanhe o resultado em **Status** e **Diagnostics**. Em **Status → Dashboard**, use **+ → SD-WAN** para exibir o widget.
+1. Confirm measurements in **Status → Gateways** and add the links under **Services → SD-WAN → Members**.
+2. Set RTT and packet loss limits in **Performance SLAs**, then assign the links to a policy in **Policies**.
+3. Review the decision in **Status** and **Diagnostics**. Under **Status → Dashboard**, use **+ → SD-WAN** to add the widget.
 
-Para atualizar uma instalação a partir da **0.4.8**, abra **SD-WAN → Updates**, clique em **Check GitHub** e selecione **Upgrade to …** quando houver versão disponível. A ação usa o privilégio nativo de instalação de pacotes.
+For installations running **0.4.8** or later, open **SD-WAN → Updates**, click **Check GitHub**, and select **Upgrade to …** when a release is available. This action uses the native package installation privilege.
 
-[Logs e severidade no pfSense](https://docs.netgate.com/pfsense/en/latest/monitoring/logs/settings.html) · [Remoção e retorno de versão](docs/LAB.pt-BR.md#remoção-e-retorno-à-versão-anterior)
+[pfSense log settings and severity](https://docs.netgate.com/pfsense/en/latest/monitoring/logs/settings.html) · [Removal and rollback](docs/LAB.md#removal-and-rollback)
 
-## Desenvolvimento e validação
+## Development and validation
 
-- [Versionamento e publicação](docs/VERSIONAMENTO.pt-BR.md)
-- [Matriz de cenários e testes](docs/VALIDACAO.pt-BR.md)
-- [Resultados e evidências de laboratório](docs/RESULTADOS.pt-BR.md)
-- [Integração com IPsec, CARP, NAT e rotas](docs/INTEGRACAO.pt-BR.md)
-- [Interoperabilidade com FortiOS](docs/FORTIOS.pt-BR.md)
+- [Versioning and publishing](docs/VERSIONING.md)
+- [Configuration impact matrix](docs/CONFIGURATIONS.md)
+- [Validation scenarios and tests](docs/VALIDATION.md)
+- [Lab results and evidence](docs/RESULTS.md)
+- [IPsec, CARP, NAT, and routing integration](docs/INTEGRATION.md)
+- [FortiOS interoperability](docs/FORTIOS.md)
 
-Execute `sh tests/run.sh` com PHP CLI 8.2+, Python 3 e uma shell POSIX. Após instalar, use [`verify-appliance.sh`](tools/verify-appliance.sh) com a versão esperada para conferir o pacote, os registros da WebGUI, o serviço e a amostra atual.
+Run `sh tests/run.sh` with PHP CLI 8.2+, Python 3, and a POSIX shell. After installation, run [`verify-appliance.sh`](tools/verify-appliance.sh) with the expected version to check the package, WebGUI registration, service, and current sample.

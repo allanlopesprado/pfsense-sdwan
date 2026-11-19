@@ -176,6 +176,6 @@ jobs:
             --published-tags "$RUNNER_TEMP/sdwan-published-tags" --run-id "$GITHUB_RUN_ID" \
             --output "$RUNNER_TEMP/sdwan-release-notes.md"
           gh release create "$tag" --target "$GITHUB_SHA" --latest \
-            --title "SD-WAN para pfSense CE $version · Laboratório" \
+            --title "SD-WAN for pfSense CE $version · Lab release" \
             --notes-file "$RUNNER_TEMP/sdwan-release-notes.md" "dist/$package" "dist/$package.sha256" \
             release-previews/widget-*.png release-pages/*.png
