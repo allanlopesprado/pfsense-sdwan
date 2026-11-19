@@ -46,6 +46,7 @@ function sdwan_steering_native(): array {
 	foreach ($paths as $key => $path) {
 		$native[$key] = config_get_path($path, []);
 	}
+	$native['links'] = sdwan_preflight_link_graph($native['interfaces']);
 	$native['gateways'] = sdwan_gateways();
 	foreach ($native['gateways'] as &$gateway) {
 		if (!$gateway['monitor_disabled'] && $gateway['monitor'] === 'dynamic') {

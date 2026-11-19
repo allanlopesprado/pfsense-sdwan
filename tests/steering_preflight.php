@@ -1,6 +1,7 @@
 <?php
 require_once __DIR__ . '/../files/usr/local/pkg/sdwan.inc';
 require_once __DIR__ . '/../files/usr/local/pkg/sdwan_preflight.inc';
+require_once __DIR__ . '/fixtures/write/config.inc';
 
 $config = [
 	'policies' => [['name' => 'Office', 'members' => ['First', 'Second']]],
@@ -173,6 +174,13 @@ foreach ([1 => ['ISP_A', '_vipcarp'], 2 => ['ISP_B', 'opt1']] as $id => [$name, 
 }
 $vti_binding = preflight_check($n, true, 'two VTIs and a CARP parent');
 $vti = $n;
+foreach ([['any' => ''], ['address' => '0.0.0.0/0']] as $unrestricted) {
+	$n = $vti;
+	$n['rules'][0]['destination'] = $unrestricted;
+	$n['rules'][1] = guard_for($n['rules'][0]);
+	preflight_check($n, false, 'VTI protection requires a specific destination');
+}
+$n = $vti;
 $n['phase1'][0]['remote-gateway'] = '203.0.113.7';
 if (preflight_check($n, true, 'new IPsec peer')['rules_revision'] === $vti_binding['rules_revision']) {
 	throw new Exception('A new IPsec peer cannot reuse the previous steering consent.');
@@ -197,4 +205,59 @@ $n['phase2'][] = ['ikeid' => '2', 'mode' => 'tunnel'];
 preflight_check($n, false, 'enabled policy-based child conflict');
 $n['phase2'][2]['disabled'] = '';
 preflight_check($n, true, 'disabled policy-based child');
-echo "Native ingress, gateway-group, scope drift, VTI and HA preflight tests passed.\n";
+$current = [
+	'vlans/vlan' => [
+		['vlanif' => 'igb0.10', 'if' => 'igb0'],
+		['vlanif' => 'igb0.20', 'if' => 'igb0'],
+		['vlanif' => 'lagg0.40', 'if' => 'lagg0'],
+	],
+	'qinqs/qinqentry' => [['vlanif' => 'igb0.50', 'if' => 'igb0', 'members' => '7  9']],
+	'laggs/lagg' => [['laggif' => 'lagg0', 'members' => 'igb1,igb2']],
+	'bridges/bridged' => [['bridgeif' => 'bridge0', 'members' => 'opt99,lan']],
+	'ppps/ppp' => [['if' => 'pppoe0', 'ports' => 'igb0.20']],
+];
+$n = $native;
+$n['interfaces']['opt99'] = ['enable' => '', 'if' => 'lagg0.40'];
+$n['links'] = sdwan_preflight_link_graph($n['interfaces']);
+$n['interfaces']['wan']['if'] = 'igb0.10';
+foreach (['igb0', 'igb0.20', 'igb0.50.7', 'pppoe0'] as $device) {
+	$n['interfaces']['opt1']['if'] = $device;
+	preflight_check($n, false, "shared physical parent through {$device}");
+}
+$n['interfaces']['opt1']['if'] = 'lagg0.40';
+$independent = preflight_check($n, true, 'distinct physical parent and LAGG');
+$topology = $n;
+$topology['links']['lagg0'] = ['igb1', 'igb3'];
+if (preflight_check($topology, true, 'changed LAGG membership')['rules_revision'] === $independent['rules_revision']) {
+	throw new Exception('Changed physical dependencies must invalidate the previous approval.');
+}
+$topology = $n;
+$topology['links']['lagg0'] = ['igb2', 'igb1'];
+if (preflight_check($topology, true, 'reordered LAGG membership')['rules_revision'] !== $independent['rules_revision']) {
+	throw new Exception('Device list order changed a stable physical topology.');
+}
+$topology['links']['lagg0'] = ['igb0', 'igb1'];
+preflight_check($topology, false, 'LAGG includes other WAN port');
+$topology['links']['lagg0'] = ['lagg0.40'];
+preflight_check($topology, false, 'recursive link dependency cannot be established');
+$n['interfaces']['wan']['if'] = 'igb2';
+$n['interfaces']['opt1']['if'] = 'bridge0';
+preflight_check($n, false, 'bridge contains VLAN on the other WAN port');
+
+$n = $vti;
+$n['links'] = sdwan_preflight_link_graph($n['interfaces']);
+$n['interfaces']['wan']['if'] = 'igb0.10';
+$n['interfaces']['opt1']['if'] = 'pppoe0';
+preflight_check($n, false, 'VTIs on separate logical interfaces share the same physical link');
+$n['interfaces']['opt1']['if'] = 'lagg0.40';
+preflight_check($n, true, 'VTIs use independent physical links');
+
+foreach (['ovpnc1', 'wg0', 'gif0', 'gre0'] as $device) {
+	$n = $native;
+	$n['interfaces']['opt1']['if'] = $device;
+	preflight_check($n, false, "unsupported active member {$device}");
+	$n['interfaces']['opt1']['if'] = 'vtnet2';
+	$n['interfaces']['opt9'] = ['enable' => '', 'if' => $device];
+	preflight_check($n, true, "unrelated tunnel {$device} can coexist");
+}
+echo "Native ingress, gateway-group, scope drift, physical dependency, VPN and HA preflight tests passed.\n";

@@ -60,7 +60,7 @@ def render_harness(work, core):
         "return filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6) !== false; } }")
 
 
-def test_config(work, family, links):
+def test_config(work, family, links, vti):
     config = fixture(work)
     if links == 3:
         config["gateways/gateway_item"].append({"name": "GW_C", "interface": "opt3"})
@@ -89,8 +89,17 @@ def test_config(work, family, links):
                    "gateways/gateway_group": [{"name": "G", "item": group_members}],
                    "fixture_sources": {}, "fixture_devices": {}, "reload_gateways": {}})
     config["interfaces"]["lan"] = {"enable": "", "if": "lablan"}
-    for gw, (source, hop), device in zip(config["gateways/gateway_item"], uplinks, ("labwana", "labwanb", "labwanc")):
+    devices = ("ipsec10", "ipsec20", "ipsec30") if vti else ("labwana", "labwanb", "labwanc")
+    if vti:
+        config.update({"ipsec/filtermode": "if_ipsec", "ipsec/phase1": [], "ipsec/phase2": []})
+    for index, (gw, (source, hop), device) in enumerate(zip(config["gateways/gateway_item"], uplinks, devices), 1):
         interface, name = gw["interface"], gw["name"]
+        if vti:
+            transport = f"opt{index + 10}"
+            config["interfaces"][transport] = {"enable": "", "if": f"wan{index}"}
+            config["ipsec/phase1"].append({"ikeid": str(index), "interface": transport, "iketype": "ikev2",
+                                           "remote-gateway": f"198.18.{index}.2"})
+            config["ipsec/phase2"].append({"ikeid": str(index), "reqid": device[5:], "mode": "vti"})
         gw["gateway"] = hop
         config["interfaces"][interface]["if"] = device
         config["fixture_devices"][interface] = device
@@ -101,7 +110,7 @@ def test_config(work, family, links):
     return config
 
 
-def run(php, core, output, replay, family, links):
+def run(php, core, output, replay, family, links, vti=False):
     with tempfile.TemporaryDirectory(prefix="sdwan-render-", dir="/tmp") as tmp, ExitStack() as stack:
         work = Path(tmp)
         render_harness(work, core)
@@ -113,7 +122,7 @@ def run(php, core, output, replay, family, links):
             code = daemon.read_text()
             assert code.count(call) == 1
             daemon.write_text(code.replace(call, "fopen($process['socket'], 'rb')"))
-        config = test_config(work, family, links)
+        config = test_config(work, family, links, vti)
         bound_rule = config["filter/rule"][0]
         scoped_flow = f'{family} proto tcp from {bound_rule["source"]["address"]} to {bound_rule["destination"]["address"]} port 7'
         settings = work / "fixture.json"
@@ -196,7 +205,9 @@ def run(php, core, output, replay, family, links):
             rules[label] = line
         assert compile_rule("control") == "unchanged"
         transport = "file replay" if replay else "AF_UNIX"
-        print(f"ok - {family}, {links} links: observer ({transport}) and native PF renderer agreed across all {1 << links} availability combinations")
+        path_type = "IPsec VTI" if vti else "direct WAN"
+        print(f"ok - {family}, {links} {path_type} links: observer ({transport}) and native PF renderer "
+              f"agreed across all {1 << links} availability combinations")
 
         def denied(reason):
             line = " ".join(compile_rule().split())
@@ -228,6 +239,13 @@ def run(php, core, output, replay, family, links):
         config["reload_gateways"]["GW_A"]["address"] = "ff02::1" if family == "inet6" else "224.0.0.1"
         denied("non-unicast next hop")
         config = deepcopy(stable)
+        if vti:
+            config["ipsec/phase1"][1]["interface"] = config["ipsec/phase1"][0]["interface"]
+            denied("VTI transports now share a link")
+            config = deepcopy(stable)
+            config["ipsec/phase2"][0]["disabled"] = ""
+            denied("VTI no longer configured")
+            config = deepcopy(stable)
         config["gateways/sdwan_bindings/item"].append(binding)
         denied("duplicate tracker binding")
         config = deepcopy(stable)
@@ -258,3 +276,4 @@ if __name__ == "__main__":
     for family in families:
         for links in link_counts:
             run(args.php, args.core.resolve(), args.emit_dir, args.replay_lines, family, links)
+            run(args.php, args.core.resolve(), None, args.replay_lines, family, links, vti=True)

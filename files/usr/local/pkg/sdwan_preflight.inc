@@ -70,6 +70,58 @@ function sdwan_preflight_vti_peer(array $native, string $device): ?array {
 	return count($peers) === 1 ? $peers[0] : null;
 }
 
+/* The native XML stores stacked interfaces and aggregates separately from
+ * their assignments. Resolve their dependencies without touching live links. */
+function sdwan_preflight_link_graph(array $interfaces): array {
+	$graph = [];
+	foreach (['vlans/vlan', 'qinqs/qinqentry'] as $path) {
+		foreach ((array)config_get_path($path, []) as $vlan) {
+			if (!empty($vlan['vlanif']) && !empty($vlan['if'])) {
+				$graph[$vlan['vlanif']] = [$vlan['if']];
+				if ($path === 'qinqs/qinqentry') {
+					foreach (preg_split('/\s+/', trim($vlan['members'] ?? ''), -1, PREG_SPLIT_NO_EMPTY) as $tag) {
+						$graph[$vlan['vlanif'] . '.' . $tag] = [$vlan['vlanif']];
+					}
+				}
+			}
+		}
+	}
+	foreach (['laggs/lagg' => ['laggif', 'members'], 'bridges/bridged' => ['bridgeif', 'members'],
+	    'ppps/ppp' => ['if', 'ports']] as $path => [$name, $keys]) {
+		foreach ((array)config_get_path($path, []) as $entry) {
+			if (!empty($entry[$name])) {
+				$members = preg_split('/\s*,\s*/', trim($entry[$keys] ?? ''), -1, PREG_SPLIT_NO_EMPTY);
+				if ($path === 'bridges/bridged') {
+					$members = array_map(static fn($member) => $interfaces[$member]['if'] ?? '', $members);
+				}
+				$graph[$entry[$name]] = $members;
+			}
+		}
+	}
+	return $graph;
+}
+
+function sdwan_preflight_link_roots(array $graph, string $device, array $seen = []): array {
+	if ($device === '' || isset($seen[$device])) {
+		return [];
+	}
+	if (!array_key_exists($device, $graph)) {
+		return [$device];
+	}
+	$seen[$device] = true;
+	$roots = [];
+	foreach ($graph[$device] as $parent) {
+		$links = sdwan_preflight_link_roots($graph, $parent, $seen);
+		if (!$links) {
+			return [];
+		}
+		array_push($roots, ...$links);
+	}
+	$roots = array_values(array_unique($roots));
+	sort($roots, SORT_STRING);
+	return $roots;
+}
+
 /* Preserve order in native rule lists while making map key order immaterial. */
 function sdwan_preflight_canonical(array $value): array {
 	if (!array_is_list($value)) {
@@ -138,7 +190,7 @@ function sdwan_preflight_unrestricted(array $endpoint): bool {
 	return array_key_exists('any', $endpoint) || preg_match('~/0+$~D', $endpoint['address'] ?? '') === 1;
 }
 
-function sdwan_preflight_native_rules(array $native, string $group, string $family, array $uplinks): array {
+function sdwan_preflight_native_rules(array $native, string $group, string $family, array $uplinks, bool $vti): array {
 	$trackers = [];
 	$scope = [];
 	$counts = [];
@@ -174,6 +226,9 @@ function sdwan_preflight_native_rules(array $native, string $group, string $fami
 		    !sdwan_preflight_endpoint($rule['source'] ?? null, $family, $ingress) ||
 		    !sdwan_preflight_endpoint($rule['destination'] ?? null, $family, $ingress)) {
 			return sdwan_preflight_error("Rule {$tracker} requires an unscheduled match with literal addresses, the ingress subnet or any, and numeric ports.");
+		}
+		if ($vti && sdwan_preflight_unrestricted($rule['destination'])) {
+			return sdwan_preflight_error("Rule {$tracker} requires a specific protected destination for VTI steering.");
 		}
 		if (sdwan_preflight_unrestricted($rule['source']) && sdwan_preflight_unrestricted($rule['destination'])) {
 			return sdwan_preflight_error("Rule {$tracker} requires a specific source or destination.");
@@ -279,8 +334,9 @@ function sdwan_steering_preflight(array $config, string $policy, string $group, 
 			return sdwan_preflight_error('The group contains an unsupported tunnel or local device.');
 		}
 		$physical = $native['interfaces'][$transport]['if'] ?? '';
-		if (!is_string($physical) || $physical === '' || isset($transports[$physical])) {
-			return sdwan_preflight_error('Each candidate requires a distinct identifiable transport interface.');
+		$roots = is_string($physical) ? sdwan_preflight_link_roots($native['links'] ?? [], $physical) : [];
+		if (!$roots || array_intersect_key(array_fill_keys($roots, true), $transports)) {
+			return sdwan_preflight_error('Each candidate requires an identifiable transport with no link shared by another candidate.');
 		}
 		$paths[$name] = [$if, $device, $transport, $physical, $gateway['family'],
 		    $gateway['address'] ?? '', $gateway['monitor'] ?? ''];
@@ -291,7 +347,11 @@ function sdwan_steering_preflight(array $config, string $policy, string $group, 
 			}
 			$paths[$name][] = $peer;
 		}
-		$transports[$physical] = true;
+		// Do not invalidate existing bindings for uncomplicated interfaces.
+		if ($roots !== [$physical]) {
+			$paths[$name][] = $roots;
+		}
+		$transports += array_fill_keys($roots, true);
 		$uplinks[$transport] = true;
 		if (($family !== null && $family !== $gateway['family']) || ($kind !== null && $kind !== $is_vti)) {
 			return sdwan_preflight_error('Keep one address family and one type of path in each group. Direct WAN and encrypted VTI cannot substitute for one another.');
@@ -322,7 +382,7 @@ function sdwan_steering_preflight(array $config, string $policy, string $group, 
 			}
 		}
 	}
-	$rules = sdwan_preflight_native_rules($native, $group, $family, $uplinks);
+	$rules = sdwan_preflight_native_rules($native, $group, $family, $uplinks, $kind);
 	if ($rules['errors']) {
 		return $rules;
 	}

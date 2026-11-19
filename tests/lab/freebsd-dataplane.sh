@@ -93,7 +93,12 @@ set state-policy if-bound
 nat on $wan_a inet from 192.0.2.0/25 to any -> ($wan_a)
 nat on $wan_b inet from 192.0.2.0/25 to any -> ($wan_b)
 nat on $wan_c inet from 192.0.2.0/25 to any -> ($wan_c)
+rdr on $wan_b inet proto tcp from any to 203.0.113.1 port 7 -> 192.0.2.11
+rdr on $wan_c inet proto tcp from any to 192.0.2.129 port 7 -> 192.0.2.11
 block all
+pass in quick on $wan_b reply-to ($wan_b 203.0.113.2) inet proto tcp to 192.0.2.11 port 7 keep state label "port-forward-b"
+pass in quick on $wan_c reply-to ($wan_c 192.0.2.130) inet proto tcp to 192.0.2.11 port 7 keep state label "port-forward-c"
+pass out on $lan inet proto tcp to 192.0.2.11 port 7
 EOF
 cat >"$work/after.pf" <<EOF
 # A later permissive native rule would allow either test destination via the
@@ -258,6 +263,30 @@ if [ -n "${SDWAN_RENDERED_RULES:-}" ]; then
     expect_roundtrip 192.0.2.163 198.51.100.1 three-wan-control
     steer a triple-
     expect_roundtrip 192.0.2.162 198.51.100.1 three-wan-recovered
+# The independent incoming services must answer on the arriving WAN,
+    # despite the kernel default on A and a different steering decision.
+    jexec "$client" inetd -p "$work/client-inetd.pid" "$work/inetd.conf"
+    cat >"$work/port-forward.pf" <<EOF
+pass in quick on ${wan_b%?}b inet proto tcp from 203.0.113.1 port 7 to 192.0.2.163 no state label "reply-b"
+pass in quick on $remote_c inet proto tcp from 192.0.2.129 port 7 to 192.0.2.163 no state label "reply-c"
+pass all no state
+EOF
+    jexec "$remote" pfctl -f "$work/port-forward.pf"
+    for decision in a none c; do
+        steer "$decision" triple-
+        for entry in 'b:203.0.113.1' 'c:192.0.2.129'; do
+            marker="port-forward-${entry%:*}-$decision"
+            result=$(printf '%s\n' "$marker" | jexec "$remote" nc -n -N -w 4 -s 192.0.2.163 "${entry#*:}" 7)
+            test "$result" = "192.0.2.163 $marker"
+            jexec "$firewall" pfctl -s labels | counter "port-forward-${entry%:*}"
+            jexec "$remote" pfctl -s labels | counter "reply-${entry%:*}"
+        done
+        # Next iteration must generate new counters on both underlay paths.
+        jexec "$remote" pfctl -f "$work/port-forward.pf"
+    done
+    echo 'ok - independent WAN B and C port forwards retained their reply-to with an active or denied steering policy'
+    jexec "$remote" pfctl -f "$work/remote.pf"
+    steer a triple-
     baseline >"$work/triple-final"
     cmp "$work/baseline" "$work/triple-final"
 

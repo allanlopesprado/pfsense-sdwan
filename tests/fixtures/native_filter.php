@@ -19,6 +19,10 @@ function is_gateway_action_enabled($gateway) { return !isset($gateway['action_di
 function return_gateway_groups_array($fixed) { return ['G' => []]; }
 function config_path_enabled($path, $key) { return isset(config_get_path($path, [])[$key]); }
 function get_failover_gateway_group_label_item($gateway) { return []; }
+function interface_has_gateway($interface) { return $interface === 'wan'; }
+function interface_has_gatewayv6($interface) { return $interface === 'wan'; }
+function get_interface_gateway($interface) { return '198.51.100.2'; }
+function get_interface_gateway_v6($interface) { return '2001:db8:20::2'; }
 // This format matches printing rules on the WebGUI. Optional unused fields in
 // the pinned upstream generator may be absent in config.xml.
 set_error_handler(static function ($level, $message, $file) use ($work) {
@@ -29,7 +33,13 @@ $PFConfig = new class {
 	function set_config($section, $lines, $group, $id) {}
 };
 $g = ['varrun_path' => $work];
-$FilterIflist = ['lan' => [0 => null, 'if' => 'lablan', 'descr' => 'LABLAN']];
+$FilterIflist = [
+	'lan' => [0 => null, 'if' => 'lablan', 'descr' => 'LABLAN'],
+	'wan' => [0 => null, 'if' => 'labwana', 'ifv6' => 'labwana', 'descr' => 'LABWANA'],
+	'enc0' => [0 => null, 'if' => 'enc0', 'descr' => 'IPSEC'],
+	'openvpn' => [0 => null, 'if' => 'ovpns1', 'descr' => 'OPENVPN'],
+	'opt9' => [0 => null, 'if' => 'wg0', 'descr' => 'WIREGUARD'],
+];
 $vpns_list = false;
 $use_floating_states_for_ipsec = false;
 $rule = config_get_path('filter/rule')[0];
@@ -51,12 +61,25 @@ if ($operation === 'render') {
 	echo json_encode([$first, $second, $third], JSON_THROW_ON_ERROR);
 } elseif ($operation === 'control') {
 	$rule['tracker'] = '49009';
-	if (filter_generate_user_rule($rule) !== lab_stock_user_rule($rule)) {
-		throw new RuntimeException('An unbound gateway-group rule changed.');
-	}
-	$native_guard = config_get_path('filter/rule')[1];
-	if (filter_generate_user_rule($native_guard) !== lab_stock_user_rule($native_guard)) {
-		throw new RuntimeException('The adjacent native deny rule changed.');
+	$default = array_replace($rule, ['gateway' => '', 'destination' => ['any' => ''], 'protocol' => 'udp']);
+	$use_floating_states_for_ipsec = true;
+	$dummynet_name_list = ['ControlPipe' => '7'];
+	$controls = [
+		'gateway group' => [$rule, '$GWG'],
+		'adjacent native deny' => [config_get_path('filter/rule')[1], 'block'],
+		'local or default DNS' => [array_replace($default, ['destination' => ['any' => '', 'port' => '53']]), 'port 53'],
+		'WAN reply-to' => [array_replace($default, ['interface' => 'wan']), 'reply-to'],
+		'policy-based IPsec' => [array_replace($default, ['interface' => 'enc0']), '(floating)'],
+		'OpenVPN' => [array_replace($default, ['interface' => 'openvpn']), '$OPENVPN'],
+		'WireGuard' => [array_replace($default, ['interface' => 'opt9']), '$WIREGUARD'],
+		'floating QoS' => [array_replace($default, ['floating' => 'yes', 'direction' => 'out',
+		    'tagged' => 'test', 'dnpipe' => 'ControlPipe', 'nopfsync' => '']), 'dnpipe'],
+	];
+	foreach ($controls as $feature => [$control, $expected]) {
+		$stock = lab_stock_user_rule($control);
+		if (!str_contains($stock, $expected) || filter_generate_user_rule($control) !== $stock) {
+			throw new RuntimeException("Native {$feature} rule changed or had no expected predicate: {$stock}");
+		}
 	}
 	echo 'unchanged';
 } elseif ($operation === 'rollback') {
