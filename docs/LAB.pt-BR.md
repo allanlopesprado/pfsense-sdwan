@@ -18,10 +18,10 @@ O patch tem como referência o commit público `9363ac5b8651a1c7a333180425ce7719
 
 Para baixar e instalar diretamente pela WebGUI, siga [Como instalar pelo Diagnostics → Command Prompt](../README.md#como-instalar-pelo-diagnostics--command-prompt).
 
-O diretório [dist](../dist/) contém o .pkg de laboratório e seu checksum. Baixe os dois arquivos no mesmo diretório do clone e confira a integridade antes de usar `pkg add`. O exemplo usa a versão 0.4.6.
+O diretório [dist](../dist/) contém o .pkg de laboratório e seu checksum. Baixe os dois arquivos no mesmo diretório do clone e confira a integridade antes de usar `pkg add`. O exemplo usa a versão 0.4.7.
 
 ```sh
-sha256 -c "$(awk '{print $1}' pfSense-pkg-SDWAN-0.4.6.pkg.sha256)" pfSense-pkg-SDWAN-0.4.6.pkg
+sha256 -c "$(awk '{print $1}' pfSense-pkg-SDWAN-0.4.7.pkg.sha256)" pfSense-pkg-SDWAN-0.4.7.pkg
 ```
 
 Para compilar o port, use um builder FreeBSD/pfSense com a árvore de ports, dependências e ABI compatíveis com o appliance alvo. O diretório que contém o Makefile deste projeto é o port. Disponibilize-o como `net/pfSense-pkg-SDWAN` na árvore de trabalho do builder. Dentro desse diretório, execute:
