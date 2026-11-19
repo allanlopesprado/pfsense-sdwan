@@ -4,6 +4,12 @@ define('SDWAN_GUI', true);
 require_once(__DIR__ . '/ui.inc.php');
 
 $snapshot = sdwan_ui_snapshot($sdwan);
+$service_state = sdwan_ui_service_state();
+[$service_class, $service_icon, $service_label] = match ($service_state) {
+	'running' => ['text-success', 'fa-solid fa-check-circle', gettext('Running')],
+	'stopped' => ['text-danger', 'fa-regular fa-circle-stop', gettext('Stopped')],
+	default => ['text-muted', 'fa-regular fa-circle-question', gettext('Not registered')],
+};
 $path_states = [
 	'single' => ['bg-success', gettext('Single path')],
 	'no_eligible' => ['bg-danger', gettext('No eligible path')],
@@ -14,10 +20,19 @@ $can_inspect = isAllowedPage('/sdwan/diagnostics.php');
 $pgtitle = [gettext('Services'), gettext('SD-WAN'), gettext('Status')];
 include('head.inc');
 sdwan_ui_tabs('status');
+?>
+<p class="sdwan-observer-state">
+	<strong><?=gettext('SD-WAN service')?></strong>
+	<span class="<?=$service_class?>"><i class="<?=$service_icon?>" aria-hidden="true"></i> <?=sdwan_ui_escape($service_label)?></span>
+	<?php if (isAllowedPage('/status_services.php')): ?>
+		<a href="/status_services.php"><?=gettext('View in Services')?></a>
+	<?php endif; ?>
+</p>
+<?php
 if (!$sdwan['members']) {
 	print_info_box(gettext('Configure a member and a performance SLA to start monitoring a path.'), 'info', false);
-} elseif ($snapshot === null) {
-	print_info_box(gettext('Waiting for current gateway measurements. Check the observer service and Diagnostics.'), 'warning', false);
+} elseif ($service_state === 'running' && $snapshot === null) {
+	print_info_box(gettext('Waiting for current gateway measurements. Check Diagnostics for details.'), 'warning', false);
 }
 ?>
 <div class="panel panel-default">
@@ -83,6 +98,5 @@ if (!$sdwan['members']) {
 <?php
 sdwan_ui_actions([
 	'/status_gateways.php' => [gettext('Gateways'), 'fa-network-wired'],
-	'/status_services.php' => [gettext('Services'), 'fa-gears'],
 ], true);
 include('foot.inc');

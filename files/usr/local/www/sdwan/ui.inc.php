@@ -8,6 +8,8 @@ if (!defined('SDWAN_GUI')) {
 require_once('/usr/local/pkg/sdwan.inc');
 require_once('/usr/local/pkg/sdwan_engine.inc');
 
+$shortcut_section = 'sdwan';
+
 function sdwan_ui_escape($text): string {
 	return htmlspecialchars((string)$text, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
 }
@@ -45,7 +47,20 @@ function sdwan_ui_choice_value(string $value): string {
 	return str_starts_with($value, ':') ? substr($value, 1) : $value;
 }
 
+function sdwan_ui_service_state(): string {
+	static $state;
+	if ($state === null) {
+		require_once('service-utils.inc');
+		$service = find_service_by_name('sdwan');
+		$state = !$service ? 'unregistered' : (get_service_status($service) ? 'running' : 'stopped');
+	}
+	return $state;
+}
+
 function sdwan_ui_snapshot(array $config): ?array {
+	if (sdwan_ui_service_state() !== 'running') {
+		return null;
+	}
 	$snapshot = sdwan_read_snapshot();
 	if (($snapshot['config_revision'] ?? null) !== sdwan_config_revision($config)) {
 		return null;

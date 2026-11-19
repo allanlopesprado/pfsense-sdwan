@@ -48,7 +48,12 @@ if ($policy !== null):
 			<?php endif; ?>
 		</dl>
 		<?php if ($result === null) {
-			print_info_box(gettext('No current sample for this policy. Verify the observer service and gateway monitoring.'), 'warning', false);
+			$notice = match (sdwan_ui_service_state()) {
+				'stopped' => gettext('The SD-WAN service is stopped.'),
+				'unregistered' => gettext('The SD-WAN service is not registered in Status > Services.'),
+				default => gettext('No current sample for this policy. Check gateway monitoring.'),
+			};
+			print_info_box($notice, 'warning', false);
 		} ?>
 	<div class="table-responsive"><table class="table table-striped table-hover table-condensed sortable-theme-bootstrap" data-sortable>
 		<thead><tr><th scope="col"><?=gettext('Member')?></th><th scope="col"><?=gettext('Gateway state')?></th>
