@@ -139,7 +139,8 @@ $sdwanBodyId = 'sdwan-status-' . $widgetkey;
 ?>
 <style>
 .sdwan-status-widget .table { table-layout: fixed; margin-bottom: 0; }
-.sdwan-status-widget .table th, .sdwan-status-widget .table td { white-space: normal; overflow-wrap: anywhere; }
+.sdwan-status-widget .table-responsive .table th,
+.sdwan-status-widget .table-responsive .table td { white-space: normal; overflow-wrap: anywhere; }
 .sdwan-status-widget .table th a { color: inherit; text-decoration: underline; }
 .sdwan-status-widget .table-responsive { margin-bottom: 0; }
 .sdwan-status-widget .sdwan-widget-state { width: 2em; }
