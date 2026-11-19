@@ -182,23 +182,24 @@ $sdwanBodyId = 'sdwan-status-' . $widgetkey;
 .sdwan-status-widget .table-responsive .table td { white-space: normal; overflow-wrap: anywhere; }
 .sdwan-status-widget .table-responsive { margin-bottom: 0; }
 .sdwan-status-widget a { color: inherit; text-decoration: underline; }
-.sdwan-status-widget .sdwan-widget-icon { width: clamp(24px, 8%, 48px); }
+.sdwan-status-widget .sdwan-widget-icon { width: 8%; }
 .sdwan-status-widget .sdwan-widget-icon i { font-size: 1.13em; }
 .sdwan-status-widget .sdwan-widget-name { font-weight: normal; }
-.sdwan-status-widget .sdwan-widget-latency { width: clamp(66px, 19%, 116px); }
-.sdwan-status-widget .sdwan-widget-loss { width: clamp(48px, 11%, 70px); }
-.sdwan-status-widget .sdwan-widget-state { width: clamp(70px, 14%, 90px); }
+.sdwan-status-widget .sdwan-widget-latency { width: 19%; }
+.sdwan-status-widget .sdwan-widget-loss { width: 11%; }
+.sdwan-status-widget .sdwan-widget-state { width: 14%; }
 .sdwan-status-widget .sdwan-widget-rtt,
 .sdwan-status-widget .sdwan-widget-rttsd,
 .sdwan-status-widget .sdwan-widget-loss { font-variant-numeric: tabular-nums; }
 .sdwan-status-widget .sdwan-widget-address,
 .sdwan-status-widget .sdwan-widget-detail { display: block; }
-@container (max-width: 399px) {
+@container (max-width: 439px) {
 	.sdwan-status-widget .table { font-size: 12px; }
 	.sdwan-status-widget .table > thead > tr > th,
 	.sdwan-status-widget .table > tbody > tr > th,
 	.sdwan-status-widget .table > tbody > tr > td { padding-right: 3px; padding-left: 3px; }
 	.sdwan-status-widget .sdwan-widget-icon { width: 22px; }
+	.sdwan-status-widget .sdwan-widget-address { font-size: .92em; }
 	.sdwan-status-widget .sdwan-widget-latency { width: 19%; }
 	.sdwan-status-widget .sdwan-widget-loss { width: 15%; }
 	.sdwan-status-widget .sdwan-widget-state { width: 18%; }

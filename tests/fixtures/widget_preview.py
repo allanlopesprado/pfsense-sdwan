@@ -158,18 +158,22 @@ def verify_dashboard_layout(core, output, widget, fragment):
                     const readouts=region.querySelectorAll('tbody th, tbody a, tbody td, .sdwan-widget-note, .sdwan-widget-note a');
                     const rows=region.querySelectorAll('tbody tr');
                     const labels=region.querySelectorAll('.sdwan-widget-latency, .sdwan-widget-loss, .sdwan-widget-status, .sdwan-widget-rtt, .sdwan-widget-rttsd');
-                    const wrappedLabels=Array.from(labels).filter(el=>{
+                    function wraps(el) {
                         const range=document.createRange();
                         range.selectNodeContents(el);
                         return range.getClientRects().length !== 1;
-                    }).map(el=>el.textContent.trim());
+                    }
+                    const wrappedLabels=Array.from(labels).filter(wraps).map(el=>el.textContent.trim());
+                    const addresses=Array.from(region.querySelectorAll('tbody .sdwan-widget-address'));
                     return {width:box.width,height:Math.ceil(box.height),viewport:innerWidth,
                             horizontalOverflow:Math.max(...nodes.map(e=>e.scrollWidth-e.clientWidth)),
                             background:getComputedStyle(document.body).backgroundColor,
                             rows:rows.length,
                             statusBackgrounds:Array.from(rows).map(row=>getComputedStyle(row.lastElementChild).backgroundColor),
                             rowBackgrounds:Array.from(rows).map(row=>getComputedStyle(row.firstElementChild).backgroundColor),
-                            addressLines:region.querySelectorAll('tbody .sdwan-widget-address').length,
+                            addresses:addresses.length, wrappedAddresses:addresses.filter(wraps).length,
+                            iconWidth:rows[0].cells[0].getBoundingClientRect().width,
+                            nameWidth:rows[0].cells[1].getBoundingClientRect().width,
                             gatewayStates:Array.from(rows).map(row=>row.lastElementChild.textContent.trim()),
                             latency:Array.from(rows).map(row=>row.querySelector('.sdwan-widget-rtt').textContent.trim()),
                             variation:Array.from(rows).map(row=>row.querySelector('.sdwan-widget-rttsd').textContent.trim()),
@@ -180,7 +184,9 @@ def verify_dashboard_layout(core, output, widget, fragment):
                 data = js(layout_script)
                 assert data["width"] == width and data["viewport"] == width and data["horizontalOverflow"] <= 1, data
                 assert data["rows"] == 3 and data["positiveTabindex"] == 0
-                assert data["gatewayStates"] == ["Warning", "Online", "Down"] and data["addressLines"] == 3, data
+                assert data["gatewayStates"] == ["Warning", "Online", "Down"] and data["addresses"] == 3, data
+                assert data["iconWidth"] <= width * .09 and data["nameWidth"] > data["iconWidth"] * 2, data
+                assert data["wrappedAddresses"] == 0, data
                 assert len(set(data["statusBackgrounds"])) == 3, data
                 assert all(a != b for a, b in zip(data["statusBackgrounds"], data["rowBackgrounds"])), data
                 assert data["latency"] == ["23.450ms", "9.800ms", "—"] and data["timestamps"] == 0 and not data["wrappedLabels"], data
