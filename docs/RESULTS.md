@@ -51,6 +51,16 @@ DHCP renewed the lease, then acquired a different address and gateway after rele
 
 Kea issued two successive /56 prefixes to the same DHCPv6 client. For each lease, the router advertised a /64 and the LAN client reached the destination with an address from that prefix. Egress failed while the first route was withdrawn. The test waited for the old address to expire before verifying delivery with the new prefix. [DHCPv6-PD and LAN renumbering](https://github.com/allanlopesprado/pfsense-sdwan/actions/runs/44518652364/job/135541214456)
 
+## Dashboard, observer, and WAN recovery in 0.4.19
+
+Chromium rejected an HTML sign-in response and hid old readings after 30 seconds without a valid refresh. A valid response restored the readings. The visual tests also checked both native themes and four panel widths. [Browser test](https://github.com/allanlopesprado/pfsense-sdwan/actions/runs/44581476703/job/135762965421)
+
+FreeBSD restarted the test worker after an unexpected exit. A deliberate stop left the service stopped. The WebGUI upgrade routine rejected interrupted and corrupted downloads from a 0.4.18 baseline, then upgraded on retry in an isolated package root. The observer recovered after a failed snapshot replacement. [FreeBSD job](https://github.com/allanlopesprado/pfsense-sdwan/actions/runs/44582106827/job/135766245531) · [Snapshot and WebGUI tests](https://github.com/allanlopesprado/pfsense-sdwan/actions/runs/44582106827/job/135765207125)
+
+A test destination beyond the configured next-hop address stopped responding to TCP while its immediate next hop remained eligible. A dpinger monitor on the farther address detected the outage. Two- and three-link policies recommended the healthy backup, and the application and probe recovered after the outage ended. [FreeBSD upstream test](https://github.com/allanlopesprado/pfsense-sdwan/actions/runs/44582106827/job/135766245531)
+
+OpenVPN and WireGuard transferred 64 KiB of verified data in both directions over a 1280-byte backup WAN with a 1200-byte tunnel MTU. DNS initiated by the VPN node also succeeded over the active WAN. The Linux lab selected the route and recorded outer traffic during failure and recovery. [OpenVPN](https://github.com/allanlopesprado/pfsense-sdwan/actions/runs/44582400239/job/135766221951) · [WireGuard](https://github.com/allanlopesprado/pfsense-sdwan/actions/runs/44582400239/job/135766221473)
+
 ## Appliance acceptance
 
 On CE 2.9.1, upgrading from 0.4.2 to 0.4.3 ran the actual hooks. On-appliance checks verified package integrity, package and service registration, a current sample, and events in the native log reader. SD-WAN configuration and PF and NAT rules matched before and after. [Release 0.4.3](https://github.com/allanlopesprado/pfsense-sdwan/releases/tag/v0.4.3)
