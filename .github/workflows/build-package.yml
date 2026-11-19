@@ -19,7 +19,26 @@ jobs:
         run: |
           php tests/steering_preflight.php
           php tests/steering.php
-          python3 -B tests/widget.py php
+      - uses: actions/checkout@v4
+        with:
+          repository: pfsense/pfsense
+          ref: 9363ac5b8651a1c7a333180425ce7719070f95f9
+          path: pfsense-core-fixture
+          sparse-checkout: |
+            src/usr/local/www/css
+            src/usr/local/www/vendor/bootstrap
+            src/usr/local/www/vendor/font-awesome
+            src/usr/local/www/vendor/jquery
+            src/usr/local/www/vendor/jquery-ui
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - name: Verify the widget in both native themes before packaging
+        run: python3 -B tests/widget.py php --visual-core pfsense-core-fixture --screenshots "$RUNNER_TEMP/sdwan-dashboard"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sdwan-dashboard-build
+          path: ${{ runner.temp }}/sdwan-dashboard/
+          if-no-files-found: error
       - uses: actions/checkout@v4
         with:
           repository: freebsd/pkg
