@@ -1,6 +1,6 @@
 # SD-WAN para pfSense CE
 
-A versão **0.4.12** acompanha gateways e recomenda caminhos na WebGUI do pfSense. O pacote é **experimental** e tem como alvo o **pfSense CE 2.9.1**. O projeto é independente do pfSense e da Netgate.
+A versão **0.4.13** acompanha gateways e recomenda caminhos na WebGUI do pfSense. O pacote é **experimental** e tem como alvo o **pfSense CE 2.9.1**. O projeto é independente do pfSense e da Netgate.
 
 ## Como instalar pelo Diagnostics → Command Prompt
 
@@ -11,10 +11,10 @@ Use um clone de laboratório com acesso administrativo. O próprio firewall baix
 
 <!-- install-command -->
 ```sh
-d=$(mktemp -d /tmp/sdwan.XXXXXXXX) && (trap 'rm -rf "$d"' EXIT; p="$d/pfSense-pkg-SDWAN-0.4.12.pkg"; fetch -o "$p" 'https://raw.githubusercontent.com/allanlopesprado/pfsense-sdwan/56313544fd9aaf8908c4e55ab80d23ee961a21be/dist/pfSense-pkg-SDWAN-0.4.12.pkg' && sha256 -c 2262b70cd60d477f0f3fda955dbb59df97c2f8ae92faffae39bc4344a2d9fba7 "$p" && pkg add "$p")
+d=$(mktemp -d /tmp/sdwan.XXXXXXXX) && (trap 'rm -rf "$d"' EXIT; p="$d/pfSense-pkg-SDWAN-0.4.13.pkg"; fetch -o "$p" 'https://raw.githubusercontent.com/allanlopesprado/pfsense-sdwan/0b563428ac08461f3285ee04eb2935652dbd4db3/dist/pfSense-pkg-SDWAN-0.4.13.pkg' && sha256 -c 76f50190263f249f21f72102ee24c9aa1229be3116abb392b4734e4e51b35e0e "$p" && pkg add "$p")
 ```
 
-3. No registro do pacote, o pfSense inicia o serviço ou reinicia a instância que já está rodando. Confira a versão e o estado do serviço com o comando abaixo. O resultado esperado inclui `pfSense-pkg-SDWAN-0.4.12` e a indicação de que o serviço está em execução.
+3. No registro do pacote, o pfSense inicia o serviço ou reinicia a instância que já está rodando. Confira a versão e o estado do serviço com o comando abaixo. O resultado esperado inclui `pfSense-pkg-SDWAN-0.4.13` e a indicação de que o serviço está em execução.
 
 ```sh
 pkg query '%n-%v' pfSense-pkg-SDWAN && /usr/local/etc/rc.d/sdwand.sh status
@@ -22,7 +22,7 @@ pkg query '%n-%v' pfSense-pkg-SDWAN && /usr/local/etc/rc.d/sdwand.sh status
 
 4. Recarregue a WebGUI e abra **Services → SD-WAN**. Se a saída indicar que o registro foi adiado porque o PHP-FPM estava parado, aguarde a WebGUI voltar e execute `/usr/local/bin/php -f /etc/rc.packages pfSense-pkg-SDWAN POST-INSTALL`. Confira de novo o menu e o serviço.
 
-[Pacote experimental 0.4.12](dist/pfSense-pkg-SDWAN-0.4.12.pkg) · [SHA-256](dist/pfSense-pkg-SDWAN-0.4.12.pkg.sha256) · [Command Prompt na documentação Netgate](https://docs.netgate.com/pfsense/en/latest/diagnostics/command-prompt.html)
+[Pacote experimental 0.4.13](dist/pfSense-pkg-SDWAN-0.4.13.pkg) · [SHA-256](dist/pfSense-pkg-SDWAN-0.4.13.pkg.sha256) · [Command Prompt na documentação Netgate](https://docs.netgate.com/pfsense/en/latest/diagnostics/command-prompt.html)
 
 ## Monitorar gateways e comparar caminhos
 
@@ -74,6 +74,7 @@ test ! -e /usr/local/www/sdwan/status.php && test ! -e /usr/local/www/widgets/wi
 | 0.4.3 | Filtro nativo de logs para perfis delegados, permissões de encaminhamento uniformes e publicação com todas as baterias do Actions. [Notas](docs/releases/v0.4.3.md) |
 | 0.4.4 | Nova tentativa após rejeição da recarga do filtro, suporte de laboratório ao core CE 2.9.1 e testes de tráfego IPv6 com dois caminhos. [Notas](docs/releases/v0.4.4.md) |
 | 0.4.5 | Widget alinhado ao dashboard, validação de Monitor IP e ensaio com dpinger real. [Notas](docs/releases/v0.4.5.md) |
+| 0.4.13 | Controles nativos de serviço na barra do SD-WAN. [Notas](docs/releases/v0.4.13.md) |
 | 0.4.12 | Nome sdwan e atalhos nativos em Status → Services. [Notas](docs/releases/v0.4.12.md) |
 | 0.4.11 | Correção do foco inicial em System Logs. [Notas](docs/releases/v0.4.11.md) |
 | 0.4.10 | Remoção do atalho Installed Packages na aba Updates. [Notas](docs/releases/v0.4.10.md) |
