@@ -1,6 +1,6 @@
 # SD-WAN para pfSense CE
 
-A versão **0.4.5** acompanha gateways e recomenda caminhos na WebGUI do pfSense. O pacote é **experimental** e tem como alvo o **pfSense CE 2.9.1**. O projeto é independente do pfSense e da Netgate.
+A versão **0.4.6** acompanha gateways e recomenda caminhos na WebGUI do pfSense. O pacote é **experimental** e tem como alvo o **pfSense CE 2.9.1**. O projeto é independente do pfSense e da Netgate.
 
 ## Como instalar pelo Diagnostics → Command Prompt
 
@@ -11,10 +11,10 @@ Use um clone de laboratório com acesso administrativo. O próprio firewall baix
 
 <!-- install-command -->
 ```sh
-d=$(mktemp -d /tmp/sdwan.XXXXXXXX) && (trap 'rm -rf "$d"' EXIT; p="$d/pfSense-pkg-SDWAN-0.4.5.pkg"; fetch -o "$p" 'https://raw.githubusercontent.com/allanlopesprado/pfsense-sdwan/6acb228dfd9015630179247a01194f734bb2789c/dist/pfSense-pkg-SDWAN-0.4.5.pkg' && sha256 -c e2a162338ab2505518306ef10d9522900fe5573b544702bf50b0f46fcbafb683 "$p" && pkg add "$p")
+d=$(mktemp -d /tmp/sdwan.XXXXXXXX) && (trap 'rm -rf "$d"' EXIT; p="$d/pfSense-pkg-SDWAN-0.4.6.pkg"; fetch -o "$p" 'https://raw.githubusercontent.com/allanlopesprado/pfsense-sdwan/9a1523d9e89668e6239824b743ae2ac451728a73/dist/pfSense-pkg-SDWAN-0.4.6.pkg' && sha256 -c bd056eccfbc0bab36e0b384f000b439f499bf24a4be7cd4c75d7944c2a57ae3c "$p" && pkg add "$p")
 ```
 
-3. No registro do pacote, o pfSense inicia o serviço ou reinicia a instância que já está rodando. Confira a versão e o estado do serviço com o comando abaixo. O resultado esperado inclui `pfSense-pkg-SDWAN-0.4.5` e a indicação de que o serviço está em execução.
+3. No registro do pacote, o pfSense inicia o serviço ou reinicia a instância que já está rodando. Confira a versão e o estado do serviço com o comando abaixo. O resultado esperado inclui `pfSense-pkg-SDWAN-0.4.6` e a indicação de que o serviço está em execução.
 
 ```sh
 pkg query '%n-%v' pfSense-pkg-SDWAN && /usr/local/etc/rc.d/sdwand.sh status
@@ -22,7 +22,7 @@ pkg query '%n-%v' pfSense-pkg-SDWAN && /usr/local/etc/rc.d/sdwand.sh status
 
 4. Recarregue a WebGUI e abra **Services → SD-WAN**. Se a saída indicar que o registro foi adiado porque o PHP-FPM estava parado, aguarde a WebGUI voltar e execute `/usr/local/bin/php -f /etc/rc.packages pfSense-pkg-SDWAN POST-INSTALL`. Confira de novo o menu e o serviço.
 
-[Pacote experimental 0.4.5](dist/pfSense-pkg-SDWAN-0.4.5.pkg) · [SHA-256](dist/pfSense-pkg-SDWAN-0.4.5.pkg.sha256) · [Command Prompt na documentação Netgate](https://docs.netgate.com/pfsense/en/latest/diagnostics/command-prompt.html)
+[Pacote experimental 0.4.6](dist/pfSense-pkg-SDWAN-0.4.6.pkg) · [SHA-256](dist/pfSense-pkg-SDWAN-0.4.6.pkg.sha256) · [Command Prompt na documentação Netgate](https://docs.netgate.com/pfsense/en/latest/diagnostics/command-prompt.html)
 
 ## Monitorar gateways e comparar caminhos
 
@@ -75,7 +75,8 @@ test ! -e /usr/local/www/sdwan/status.php && test ! -e /usr/local/www/widgets/wi
 |---|---|
 | 0.4.3 | Filtro nativo de logs para perfis delegados, permissões de encaminhamento uniformes e publicação com todas as baterias do Actions. [Notas](docs/releases/v0.4.3.md) |
 | 0.4.4 | Nova tentativa após rejeição da recarga do filtro, suporte de laboratório ao core CE 2.9.1 e testes de tráfego IPv6 com dois caminhos. [Notas](docs/releases/v0.4.4.md) |
-| 0.4.5 | Widget alinhado ao dashboard, validação de Monitor IP e ensaio com dpinger real. [Notas](docs/releases/v0.4.5.md) · [Matriz de validação](docs/VALIDACAO.pt-BR.md) |
+| 0.4.5 | Widget alinhado ao dashboard, validação de Monitor IP e ensaio com dpinger real. [Notas](docs/releases/v0.4.5.md) |
+| 0.4.6 | Matriz de um a três enlaces, verificação de dependências físicas e destino protegido para VTI. [Notas](docs/releases/v0.4.6.md) · [Matriz de validação](docs/VALIDACAO.pt-BR.md) |
 | 0.4.2 | Tabelas, edição, diagnósticos e botões seguindo os componentes nativos do pfSense CE 2.9.1. [Notas](docs/releases/v0.4.2.md) |
 | 0.4.1 | Publicação no GitHub Releases. O serviço mantém a conexão com o syslog para preservar eventos consecutivos durante uma pausa do leitor. |
 | 0.4.0 | Pacote experimental disponibilizado em `main`. Revisão da WebGUI e do widget, eventos SD-WAN no log geral do pfSense e consulta de versão com indicação de maturidade. |
