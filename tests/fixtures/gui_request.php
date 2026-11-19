@@ -103,6 +103,7 @@ if ($request['steering_abi'] ?? false) {
 function csrf_startup() {
 	csrf_conf('auto-session', false);
 	csrf_conf('secret', 'isolated-form-regression-fixture');
+	csrf_conf('rewrite-js', '/csrf/csrf-magic.js');
 	csrf_conf('callback', 'fixture_csrf_failure');
 }
 function fixture_csrf_failure($token) { echo 'CSRF check failed'; }

@@ -154,9 +154,8 @@ def screenshots(directory, www, pages):
                 for mode, page_name in (("startservice", "status-stopped"), ("stopservice", "status"), ("restartservice", "status")):
                     page = pages[page_name]
                     token = Choices(page).tokens[0]
-                    footer = '<script>var csrfMagicToken = ' + json.dumps(token) + ';</script>'
-                    scripts = ("/csrf/csrf-magic.js", *native_scripts, "/js/pfSenseHelpers.js")
-                    footer += "".join(f'<script src="{url}"></script>' for url in scripts)
+                    scripts = (*native_scripts, "/js/pfSenseHelpers.js")
+                    footer = "".join(f'<script src="{url}"></script>' for url in scripts)
                     footer += f'<script>events.push(function () {{ document.getElementById("{mode}-sdwan").click(); }});</script>'
                     filename = f"sdwan/{mode}.html"
                     (site / filename).write_text(page.replace("</body>", footer + "</body>"))
