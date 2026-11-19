@@ -61,11 +61,7 @@ function sdwan_ui_snapshot(array $config): ?array {
 	if (sdwan_ui_service_state() !== 'running') {
 		return null;
 	}
-	$snapshot = sdwan_read_snapshot();
-	if (($snapshot['config_revision'] ?? null) !== sdwan_config_revision($config)) {
-		return null;
-	}
-	return $snapshot;
+	return sdwan_current_snapshot($config, sdwan_gateways());
 }
 
 function sdwan_ui_empty(string $message, int $columns): void {

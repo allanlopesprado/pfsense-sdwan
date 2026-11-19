@@ -243,9 +243,10 @@ function sdwan_read_snapshot(): ?array {
 		return null;
 	}
 	$gateways = $data['gateways'] ?? [];
-	if (array_key_exists('gateways', $data) && (!is_array($data['gateways']) ||
-	    !is_string($data['gateway_inventory_revision'] ?? null) ||
-	    !preg_match('/^[a-f0-9]{64}$/D', $data['gateway_inventory_revision']))) {
+	if ((array_key_exists('gateways', $data) && !is_array($data['gateways'])) ||
+	    ((array_key_exists('gateways', $data) || array_key_exists('gateway_inventory_revision', $data)) &&
+	    (!is_string($data['gateway_inventory_revision'] ?? null) ||
+	    !preg_match('/^[a-f0-9]{64}$/D', $data['gateway_inventory_revision'])))) {
 		return null;
 	}
 	foreach (array_merge(array_values($data['members']), array_values($gateways)) as $sample) {
@@ -295,4 +296,14 @@ function sdwan_read_snapshot(): ?array {
 		}
 	}
 	return $data;
+}
+
+/* The configuration may have changed in System > Routing since the last poll. */
+function sdwan_current_snapshot(array $config, array $inventory): ?array {
+	$snapshot = sdwan_read_snapshot();
+	if (($snapshot['config_revision'] ?? null) !== sdwan_config_revision($config) ||
+	    ($snapshot['gateway_inventory_revision'] ?? null) !== sdwan_gateway_inventory_revision($config, $inventory)) {
+		return null;
+	}
+	return $snapshot;
 }

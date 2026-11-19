@@ -139,8 +139,17 @@ function sdwan_gateways(): array {
 		$ip = explode('%', $address, 2)[0];
 		$family = filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6) ? 'inet6' :
 		    (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) ? 'inet' : ($gateway['ipprotocol'] ?? 'inet'));
+		$probe = [];
+		foreach (['latencyhigh', 'latencylow', 'losshigh', 'losslow', 'interval', 'loss_interval',
+		    'time_period', 'alert_interval', 'data_payload'] as $setting) {
+			if (is_numeric($gateway[$setting] ?? null)) {
+				$probe[$setting] = (float)$gateway[$setting];
+			}
+		}
 		$inventory[$name] = [
 			'interface' => $interface,
+			'device' => $device,
+			'probe' => $probe,
 			'transport' => str_starts_with($device, 'ipsec') ? ($transports[$device] ?? '') : $interface,
 			'address' => $address,
 			'monitor' => !empty($gateway['monitor']) ? $gateway['monitor'] : $address,
@@ -152,6 +161,16 @@ function sdwan_gateways(): array {
 	}
 	ksort($inventory, SORT_STRING);
 	return $inventory;
+}
+
+/* Only changes that affect a monitored gateway invalidate its snapshot. */
+function sdwan_gateway_inventory_revision(array $config, array $inventory): string {
+	$members = array_column($config['members'], 'gateway');
+	$monitored = $members ? array_intersect_key($inventory, array_fill_keys($members, true)) : $inventory;
+	return sdwan_config_revision([
+		'gateways' => $monitored,
+		'monitor_routes_disabled' => config_get_path('system/dpinger_dont_add_static_routes') !== null,
+	]);
 }
 
 function sdwan_valid_name($value): bool {

@@ -74,9 +74,13 @@ verify(sdwan_steering_gateway_for_rule($raw, $rule) === null, 'missing or stale 
 $sample = ['status' => 'online', 'substatus' => 'none', 'delay' => '12ms', 'stddev' => '1ms', 'loss' => '0%'];
 $snapshot = sdwan_evaluate($config, ['A' => $sample, 'B' => $sample], time(), sdwan_gateways());
 $snapshot['config_revision'] = sdwan_config_revision($config);
+$snapshot['gateway_inventory_revision'] = sdwan_gateway_inventory_revision($config, sdwan_gateways());
 $snapshot['steering'] = sdwan_steering_observations($config, $snapshot, []);
 file_put_contents(SDWAN_SNAPSHOT_PATH, json_encode($snapshot));
 verify(sdwan_steering_gateway_for_rule($raw, $rule) === 'A', 'fresh matching snapshot returns only the selected native gateway');
+$current['gateways/gateway_item'][0]['interval'] = '1000';
+verify(sdwan_steering_gateway_for_rule($raw, $rule) === null, 'a change to probing parameters requires a current observation');
+unset($current['gateways/gateway_item'][0]['interval']);
 $current['gateways/gateway_item'][] = ['name' => 'other', 'interface' => 'opt1', 'gateway' => '192.0.2.1'];
 verify(sdwan_steering_gateway_for_rule($raw, $rule) === null &&
     sdwan_steering_observations($config, $snapshot, [])['G']['gateway'] === null,

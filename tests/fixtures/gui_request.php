@@ -121,7 +121,11 @@ $_POST = $request['post'] ?? [];
 $_SERVER['REQUEST_URI'] = '/sdwan/' . $page . '.php';
 $_SERVER['REQUEST_METHOD'] = $_POST ? 'POST' : 'GET';
 if (isset($request['snapshot'])) {
-	$snapshot = $request['snapshot'] + ['generated_at' => time(), 'config_revision' => sdwan_config_revision($config)];
+	$snapshot = $request['snapshot'] + [
+		'generated_at' => time(),
+		'config_revision' => sdwan_config_revision($config),
+		'gateway_inventory_revision' => sdwan_gateway_inventory_revision($config, sdwan_gateways()),
+	];
 	file_put_contents($web . '/observer.json', json_encode($snapshot));
 }
 if ($_POST) {

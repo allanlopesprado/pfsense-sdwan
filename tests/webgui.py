@@ -298,7 +298,11 @@ def run(php, classes, screenshot_dir=None):
         assert "No eligible path" in unavailable and 'class="bg-danger"' in unavailable
         stale = request("status", snapshot={**snapshot, "generated_at": 1})
         assert "Waiting for current gateway measurements" in stale and "2 of 2" not in stale
-        print("ok - native CSRF verifies form posts; status checks permissions, path diversity and sample freshness")
+        retargeted = {**snapshot, "gateway_inventory_revision": "0" * 64}
+        fresh_snapshot_wrong_gateway = request("status", snapshot=retargeted)
+        assert "Waiting for current gateway measurements" in fresh_snapshot_wrong_gateway and "2 of 2" not in fresh_snapshot_wrong_gateway
+        assert 'aria-label="Member evaluation"' not in request("diagnostics", snapshot=retargeted)
+        print("ok - native CSRF verifies posts; Status and Diagnostics suppress outdated observations")
         assert "Multiple eligible paths" in fresh and 'class="bg-success"' in fresh
         assert 'id="restartservice-sdwan"' in fresh and 'id="stopservice-sdwan"' in fresh and 'id="startservice-sdwan"' not in fresh
         stopped = request("status", snapshot=snapshot, service_state="stopped")

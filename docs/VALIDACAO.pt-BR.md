@@ -26,6 +26,8 @@ A coluna **RTTsd** exibe o desvio padrão do RTT que o dpinger mede. O SLA do pa
 
 ## Matriz de impacto no pfSense
 
+A [matriz de configurações nativas](CONFIGURACOES.pt-BR.md) relaciona os controles da WebGUI, o efeito esperado e o tipo de evidência disponível.
+
 | Área | Verificação automatizada e limite |
 |---|---|
 | WAN IPv4 e IPv6 | O observador lê três processos dpinger reais enquanto alterna todas as oito combinações de perda total. Políticas simultâneas de um, dois e três links confirmam caminhos elegíveis e recuperação. Um link permite observação. O gerador nativo e o PF da VM exercitam encaminhamento com dois e três links. O IPv6 inclui gateway link-local. |

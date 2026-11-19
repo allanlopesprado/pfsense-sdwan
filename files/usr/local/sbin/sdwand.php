@@ -32,7 +32,6 @@ function sdwan_sample_socket(array $process, string $name): ?array {
 
 function sdwan_gateway_observations(array $names, array $inventory): array {
 	$processes = running_dpinger_processes();
-	$settings = array_column(config_get_path('gateways/gateway_item', []), null, 'name');
 	$defaults = return_dpinger_defaults();
 	$observations = [];
 	foreach (array_unique($names) as $name) {
@@ -53,13 +52,7 @@ function sdwan_gateway_observations(array $names, array $inventory): array {
 			continue;
 		}
 		[$rtt, $variation, $loss] = $values;
-		$limits = $defaults;
-		foreach (['latencyhigh', 'latencylow', 'losshigh', 'losslow'] as $limit) {
-			$value = $settings[$name][$limit] ?? null;
-			if (is_numeric($value)) {
-				$limits[$limit] = (float)$value;
-			}
-		}
+		$limits = $gateway['probe'] + $defaults;
 		$substatus = match (true) {
 			$rtt > $limits['latencyhigh'] => 'highdelay',
 			$loss > $limits['losshigh'] => 'highloss',
@@ -68,7 +61,7 @@ function sdwan_gateway_observations(array $names, array $inventory): array {
 			default => 'none'
 		};
 		$alarm_down = in_array($substatus, ['highdelay', 'highloss'], true) &&
-		    !isset($settings[$name]['action_disable']);
+		    !$gateway['action_disabled'];
 		$observations[$name] = [
 			'status' => $alarm_down ? 'down' : 'online', 'substatus' => $substatus,
 			'delay' => number_format($rtt, 3, '.', '') . 'ms',
@@ -99,10 +92,10 @@ function sdwan_observe_once(): void {
 		$observations = sdwan_gateway_observations($members ?: array_keys($inventory), $inventory);
 		$snapshot = sdwan_evaluate($config, $observations, $started, $inventory);
 		$snapshot['config_revision'] = sdwan_config_revision($config);
+		$snapshot['gateway_inventory_revision'] = sdwan_gateway_inventory_revision($config, $inventory);
 		if (!$members) {
 			// Show native gateways on the dashboard before any members are configured.
 			$snapshot['gateways'] = array_map('sdwan_member_sample', $observations);
-			$snapshot['gateway_inventory_revision'] = sdwan_config_revision($inventory);
 		}
 		$receipt = SDWAN_SNAPSHOT_PATH . '.forwarded';
 		$reload = false;
@@ -111,7 +104,7 @@ function sdwan_observe_once(): void {
 		if (config_get_path('gateways/sdwan_bindings/item', []) || is_file($receipt)) {
 			require_once('/usr/local/pkg/sdwan_steering.inc');
 			if (sdwan_steering_supported()) {
-				$prior = sdwan_read_snapshot();
+				$prior = sdwan_current_snapshot($config, $inventory);
 				try {
 					$snapshot['steering'] = sdwan_steering_observations($config, $snapshot, $prior['steering'] ?? []);
 				} catch (UnexpectedValueException $e) {

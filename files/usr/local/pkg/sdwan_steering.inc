@@ -35,7 +35,7 @@ function sdwan_steering_request_reload(): bool {
 	}
 }
 
-function sdwan_steering_native(): array {
+function sdwan_steering_native(?array $inventory = null): array {
 	$paths = [
 		'groups' => 'gateways/gateway_group', 'rules' => 'filter/rule',
 		'phase1' => 'ipsec/phase1', 'phase2' => 'ipsec/phase2', 'vips' => 'virtualip/vip',
@@ -47,7 +47,7 @@ function sdwan_steering_native(): array {
 		$native[$key] = config_get_path($path, []);
 	}
 	$native['links'] = sdwan_preflight_link_graph($native['interfaces']);
-	$native['gateways'] = sdwan_gateways();
+	$native['gateways'] = $inventory ?? sdwan_gateways();
 	foreach ($native['gateways'] as &$gateway) {
 		if (!$gateway['monitor_disabled'] && $gateway['monitor'] === 'dynamic') {
 			$gateway['resolved_monitor'] = sdwan_gateway_monitor($gateway);
@@ -281,12 +281,12 @@ function sdwan_steering_gateway_for_rule(array $raw, array $rule): ?string {
 		return null;
 	}
 	$config = sdwan_get_config();
-	$snapshot = sdwan_read_snapshot();
-	if (($snapshot['config_revision'] ?? null) !== sdwan_config_revision($config) ||
-	    $binding['policy_revision'] !== sdwan_steering_policy_revision($config, $binding['policy'])) {
+	$inventory = sdwan_gateways();
+	$snapshot = sdwan_current_snapshot($config, $inventory);
+	if ($snapshot === null || $binding['policy_revision'] !== sdwan_steering_policy_revision($config, $binding['policy'])) {
 		return null;
 	}
-	$preflight = sdwan_steering_preflight($config, $binding['policy'], $binding['group'], sdwan_steering_native());
+	$preflight = sdwan_steering_preflight($config, $binding['policy'], $binding['group'], sdwan_steering_native($inventory));
 	if ($preflight['errors'] || $preflight['binding']['rules_revision'] !== $binding['rules_revision'] ||
 	    $preflight['binding']['gateways'] !== $binding['gateways'] ||
 	    $preflight['binding']['trackers'] !== $binding['trackers']) {

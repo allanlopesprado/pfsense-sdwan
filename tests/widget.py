@@ -95,6 +95,7 @@ echo json_encode([http_response_code() ?: 200, $body, $sdwan_title_link,
 
     snapshot = {
         "generated_at": int(time.time()), "config_revision": revision, "members": samples,
+        "gateway_inventory_revision": package_value("sdwan_gateway_inventory_revision(sdwan_get_config(), sdwan_gateways())"),
         "policies": {"Voice": policy("a", "Eligible", "Eligible"),
                      "BranchVPN": policy("b", "High RTT", "Eligible"),
                      "Backups": policy(None, "High RTT", "Packet loss")},
@@ -127,6 +128,11 @@ echo json_encode([http_response_code() ?: 200, $body, $sdwan_title_link,
         assert "23.450ms" not in stale and "Preferred:" not in stale and "No eligible path:" not in stale
 
     runtime.write_text(json.dumps(snapshot))
+    fixture["gateways/gateway_item"][0]["monitor"] = "192.0.2.55"
+    config.write_text(json.dumps(fixture))
+    retargeted = render("ajax")[1]
+    assert "23.450ms" not in retargeted and "Preferred:" not in retargeted
+    fixture["gateways/gateway_item"][0].pop("monitor")
     fixture["gateways/gateway_item"][0]["monitor_disable"] = ""
     fixture["gateways/gateway_item"][1]["force_down"] = ""
     del fixture["interfaces"]["opt3"]
@@ -141,7 +147,7 @@ echo json_encode([http_response_code() ?: 200, $body, $sdwan_title_link,
     config.write_text(json.dumps(fixture))
     native = {"generated_at": int(time.time()), "members": [], "policies": [],
               "config_revision": package_value("sdwan_config_revision(sdwan_get_config())"),
-              "gateway_inventory_revision": package_value("sdwan_config_revision(sdwan_gateways())"),
+              "gateway_inventory_revision": package_value("sdwan_gateway_inventory_revision(sdwan_get_config(), sdwan_gateways())"),
               "gateways": {"GW_A": samples["a"], "GW_B": samples["b"]}}
     runtime.write_text(json.dumps(native))
     native_dashboard = render("ajax")[1]

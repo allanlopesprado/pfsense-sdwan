@@ -42,18 +42,14 @@ $sdwanRender = static function (): void {
 		$notice(gettext('No available gateways.'));
 		return;
 	}
-	$snapshot = sdwan_read_snapshot();
-	if (($snapshot['config_revision'] ?? null) !== sdwan_config_revision($config)) {
-		$snapshot = null;
-	}
+	$snapshot = sdwan_current_snapshot($config, $inventory);
 	if ($members) {
 		$samples = [];
 		foreach ($members as $member => $gateway) {
 			$samples[$gateway] = $snapshot['members'][$member] ?? [];
 		}
 	} else {
-		$samples = ($snapshot['gateway_inventory_revision'] ?? null) === sdwan_config_revision($inventory) ?
-		    $snapshot['gateways'] ?? [] : [];
+		$samples = $snapshot['gateways'] ?? [];
 	}
 
 	$preferred = [];

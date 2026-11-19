@@ -183,7 +183,7 @@ def run(binary, require_unix):
         assert first["policies"]["calls"]["selected"] == "a"
         assert first["members"]["a"]["rtt_ms"] == 20
         assert first["members"]["b"]["rttsd_ms"] == 2
-        assert len(first["config_revision"]) == 64
+        assert len(first["config_revision"]) == len(first["gateway_inventory_revision"]) == 64
         assert json.loads(php(binary, "-r", read)) == first
         print("ok - --once publishes fresh decisions from two Unix sockets")
 
@@ -198,6 +198,33 @@ def run(binary, require_unix):
         assert list(sandbox.glob(".sdwan-*")) == []
         assert config_path.read_bytes() == original_config
         print("ok - degradation changes recommendation and atomically replaces the snapshot")
+
+        current = ("require 'sdwan.inc'; require 'sdwan_engine.inc'; "
+                   "echo json_encode(sdwan_current_snapshot(sdwan_get_config(), sdwan_gateways()));")
+        def current_snapshot():
+            return json.loads(php(binary, "-d", f"include_path={sandbox}", "-r", current))
+
+        assert current_snapshot() == second
+        primary, secondary = baseline["gateways/gateway_item"]
+        changed_gateways = [
+            {"name": "Renamed"}, {"disabled": ""}, {"monitor_disable": ""}, {"action_disable": ""},
+            {"force_down": ""}, {"monitor": "192.0.2.55"}, {"gateway": "dynamic"},
+            {"gateway": "2001:db8::1"}, {"latencyhigh": "400"}, {"time_period": "75000"},
+        ]
+        edits = [{"gateways/gateway_item": [primary | fields, secondary]} for fields in changed_gateways]
+        edits.extend([
+            {"gateways/gateway_item": [secondary]},
+            {"interfaces": {key: value for key, value in baseline["interfaces"].items() if key != primary["interface"]}},
+            {"interfaces": baseline["interfaces"] | {primary["interface"]: {"enable": "", "if": "new_device"}}},
+            {"system/dpinger_dont_add_static_routes": ""},
+        ])
+        for edit in edits:
+            config_path.write_text(json.dumps(baseline | edit))
+            assert current_snapshot() is None, edit
+        unrelated = dict(baseline["gateways/gateway_item"][0], name="Unrelated", monitor="192.0.2.123")
+        config_path.write_text(json.dumps(baseline | {"gateways/gateway_item": baseline["gateways/gateway_item"] + [unrelated]}))
+        assert current_snapshot() == second
+        print("ok - native monitoring changes invalidate pending results; unrelated gateways do not")
 
         for case, expected_status in [("missing interface", "unknown"),
                                       ("changed monitor address", "unknown"),
