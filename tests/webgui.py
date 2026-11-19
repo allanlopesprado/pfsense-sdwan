@@ -300,18 +300,20 @@ def run(php, classes, screenshot_dir=None):
         assert "Waiting for current gateway measurements" in stale and "2 of 2" not in stale
         print("ok - native CSRF verifies form posts; status checks permissions, path diversity and sample freshness")
         assert "Multiple eligible paths" in fresh and 'class="bg-success"' in fresh
-        assert "SD-WAN service" in fresh and "Running" in fresh and "/status_services.php" in Choices(fresh).links
         assert 'id="restartservice-sdwan"' in fresh and 'id="stopservice-sdwan"' in fresh and 'id="startservice-sdwan"' not in fresh
         stopped = request("status", snapshot=snapshot, service_state="stopped")
-        assert "> Stopped" in stopped and 'id="startservice-sdwan"' in stopped and 'id="stopservice-sdwan"' not in stopped
+        assert 'id="startservice-sdwan"' in stopped and 'id="stopservice-sdwan"' not in stopped
         assert "Multiple eligible paths" not in stopped and "Waiting for current gateway measurements" not in stopped
         missing = request("status", snapshot=snapshot, service_state="unregistered")
-        assert "Not registered" in missing and 'service-sdwan"' not in missing and "Multiple eligible paths" not in missing
+        assert 'service-sdwan"' not in missing and "Multiple eligible paths" not in missing
         read_only = request("status", snapshot=snapshot, privileges={"/status_services.php": False})
-        assert "/status_services.php" not in Choices(read_only).links and 'service-sdwan"' not in read_only and "Running" in read_only
+        assert 'service-sdwan"' not in read_only and "Multiple eligible paths" in read_only
+        for status in (fresh, stopped, missing, read_only):
+            assert "sdwan-observer-state" not in status and "View in Services" not in status
+            assert "/status_services.php" not in Choices(status).links
         past = request("diagnostics", snapshot=snapshot, service_state="stopped")
         assert "The SD-WAN service is stopped." in past and 'aria-label="Member evaluation"' not in past
-        print("ok - native service state distinguishes running, stopped, unregistered and read-only access")
+        print("ok - Status omits the service banner and keeps the native toolbar and sample checks")
         assert 'data-sortable' in fresh and "RTTsd" in fresh and 'class="action-buttons"' in fresh
         event_form = next((form for form in Choices(fresh).forms if form[0].get("action") == "/status_logs.php"), None)
         assert event_form is not None
