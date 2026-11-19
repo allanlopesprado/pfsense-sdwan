@@ -45,14 +45,14 @@ if ($policy !== null):
 ?>
 <div class="panel panel-default">
 	<div class="panel-heading"><h2 class="panel-title"><?=gettext('Results')?></h2></div>
-	<div class="panel-body">
+	<div class="container-fluid">
 		<div class="row">
 			<div class="col-sm-5">
 				<p><strong><?=gettext('Recommended member')?></strong><br>
 				<?php if ($selected !== null): ?>
 					<?=sdwan_ui_escape($selected)?><br><small><?=sdwan_ui_escape($result['reason'])?></small>
 				<?php else: ?>
-					<?= $result === null ? gettext('Awaiting evaluation') : gettext('No eligible member') ?>
+					<?=$result === null ? gettext('Awaiting evaluation') : gettext('No eligible member')?>
 				<?php endif; ?></p>
 			</div>
 			<div class="col-sm-5">
@@ -120,7 +120,7 @@ if ($policy !== null):
 					?>
 					<td class="text-right text-nowrap<?=$over_limit ? ' bg-warning' : ''?>" data-value="<?=sdwan_ui_escape($value)?>">
 						<?php if ($over_limit): ?>
-							<i class="fa-solid fa-triangle-exclamation" title="<?=gettext('Above the SLA limit')?>" aria-hidden="true"></i>
+							<i class="fa-solid fa-triangle-exclamation" title="<?=sdwan_ui_escape(gettext('Above the SLA limit'))?>" aria-hidden="true"></i>
 							<span class="sr-only"><?=gettext('Above the SLA limit')?></span>
 						<?php endif; ?>
 						<?=sdwan_ui_metric($value, $unit)?>
