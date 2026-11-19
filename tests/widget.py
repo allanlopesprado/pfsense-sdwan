@@ -100,10 +100,10 @@ echo json_encode([http_response_code() ?: 200, $body, $sdwan_title_link,
     runtime.write_text(json.dumps(snapshot))
     status, body, _, _ = render("ajax")
     assert status == 200 and "<script>" not in body
-    for label in ("GW_A", "GW_B", "GW_C", "23.45 ms", "9.8 ms", "2%", "0%", "100%",
+    for label in ("GW_A", "GW_B", "GW_C", "RTT (ms)", ">23.45<", ">9.8<", "2%", "0%", "100%",
                   "Warning", "Online", "Down", "Preferred:", "No eligible path:"):
         assert label in body, label
-    assert ">0 ms<" not in body
+    assert ">0</td>" not in body
     assert 'class="table table-striped table-hover table-condensed"' in body and 'scope="row"' in body
     assert all(label not in body for label in ("<time", "Last sample", "Requested gateway",
                                                "PrivateForwardingGroup", "PrivateGateway", "Forwarding requests"))
@@ -117,7 +117,7 @@ echo json_encode([http_response_code() ?: 200, $body, $sdwan_title_link,
         runtime.write_text(json.dumps(changed))
         stale = render("ajax")[1]
         assert stale.count("No data") == 3
-        assert "23.45 ms" not in stale and "Preferred:" not in stale and "No eligible path:" not in stale
+        assert ">23.45<" not in stale and "Preferred:" not in stale and "No eligible path:" not in stale
 
     runtime.write_text(json.dumps(snapshot))
     fixture["gateways/gateway_item"][0]["monitor_disable"] = ""
@@ -125,8 +125,8 @@ echo json_encode([http_response_code() ?: 200, $body, $sdwan_title_link,
     del fixture["interfaces"]["opt3"]
     config.write_text(json.dumps(fixture))
     unavailable = render("ajax")[1]
-    assert "Unmonitored" in unavailable and unavailable.count("> Down</td>") == 2
-    assert all(label not in unavailable for label in ("23.45 ms", "9.8 ms", "100%", "Preferred:"))
+    assert "Unmonitored" in unavailable and unavailable.count(">Down</span>") == 2
+    assert all(label not in unavailable for label in (">23.45<", ">9.8<", "100%", "Preferred:"))
 
     fixture["gateways/gateway_item"][0].pop("monitor_disable")
     fixture["gateways/gateway_item"][1].pop("force_down")
@@ -138,11 +138,11 @@ echo json_encode([http_response_code() ?: 200, $body, $sdwan_title_link,
               "gateways": {"GW_A": samples["a"], "GW_B": samples["b"]}}
     runtime.write_text(json.dumps(native))
     native_dashboard = render("ajax")[1]
-    assert "GW_A" in native_dashboard and "GW_B" in native_dashboard and "23.45 ms" in native_dashboard
+    assert "GW_A" in native_dashboard and "GW_B" in native_dashboard and ">23.45<" in native_dashboard
     assert "GW_C" not in native_dashboard and "Preferred:" not in native_dashboard
     assert "<time" not in native_dashboard
     runtime.write_text(json.dumps(dict(native, gateways={"GW_A": dict(samples["a"], loss_pct=800)})))
-    assert "23.45 ms" not in render("ajax")[1]
+    assert ">23.45<" not in render("ajax")[1]
     fixture["gateways/gateway_item"][0]["monitor"] = "192.0.2.2"
     config.write_text(json.dumps(fixture))
     runtime.write_text(json.dumps(native))

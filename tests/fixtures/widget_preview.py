@@ -130,7 +130,7 @@ def verify_dashboard_layout(core, output, widget, fragment):
                     document.querySelector('.sdwan-widget-rtt').textContent='pending-test';
                     $.post(w.url,w.parms).done(html=>{
                         w.callback(html);
-                        done(document.querySelector('.sdwan-widget-rtt').textContent==='23.45 ms');
+                        done(document.querySelector('.sdwan-widget-rtt').textContent==='23.45');
                     }).fail(()=>done(false));
                 """})
                 assert updated and js("return document.activeElement.getAttribute('href')") == expected[-1]
@@ -172,7 +172,7 @@ def verify_dashboard_layout(core, output, widget, fragment):
                 assert data["width"] == width and data["viewport"] == width and data["horizontalOverflow"] <= 1, data
                 assert data["rows"] == 3 and data["positiveTabindex"] == 0
                 assert data["neutralStatusCells"] and data["gatewayStates"] == ["Warning", "Online", "Down"]
-                assert data["latency"] == ["23.45 ms", "9.8 ms", "—"] and data["timestamps"] == 0
+                assert data["latency"] == ["23.45", "9.8", "—"] and data["timestamps"] == 0
                 assert data["minimumReadoutContrast"] >= 4.5, data
                 expected_bg = "rgb(245, 245, 245)" if theme == "light" else "rgb(33, 33, 33)"
                 assert data["background"] == expected_bg, data

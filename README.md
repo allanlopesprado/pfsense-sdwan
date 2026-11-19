@@ -39,9 +39,7 @@ O serviço lê os sockets do monitor de gateways do pfSense. Uma amostra ausente
 
 ## Exibir o widget
 
-Em **Status → Dashboard**, clique em **+** e selecione **SD-WAN**. Para cada política, o widget mostra quantos membros atendem ao SLA, o membro recomendado e a hora da amostra. Quem tem acesso à página **Forwarding** também vê o gateway solicitado para cada grupo vinculado. O título abre a página **Status** do pacote. Para retirar o widget do painel, clique no **×**.
-
-O widget segue a tabela de **Gateways** do Dashboard. A coluna de estado usa as cores do tema ativo da WebGUI.
+Em **Status → Dashboard**, clique em **+** e selecione **SD-WAN**. O widget mostra RTT, perda e estado por gateway. Quando há membros SD-WAN, a tabela mostra os gateways desses membros e indica as políticas que os recomendam. Na configuração inicial, a tabela mostra os gateways nativos do firewall. O título abre **Status** do pacote. Para retirar o widget, clique no **×**.
 
 ## Consultar eventos no log do pfSense
 
