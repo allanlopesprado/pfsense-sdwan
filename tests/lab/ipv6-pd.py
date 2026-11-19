@@ -55,26 +55,30 @@ def exercise(work, stack):
         Path(path).mkdir(exist_ok=True)
     for index, subnet in enumerate(POOLS):
         prefix = ip_network(subnet)
-        # Use the standard service locations allowed by the Ubuntu profiles.
-        # All files belonging to the isolated example use a unique basename.
+        # Match the installed profiles without sharing the host's service files.
         lease = Path(f"/var/lib/dhcp/dhclient6.{token}-{index}.leases")
-        conf = Path(f"/etc/kea/kea-dhcp6-{token}-{index}.conf")
-        state = Path(f"/var/lib/kea/kea-leases6.{token}-{index}.csv")
         pid = Path(f"/run/dhclient6.{token}.pid")
-        kea_pid = Path(f"/run/kea/{conf.stem}.kea-dhcp6.pid")
-        for artifact in (lease, lease.with_name(lease.name + "~"), conf, state, kea_pid, pid):
+        for artifact in (lease, lease.with_name(lease.name + "~"), pid):
             stack.callback(artifact.unlink, missing_ok=True)
+        conf = work / f"kea-{index}.json"
+        runtime = work / f"kea-{index}-run"
+        data = work / f"kea-{index}-data"
+        runtime.mkdir()
+        data.mkdir()
         if duid:
             lease.write_text(duid + "\n")
         conf.write_text(json.dumps({"Dhcp6": {
             "interfaces-config": {"interfaces": ["wan0"]},
-            "lease-database": {"type": "memfile", "persist": False, "name": str(state)},
+            "lease-database": {"type": "memfile", "persist": False},
             "renew-timer": 60, "rebind-timer": 90, "preferred-lifetime": 120, "valid-lifetime": 180,
             "subnet6": [{"id": 1, "interface": "wan0", "subnet": WAN + "/64",
                          "pd-pools": [{"prefix": str(prefix.network_address),
                                        "prefix-len": prefix.prefixlen, "delegated-len": prefix.prefixlen}]}],
         }}))
-        kea = launch(stack, work, upstream, f"kea-{index}", "kea-dhcp6", "-c", str(conf))
+        private = ('mount --bind "$1" /etc/kea/kea-dhcp6.conf && mount --bind "$2" /run/kea && '
+                   'mount --bind "$3" /var/lib/kea && exec kea-dhcp6 -c /etc/kea/kea-dhcp6.conf')
+        kea = launch(stack, work, upstream, f"kea-{index}", "unshare", "--mount", "--propagation", "private",
+                     "sh", "-ec", private, "kea-lab", str(conf), str(runtime), str(data))
         request = ["dhclient", "-6", "-P", "-v", "-lf", str(lease), "-pf", str(pid), "-sf", "/bin/true"]
         agent = launch(stack, work, router, f"dhclient-{index}", *request, "-d", "wan0")
 
