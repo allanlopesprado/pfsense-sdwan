@@ -258,7 +258,7 @@ class Peer:
         output = self.control("--list-sas", "--ike", f"path-{p.name}", "--child", f"data-{p.name}")
         ike = re.search(rf"^path-{p.name}: #\d+, ESTABLISHED, IKEv2, ([0-9a-f]+)_i\*? ([0-9a-f]+)_r", output, re.M)
         child = re.findall(rf"^\s*data-{p.name}: #\d+, reqid {p.reqid}, INSTALLED, TUNNEL, ESP:AES_GCM_16-128", output, re.M)
-        directions = re.findall(r"^\s*(in|out)\s+([0-9a-f]+),\s+(\d+) bytes,", output, re.M)
+        directions = re.findall(r"^[ \t]*(in|out)[ \t]+([0-9a-f]+)(?: \([^)]+\))?,[ \t]+(\d+) bytes,", output, re.M)
         if not ike or len(child) != 1 or len(directions) != 2:
             return None
         data = {"ike": ike.groups()}
