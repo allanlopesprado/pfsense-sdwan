@@ -1,6 +1,6 @@
 # Homologação em pfSense CE 2.9.1
 
-A versão experimental 0.4.2 inclui o observador e a integração experimental de encaminhamento. Registre a revisão do pacote e a do core separadamente. Em um clone com o core padrão, valide o observador e o encaminhamento nativo. Para testar o efeito da escolha de caminhos use uma imagem de laboratório que incorpore a integração de core. [Integração com IPsec, CARP, NAT, estados e rotas](INTEGRACAO.pt-BR.md)
+A versão experimental 0.4.3 inclui o observador e a integração experimental de encaminhamento. Registre a revisão do pacote e a do core separadamente. Em um clone com o core padrão, valide o observador e o encaminhamento nativo. Para testar o efeito da escolha de caminhos use uma imagem de laboratório que incorpore a integração de core. [Integração com IPsec, CARP, NAT, estados e rotas](INTEGRACAO.pt-BR.md)
 
 ## Topologia e evidência
 
@@ -21,8 +21,8 @@ Para baixar e instalar diretamente pela WebGUI, siga [Como instalar pelo Diagnos
 O diretório [dist](../dist/) contém o .pkg de laboratório e seu checksum. Para usar o artefato já construído, baixe os dois arquivos no mesmo diretório do clone e confira a integridade com o comando abaixo. Compare a saída com o hash publicado antes de usar `pkg add`.
 
 ```sh
-sha256 -q pfSense-pkg-SDWAN-0.4.2.pkg
-cat pfSense-pkg-SDWAN-0.4.2.pkg.sha256
+sha256 -q pfSense-pkg-SDWAN-0.4.3.pkg
+cat pfSense-pkg-SDWAN-0.4.3.pkg.sha256
 ```
 
 Para compilar o port, use um builder FreeBSD/pfSense com a árvore de ports, dependências e ABI compatíveis com o appliance alvo. O diretório que contém o Makefile deste projeto é o port. Disponibilize-o como `net/pfSense-pkg-SDWAN` na árvore de trabalho do builder. Dentro desse diretório, execute:
@@ -43,7 +43,7 @@ O arquivo de pré-lançamento também pode ser reproduzido com Python 3.9+, a fe
 fakeroot python3 tools/build-lab-pkg.py --output ./dist
 ```
 
-Depois de produzir o pacote e seu arquivo `.sha256`, gere o índice consultado pela aba **Updates**. A versão 0.4.2 usa o canal `main` e a maturidade `experimental`. A versão 0.3.0 continua consultando o índice próprio de laboratório. A verificação confere nome e versão do manifesto, arquivo e SHA-256. Publique o índice e o pacote na mesma revisão. No README de distribuição, fixe a URL do pacote nesse commit e atualize seu SHA-256.
+Depois de produzir o pacote e seu arquivo `.sha256`, gere o índice consultado pela aba **Updates**. A versão 0.4.3 usa o canal `main` e a maturidade `experimental`. A versão 0.3.0 continua consultando o índice próprio de laboratório. A verificação confere nome e versão do manifesto, arquivo e SHA-256. Publique o índice e o pacote na mesma revisão. No README de distribuição, fixe a URL do pacote nesse commit e atualize seu SHA-256.
 
 ```sh
 python3 tools/update-release-index.py
@@ -73,7 +73,7 @@ O laboratório precisa de uma imagem com o core e os arquivos do pacote identifi
 
 1. Em **Services → SD-WAN → Forwarding → Configured bindings**, use **Remove binding** em cada grupo para voltar ao encaminhamento nativo. Aguarde a recarga do filtro. Confira as regras e grupos que o administrador configurou no pfSense, a rota de saída e o retorno de uma nova conexão. Para prefixos protegidos, confirme também a regra nativa de bloqueio quando o túnel está indisponível.
 2. Com a WebGUI disponível, execute `pkg delete -y pfSense-pkg-SDWAN` no Command Prompt. Reabra o dashboard e o menu Services. Consulte os arquivos e o processo com os comandos do README. O `pkg` remove os arquivos de sua lista e o mecanismo `rc.packages` atualiza o menu e o registro de serviços. Em uma remoção com vínculo ainda registrado, o pacote apaga a seleção transitória e solicita recarga. No core experimental, o marcador continua permitindo que a regra vinculada bloqueie novos fluxos quando a recarga termina sem provedor. Os estados já abertos seguem sua política nativa. Se o pacote já foi removido com vínculos, reinstale o pacote compatível e use **Remove binding** antes de uma nova remoção. Regras, rotas e grupos criados pelo administrador possuem ciclo próprio.
-3. Para testar o retorno do **pacote**, reinstale a versão original após remover a 0.4.2. Use o SHA-256 da revisão anterior, confirme `pkg query '%n-%v' pfSense-pkg-SDWAN` e a integridade com `pkg check -s pfSense-pkg-SDWAN`. Verifique o menu, o serviço e o caminho de uma nova conexão. [Pacotes de versões anteriores](../dist/)
+3. Para testar o retorno do **pacote**, reinstale a versão original após remover a 0.4.3. Use o SHA-256 da revisão anterior, confirme `pkg query '%n-%v' pfSense-pkg-SDWAN` e a integridade com `pkg check -s pfSense-pkg-SDWAN`. Verifique o menu, o serviço e o caminho de uma nova conexão. [Pacotes de versões anteriores](../dist/)
 4. Para desfazer a alteração do **core**, restaure o snapshot anterior da imagem de laboratório. Compare a versão da base, a configuração e a primeira transação bem-sucedida com o estado de referência. Em HA, valide o papel de cada nó e a versão em ambos.
 
 No teste automatizado de pacote em FreeBSD, as raízes são isoladas e os hooks de sistema ficam desativados. A suíte separada de ciclo executa os scripts do pacote e o trecho de registro do serviço com adaptadores controlados, inclusive com PHP-FPM indisponível. A verificação do registro real na WebGUI, da continuidade de sessões e do rollback do core precisa do clone.
@@ -99,7 +99,7 @@ Verifique os estados relevantes com **Diagnostics → States**. Faça capturas d
 |---|---|---|
 | Instalação sem configuração | Abrir todas as abas com o conjunto inicial vazio. | Navegação funcional e ausência de recomendação para política inexistente. Rota padrão e regras de passagem continuam equivalentes às da referência. |
 | Um caminho | Criar uma política com um único membro monitorado. Tornar seu alvo indisponível. | O único membro aparece enquanto elegível. Após a perda da medição ou do SLA, o conjunto fica sem alternativa. |
-| Atualização para 0.4.2 | Em cada clone, instalar a versão de origem, salvar uma política de um membro e anotar sua configuração. Aplicar o pacote novo com o instalador do README e confirmar o reinício do serviço pelo registro do pacote. | O registro local passa a 0.4.2. A política é lida, o serviço publica uma amostra nova e o membro continua representando um único caminho. |
+| Atualização para 0.4.3 | Em cada clone, instalar a versão de origem, salvar uma política de um membro e anotar sua configuração. Aplicar o pacote novo com o instalador do README e confirmar o reinício do serviço pelo registro do pacote. | A verificação local identifica a 0.4.3. A política é lida, o serviço publica uma amostra nova e o membro continua representando um único caminho. |
 | Widget do dashboard | Em **Status → Dashboard**, usar **+ → SD-WAN**. Comparar o membro e a hora da amostra com o status. Parar o observador e aguardar a expiração. Retirar pelo **×**. | Exibe o resultado local válido, informa ausência de políticas ou de medição atual, respeita os privilégios do usuário e sai do painel quando solicitado. |
 | Consulta de versão | Abrir **Updates**, observar a versão instalada, acionar **Check GitHub** e repetir com a saída HTTPS indisponível. | A consulta externa ocorre ao clicar. A página diferencia uma versão publicada, uma falha de consulta e uma versão local desconhecida. A operação apenas exibe informação. |
 | Dois caminhos saudáveis | Cadastrar membros associados aos gateways reais, SLA e uma política com ambos. Definir custos distintos e verificar também a estratégia de menor latência. | O candidato selecionado e o motivo batem com os dados de monitoramento e o critério configurado. Os novos fluxos continuam seguindo a política **nativa** já presente. |
