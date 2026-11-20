@@ -1,0 +1,42 @@
+name: CE 2.9.1 two-WAN appliance
+on:
+  push:
+    branches: ['lab/ce291-appliance']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ce291-appliance-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  appliance:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Configure Ubuntu package mirror
+        run: bash .github/scripts/ubuntu-archive.sh
+      - name: Create a disk from signed Netgate packages
+        uses: vmactions/freebsd-vm@4441bea20b31bfa77329a5af583199362489567e # v1.4.9
+        with:
+          release: "15.1"
+          usesh: true
+          prepare: env ASSUME_ALWAYS_YES=yes pkg bootstrap
+          run: sh tests/lab/ce291-disk.sh "$PWD"
+      - name: Install QEMU for the isolated appliance
+        run: sudo apt-get install -y --no-install-recommends qemu-system-x86 python3-pexpect
+      - name: Verify the Netgate kernel and start the installed system
+        run: |
+          set -eu
+          gunzip ce291.raw.gz
+          sudo /usr/bin/python3 tests/lab/ce291-appliance.py ce291.raw | tee ce291-result.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ce291-result
+          path: |
+            ce291-result.log
+            ce291-console.log
+
