@@ -143,12 +143,12 @@ def client(target, held):
 def command(qemu, script, timeout=60):
     invocation = "sh -ec " + shlex.quote(script)
     if "\n" in script or len(invocation) > 240:
-        qemu.sendline("umask 077; cat >/tmp/sdwan-serial-command <<'SDWAN_SERIAL_END'")
+        qemu.sendline("umask 077; cat >/root/sdwan-serial-command <<'SDWAN_SERIAL_END'")
         for line in script.splitlines():
             assert len(line) <= 240 and line != "SDWAN_SERIAL_END", line
             qemu.sendline(line)
         qemu.sendline("SDWAN_SERIAL_END")
-        invocation = "sh -e /tmp/sdwan-serial-command"
+        invocation = "sh -e /root/sdwan-serial-command"
     qemu.sendline("echo __START__; " + invocation + "; echo __RESULT__$?")
     qemu.expect(r"\r+\n__START__\r+\n", timeout=timeout)
     qemu.expect(r"(?:\r+\n)?__RESULT__(\d+)\r+\n", timeout=timeout)
@@ -170,7 +170,7 @@ def first_boot(qemu):
     qemu.expect("Enter full pathname of shell", timeout=180)
     qemu.sendline("")
     qemu.expect(r"# ")
-    command(qemu, "mount -uw /")
+    command(qemu, "mount -uw /; mkdir -p /tmp /var/tmp /var/run /var/log; chmod 1777 /tmp /var/tmp")
     command(qemu, """mkdir -p /cf/conf;
         if [ ! -f /etc/master.passwd ]; then
             install -m 600 /dev/null /etc/master.passwd
