@@ -410,9 +410,11 @@ def same_target_probes(qemu):
 
 
 def vti_no_sa(qemu):
+    # A ping sourced from a firewall WAN IP uses the native, source-based
+    # route-to rule. The protected path must be tested with a LAN client.
     before = evidence_count("vti-clear")
-    ping = f"ping -n -c 2 -t 5 -S {A} 192.0.2.169"
-    command(qemu, ping)
+    ping = in_ns("sdwan-client", "ping", "-n", "-c", 2, "-w", 4, "192.0.2.169")
+    run(*ping, capture_output=True)
     control = evidence_count("vti-clear")
     assert control >= before + 2
     command(qemu, """if ! ifconfig -C | tr ' ' '\\n' | grep -qx ipsec; then kldload -n ipsec; fi""")
@@ -426,13 +428,14 @@ def vti_no_sa(qemu):
         assert f"interface: {device}" in route, route
         stats = "netstat -s -p ipsec | awk '/outbound packets? with no SA available/ {print $1; exit}'"
         no_sa = int(command(qemu, stats))
-        command(qemu, f"if {ping}; then exit 1; fi")
+        result = subprocess.run(ping, check=False, text=True, capture_output=True, timeout=8)
+        after = evidence_count("vti-clear")
+        assert result.returncode == 1 and after == control, (result.stdout, result.stderr, control, after)
         assert int(command(qemu, stats)) > no_sa
-        assert evidence_count("vti-clear") == control
         print("VTI_WITHOUT_SA_BLOCKS_WITHOUT_CLEARTEXT", flush=True)
     finally:
         command(qemu, f"route -n delete -host 192.0.2.169; ifconfig {device} destroy")
-    command(qemu, ping)
+    run(*ping, capture_output=True)
     assert evidence_count("vti-clear") >= control + 2
 
 
