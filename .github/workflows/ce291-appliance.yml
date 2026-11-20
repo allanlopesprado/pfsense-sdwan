@@ -18,7 +18,14 @@ jobs:
           persist-credentials: false
       - name: Configure Ubuntu package mirror
         run: bash .github/scripts/ubuntu-archive.sh
+      - name: Recover the disposable disk for this pinned input
+        id: disk
+        uses: actions/cache/restore@v4
+        with:
+          path: ce291.raw.gz
+          key: ce291-signed-disk-v1-${{ hashFiles('tests/lab/ce291-disk.sh', 'tests/lab/ce291-guest.php', 'tests/lab/ce291-source.py', 'core/filter-sdwan.*', 'tools/prepare-core.py', 'dist/pfSense-pkg-SDWAN-0.4.2[78].pkg') }}
       - name: Prepare the audited CE 2.9.1 adapter
+        if: steps.disk.outputs.cache-hit != 'true'
         run: |
           set -euo pipefail
           archive="$RUNNER_TEMP/pfSense-system-2.9.1.pkg"
@@ -28,12 +35,19 @@ jobs:
           python3 tests/lab/ce291-source.py "$archive" lab-ce291
           python3 tools/prepare-core.py --ce-291-lab --source lab-ce291 --out lab-overlay
       - name: Create a disk from signed Netgate packages
+        if: steps.disk.outputs.cache-hit != 'true'
         uses: vmactions/freebsd-vm@4441bea20b31bfa77329a5af583199362489567e # v1.4.9
         with:
           release: "15.1"
           usesh: true
           prepare: env ASSUME_ALWAYS_YES=yes pkg bootstrap
           run: sh tests/lab/ce291-disk.sh "$PWD"
+      - name: Cache the unbooted disk
+        if: steps.disk.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ce291.raw.gz
+          key: ${{ steps.disk.outputs.cache-primary-key }}
       - name: Install QEMU for the isolated appliance
         run: sudo apt-get install -y --no-install-recommends qemu-system-x86 nftables python3-pexpect
       - name: Run native installation, PF reload, reboot and rollback

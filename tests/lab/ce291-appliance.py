@@ -129,9 +129,9 @@ def client(target, held):
 
 def command(qemu, script, timeout=60):
     qemu.sendline("echo __START__; sh -c " + shlex.quote(script) + "; echo __RESULT__$?")
-    qemu.expect(r"\r\n__START__\r\n", timeout=timeout)
-    qemu.expect(r"(?:\r\n)?__RESULT__(\d+)\r\n", timeout=timeout)
-    result = qemu.before.strip()
+    qemu.expect(r"\r+\n__START__\r+\n", timeout=timeout)
+    qemu.expect(r"(?:\r+\n)?__RESULT__(\d+)\r+\n", timeout=timeout)
+    result = qemu.before.replace("\r", "").strip()
     if qemu.match.group(1) != "0":
         raise RuntimeError(f"{script} failed: {result}")
     return result
@@ -164,7 +164,9 @@ def first_boot(qemu):
     command(qemu, """sed -i '' '/^boot_single=/d' /boot/loader.conf.local; sync""")
     qemu.sendline("exit")
     console_shell(qemu)
-    print(command(qemu, "cat /etc/version; uname -a; test -S /var/run/check_reload_status"), flush=True)
+    identity = command(qemu, "cat /etc/version; uname -a; test -S /var/run/check_reload_status")
+    assert identity.splitlines()[0] == "2.9.1-RELEASE", identity
+    print(identity, flush=True)
 
 
 def wait_paths(qemu, label, expected, wait_ack=False):
