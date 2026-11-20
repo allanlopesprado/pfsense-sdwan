@@ -8,6 +8,7 @@ from pathlib import Path
 import re
 import select
 import shlex
+import signal
 import socket
 import socketserver
 import struct
@@ -41,6 +42,18 @@ def stop(child):
         except subprocess.TimeoutExpired:
             child.kill()
             child.wait(timeout=3)
+
+
+def stop_vm(qemu):
+    for sig in (signal.SIGTERM, signal.SIGKILL):
+        if qemu.isalive():
+            qemu.kill(sig)
+        for _ in range(20):
+            if not qemu.isalive():
+                qemu.close()
+                return
+            time.sleep(.1)
+    raise RuntimeError("The disposable QEMU process did not stop")
 
 
 def wire(cleanup):
@@ -150,7 +163,23 @@ def first_boot(qemu):
     qemu.sendline("")
     qemu.expect(r"# ")
     command(qemu, "mount -uw /")
-    command(qemu, "test -r /etc/master.passwd; grep -q '^nobody:' /etc/master.passwd; pwd_mkdb -p /etc/master.passwd")
+    command(qemu, """mkdir -p /cf/conf;
+        if [ ! -f /etc/master.passwd ]; then
+            install -m 600 /dev/null /etc/master.passwd
+        fi
+        if ! grep -q '^root:' /etc/master.passwd; then
+            echo 'root:*:0:0::0:0:root:/root:/bin/sh' >> /etc/master.passwd
+        fi
+        if ! grep -q '^nobody:' /etc/master.passwd; then
+            echo 'nobody:*:65534:65534::0:0:nobody:/nonexistent:/usr/sbin/nologin' >> /etc/master.passwd
+        fi
+        if ! test -f /etc/group; then
+            printf 'wheel:*:0:root\n' > /etc/group
+        fi
+        if ! grep -q '^nobody:' /etc/group; then
+            echo 'nobody:*:65534:' >> /etc/group
+        fi
+        pwd_mkdb -p /etc/master.passwd; getent passwd nobody""")
     version = command(qemu, "uname -a; pkg query '%n %v' pfSense-base pfSense-kernel-pfSense")
     print(version, flush=True)
     assert "pfSense-kernel-pfSense 2.9.1" in version, version
@@ -321,7 +350,7 @@ def appliance(image):
             "-drive", f"file={image},format=raw,if=virtio", "-display", "none",
             "-serial", "stdio", "-monitor", "none", *nets,
         ], encoding="utf-8", codec_errors="replace", timeout=120)
-        cleanup.callback(qemu.close, force=True)
+        cleanup.callback(stop_vm, qemu)
         qemu.logfile_read = log
         first_boot(qemu)
         acceptance(qemu, cleanup)
