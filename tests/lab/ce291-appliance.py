@@ -171,7 +171,7 @@ def console_shell(qemu, timeout=300):
     qemu.sendline("8")
     expect_console(qemu, r"(?:[#%] |/root(?:\x1b\[[0-9;]*m)*:(?:\x1b\[[0-9;]*m)* )", 75)
     qemu.sendline("exec /bin/sh")
-    expect_console(qemu, r"\r+\n# ", 45)
+    expect_console(qemu, r"(?:\r+\n|\x1b8)# ", 45)
     qemu.sendcontrol("u")
     qemu.sendline("TERM=dumb; export TERM; echo __SDWAN_SHELL__")
     expect_console(qemu, r"\r+\n__SDWAN_SHELL__\r+\n", 15)
