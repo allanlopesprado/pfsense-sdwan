@@ -33,7 +33,8 @@ if ($policy !== null):
 	$use_pool = $policy['strategy'] === 'balance';
 	$selected = $use_pool ? null : ($result['selected'] ?? null);
 	$use_cost = $policy['strategy'] === 'cost';
-	$show_checks = (bool)array_column(array_intersect_key($members, array_fill_keys($policy['members'], true)), 'probe_primary');
+	$show_checks = isset($policy['primary_check']) || isset($policy['secondary_check']) ||
+	    (bool)array_column(array_intersect_key($members, array_fill_keys($policy['members'], true)), 'probe_primary');
 	$metrics = [
 		'rtt_ms' => [' ms', (float)$sla['latency_ms']],
 		'rttsd_ms' => [' ms', isset($sla['rttsd_ms']) ? (float)$sla['rttsd_ms'] : null],
@@ -129,9 +130,11 @@ if ($policy !== null):
 					</td>
 					<?php endforeach; ?>
 					<?php if ($show_checks): ?>
-					<td><?php foreach (['probe_primary' => gettext('Primary'), 'probe_secondary' => gettext('Secondary')] as $field => $label): ?>
-						<?php if (isset($members[$member][$field])): ?>
-						<div><?=sdwan_ui_escape($label)?> · <?=sdwan_ui_escape(gettext($reading['checks'][$field] ?? 'Unavailable'))?></div>
+					<td><strong><?=sdwan_ui_escape(gettext($result['services'][$member] ?? 'No measurement'))?></strong>
+					<?php $requirements = sdwan_policy_probe_requirements($policy, $members[$member] ?? []);
+					foreach (['probe_primary' => gettext('Primary'), 'probe_secondary' => gettext('Secondary')] as $field => $label): ?>
+						<?php if (isset($requirements[$field])): ?>
+						<div><?=sdwan_ui_escape($label)?> · <?=sdwan_ui_escape(gettext($reading['checks'][$field] ?? 'No measurement'))?></div>
 						<?php endif; ?>
 					<?php endforeach; ?></td>
 					<?php endif; ?>

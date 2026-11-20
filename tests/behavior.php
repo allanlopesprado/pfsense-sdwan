@@ -180,6 +180,17 @@ check('DNS probes require a complete A answer for the requested name or its CNAM
     !sdwan_probe_dns_answer(substr($answer, 0, -1), 17, $question) &&
     !sdwan_probe_dns_answer(substr_replace($answer, pack('n', 0x8380), 2, 2), 17, $question));
 
+$modes = ['probe_primary' => 'tcp://192.0.2.50:443', 'probe_secondary' => 'dns://example.com 192.0.2.53'];
+$partial = ['probe_primary' => 'TCP check failed', 'probe_secondary' => 'Passed'];
+check('select required service checks per policy without changing legacy any-passing checks',
+    sdwan_policy_service_status([], $modes, $partial) === 'Passed' &&
+    sdwan_policy_service_status(['primary_check' => 'required'], $modes, $partial) === 'Failed' &&
+    sdwan_policy_service_status(['secondary_check' => 'required'], $modes, $partial) === 'Passed' &&
+    sdwan_policy_service_status(['primary_check' => 'ignored'], $modes, $partial) === 'Not selected');
+check('service failures, missing measurements and skipped checks have distinct statuses',
+    sdwan_policy_service_status(['primary_check' => 'required'], $modes, []) === 'No measurement' &&
+    sdwan_policy_service_status(['primary_check' => 'required'], $modes, ['probe_primary' => 'Not run']) === 'Not run');
+
 $route = "gateway: 192.0.2.1\ninterface: wan0\nflags: <UP,GATEWAY,HOST,DONE,STATIC>";
 check('service probes require an exact host route over the intended next hop',
     sdwan_probe_route_matches($route, 'wan0', '192.0.2.1') &&

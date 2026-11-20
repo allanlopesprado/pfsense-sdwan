@@ -185,9 +185,12 @@ function sdwan_probe_observe(array $members, array $inventory, array $observatio
 				continue;
 			}
 			$target = sdwan_probe_target($member[$field]);
-			$results[$name][$field] = 'Unavailable';
-			if ($target === null || $gateway === null ||
-			    ($observations[$member['gateway']]['status'] ?? null) !== 'online' || hrtime(true) >= $deadline) {
+			$results[$name][$field] = 'No measurement';
+			if ($target === null || $gateway === null) {
+				continue;
+			}
+			if (($observations[$member['gateway']]['status'] ?? null) !== 'online' || hrtime(true) >= $deadline) {
+				$results[$name][$field] = 'Not run';
 				continue;
 			}
 			$path = sdwan_probe_path($target, $gateway);
@@ -263,7 +266,8 @@ function sdwan_probe_observe(array $members, array $inventory, array $observatio
 					continue;
 				}
 				$success = $connected && sdwan_probe_path($job['target'], $job['gateway']) === $job['path'];
-				$results[$job['member']][$job['field']] = $success ? 'Passed' : 'TCP check failed';
+				$results[$job['member']][$job['field']] = $success ? 'Passed' : ($connected ?
+				    'No measurement' : 'TCP check failed');
 				fclose($job['socket']);
 				unset($jobs[$index]);
 				continue;
@@ -272,9 +276,9 @@ function sdwan_probe_observe(array $members, array $inventory, array $observatio
 			if (!is_string($reply) || $reply === '') {
 				continue;
 			}
-			$success = sdwan_probe_dns_answer($reply, $job['id'], $job['question']) &&
-			    sdwan_probe_path($job['target'], $job['gateway']) === $job['path'];
-			$results[$job['member']][$job['field']] = $success ? 'Passed' : 'DNS check failed';
+			$same_path = sdwan_probe_path($job['target'], $job['gateway']) === $job['path'];
+			$results[$job['member']][$job['field']] = !$same_path ? 'No measurement' :
+			    (sdwan_probe_dns_answer($reply, $job['id'], $job['question']) ? 'Passed' : 'DNS check failed');
 			fclose($job['socket']);
 			unset($jobs[$index]);
 		}
@@ -284,9 +288,10 @@ function sdwan_probe_observe(array $members, array $inventory, array $observatio
 					continue;
 				}
 				$status = curl_getinfo($job['curl'], CURLINFO_RESPONSE_CODE);
-				$success = $done['result'] === CURLE_OK && $status >= 200 && $status < 300 &&
-				    sdwan_probe_path($job['target'], $job['gateway']) === $job['path'];
-				$results[$job['member']][$job['field']] = $success ? 'Passed' : 'HTTPS check failed';
+				$same_path = sdwan_probe_path($job['target'], $job['gateway']) === $job['path'];
+				$success = $done['result'] === CURLE_OK && $status >= 200 && $status < 300;
+				$results[$job['member']][$job['field']] = !$same_path ? 'No measurement' :
+				    ($success ? 'Passed' : 'HTTPS check failed');
 				curl_multi_remove_handle($curl, $job['curl']);
 				unset($jobs[$index]);
 				break;

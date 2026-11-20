@@ -48,6 +48,8 @@ $sdwanRender = static function (): void {
 	$bindings_by_policy = [];
 	$bindings_error = false;
 	$pf_rules = null;
+	$receipt = [];
+	$adapter = false;
 	if ($can_view_forwarding) {
 		require_once('/usr/local/pkg/sdwan_steering.inc');
 		try {
@@ -57,7 +59,9 @@ $sdwanRender = static function (): void {
 		} catch (UnexpectedValueException $error) {
 			$bindings_error = true;
 		}
-		if ($snapshot !== null && $bindings_by_policy && sdwan_steering_supported()) {
+		$adapter = (bool)$bindings_by_policy && sdwan_steering_supported();
+		if ($snapshot !== null && $adapter) {
+			$receipt = sdwan_steering_receipt(SDWAN_SNAPSHOT_PATH . '.forwarded');
 			$pf_rules = sdwan_steering_pf_rules();
 		}
 	}
@@ -93,15 +97,25 @@ $sdwanRender = static function (): void {
 				if ($binding !== null) {
 					$url = '/sdwan/forwarding.php?' . http_build_query(['policy' => $name, 'group' => $group], '', '&', PHP_QUERY_RFC3986);
 					$state = $snapshot['steering'][$group] ?? [];
-					$verified = sdwan_steering_pf_status($binding, is_array($state) ? $state : [], $inventory, $pf_rules);
+					$verified = sdwan_steering_application(
+					    sdwan_steering_runtime_pf_status($binding, is_array($state) ? $state : [], $inventory, $pf_rules),
+					    $snapshot, $receipt);
 					[$color, $status] = match (true) {
+						!$adapter => ['bg-info', gettext('Observation only')],
+						$verified === 'expired' => ['bg-info', gettext('No current data')],
 						$snapshot === null => ['bg-info', gettext('No current data')],
 						$verified === 'applied' => ['bg-success', gettext('Applied')],
 						$verified === 'blocked' => ['bg-danger', gettext('Blocked')],
 						$verified === 'pending' => ['bg-warning', gettext('Rules pending')],
+						$verified === 'recommended' => ['bg-info', gettext('Recommended')],
+						$verified === 'requested' => ['bg-info', gettext('Reload requested')],
+						$verified === 'divergent' => ['bg-warning', gettext('Rules diverge')],
+						$verified === 'persistent' => ['bg-danger', gettext('Persistent rule mismatch')],
 						default => ['bg-warning', gettext('Rules unverified')],
 					};
-					if ($verified === 'applied') {
+					if ($verified === 'expired') {
+						$detail = gettext('Sample expired');
+					} elseif ($verified === 'applied') {
 						$egress = $state['pool'] ?? [$state['gateway']];
 						if ($evaluated) {
 							$alternatives = array_diff(array_intersect($eligible, $binding['gateways']), $egress);

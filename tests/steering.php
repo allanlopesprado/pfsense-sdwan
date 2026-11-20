@@ -176,6 +176,27 @@ verify(sdwan_steering_pf_status($edited_binding, $runtime, $dynamic, $loaded) ==
 unset($current['fixture/dynamic/wan']);
 verify(sdwan_steering_pf_status($edited_binding, $runtime, $dynamic, $loaded) === 'pending',
     'an unresolved dynamic gateway is not shown as applied');
+$dynamic_sample = ['steering' => ['G' => $runtime], 'config_revision' => 'config', 'gateway_inventory_revision' => 'inventory'];
+$current['fixture/dynamic/wan'] = '192.0.2.1';
+$decision = sdwan_steering_decision_id($dynamic_sample, $dynamic);
+$current['fixture/dynamic/wan'] = '192.0.2.2';
+verify($decision !== sdwan_steering_decision_id($dynamic_sample, $dynamic),
+    'a renewed DHCP next hop gets a new reconciliation budget');
+unset($current['fixture/dynamic/wan']);
+$controlled = $config;
+$controlled['policies'][0]['degrade_samples'] = '2';
+$controlled['policies'][0]['recover_seconds'] = '0';
+$binding = $edited_binding;
+$binding['policy_revision'] = sdwan_steering_policy_revision($controlled, $binding['policy']);
+$before = ['revision' => sdwan_config_revision($binding), 'gateway' => 'A'];
+$soft = ['selected' => null, 'candidates' => ['a' => 'Loss exceeds the SLA', 'b' => 'Gateway is down'], 'soft' => ['a']];
+$retained = sdwan_steering_state($controlled, $binding, $soft, $before, 100);
+verify($retained['gateway'] === 'A' && $retained['degraded']['A'] === 1 &&
+    sdwan_steering_state($controlled, $binding, $soft, $retained, 110)['gateway'] === null &&
+    sdwan_steering_state($controlled, $binding, array_diff_key($soft, ['soft' => 1]), $before, 110)['gateway'] === null,
+    'only an explicitly permitted incumbent survives a bounded soft degradation; a hard failure blocks immediately');
+verify(sdwan_steering_step(['gateway' => 'A'], ['A', 'B'], 'B', 100, 0)['gateway'] === 'B',
+    'a policy can explicitly choose immediate recovery');
 $pooled = ['revision' => sdwan_config_revision($edited_binding), 'gateway' => 'A', 'pool' => ['A', 'B']];
 $inventory['B'] = ['device' => 'igb1', 'address' => '192.0.2.2', 'weight' => 2];
 $weighted = 'pass in quick on igb2 route-to { ' . str_repeat('(igb0 192.0.2.1), ', 2) .

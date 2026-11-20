@@ -95,6 +95,8 @@ echo json_encode([http_response_code() ?: 200, $body, $sdwan_title_link,
         for index, (policy, group) in enumerate(groups.items(), 1)
     ]
     fixture["gateways/sdwan_bindings"] = {"item": bindings}
+    fixture["interfaces"]["lan"] = {"if": "lan"}
+    fixture["filter/rule"] = [{"tracker": str(n), "interface": "lan"} for n in (301, 302, 303, 305)]
     fixture["fixture_pf_rules"] = [
         'pass in quick on lan route-to (igb1 198.51.100.1) inet all label "descr=Voice" ridentifier 301',
         'pass in quick on lan route-to (igb0 192.0.2.1) inet all ridentifier 302',

@@ -198,7 +198,9 @@ function sdwan_validate_config(array $config, ?array $gateways, array $previous 
 		'slas' => ['name', 'latency_ms', 'loss_pct'],
 		'policies' => ['name', 'sla', 'members', 'strategy'],
 	];
-	$optional = ['slas' => ['rttsd_ms'], 'members' => ['probe_primary', 'probe_secondary']];
+	$optional = ['slas' => ['rttsd_ms'], 'members' => ['probe_primary', 'probe_secondary'],
+	    'policies' => ['primary_check', 'secondary_check', 'degrade_samples', 'recover_seconds']];
+	$probes_by_member = [];
 	if (($config['version'] ?? null) !== SDWAN_CONFIG_VERSION ||
 	    array_diff_key($config, sdwan_empty_config())) {
 		return ['Unsupported SD-WAN configuration format.'];
@@ -264,6 +266,7 @@ function sdwan_validate_config(array $config, ?array $gateways, array $previous 
 						return ['Each service check needs a distinct destination address and a matching native host route.'];
 					}
 					$used_probes[$probe['address']] = true;
+					$probes_by_member[$name][$probe_field] = true;
 				}
 				$cost = $row['cost'];
 				if ((!is_string($cost) && !is_int($cost)) ||
@@ -286,6 +289,17 @@ function sdwan_validate_config(array $config, ?array $gateways, array $previous 
 				if (!is_array($row['members']) || !array_is_list($row['members']) || !$row['members']) {
 					return ["Select at least one member for {$name}."];
 				}
+				foreach (['primary_check', 'secondary_check'] as $field) {
+					if (array_key_exists($field, $row) && !in_array($row[$field], ['ignored', 'optional', 'required'], true)) {
+						return ["Invalid service check requirement for policy {$name}."];
+					}
+				}
+				foreach (['degrade_samples' => [1, 6], 'recover_seconds' => [0, 300]] as $field => [$min, $max]) {
+					if (array_key_exists($field, $row) && (!is_string($row[$field]) ||
+					    !preg_match('/\A[0-9]{1,3}\z/', $row[$field]) || (int)$row[$field] < $min || (int)$row[$field] > $max)) {
+						return ["Invalid degradation or recovery criterion for policy {$name}."];
+					}
+				}
 				$selected = [];
 				$families = [];
 				$old_members = $old_policies[$name]['members'] ?? [];
@@ -296,6 +310,11 @@ function sdwan_validate_config(array $config, ?array $gateways, array $previous 
 						return ["Invalid or repeated member in policy {$name}."];
 					}
 					$selected[$member] = true;
+					foreach (['primary_check' => 'probe_primary', 'secondary_check' => 'probe_secondary'] as $field => $probe) {
+						if (($row[$field] ?? null) === 'required' && !isset($probes_by_member[$member][$probe])) {
+							return ["Configure the required service check on {$member} for policy {$name}."];
+						}
+					}
 					if (isset($unavailable[$member]) && !in_array($member, $old_members, true)) {
 						return ["Select members with available monitored gateways for {$name}."];
 					}

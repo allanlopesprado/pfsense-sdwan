@@ -148,10 +148,42 @@ function sdwan_candidate_reason(?array $member, ?array $sample, ?array $sla): st
 	if ($sample['loss_pct'] > (float)$sla['loss_pct']) {
 		return 'Loss exceeds the SLA';
 	}
-	if (($sample['checks'] ?? []) && !in_array('Passed', $sample['checks'], true)) {
-		return 'No configured service check passed';
-	}
 	return 'Eligible';
+}
+
+/* Configured member slots can be reused with different requirements per policy. */
+function sdwan_policy_probe_requirements(array $policy, array $member): array {
+	$requirements = [];
+	$legacy = !isset($policy['primary_check']) && !isset($policy['secondary_check']);
+	foreach (['probe_primary' => 'primary_check', 'probe_secondary' => 'secondary_check'] as $slot => $field) {
+		$mode = $legacy && isset($member[$slot]) ? 'optional' : ($policy[$field] ?? 'ignored');
+		if ($mode !== 'ignored') {
+			$requirements[$slot] = $mode;
+		}
+	}
+	return $requirements;
+}
+
+function sdwan_policy_service_status(array $policy, array $member, array $checks): string {
+	$requirements = sdwan_policy_probe_requirements($policy, $member);
+	if (!$requirements) {
+		return 'Not selected';
+	}
+	$mandatory = array_keys($requirements, 'required', true);
+	$passed = array_keys($checks, 'Passed', true);
+	if ($mandatory ? !array_diff($mandatory, $passed) : array_intersect(array_keys($requirements), $passed)) {
+		return 'Passed';
+	}
+	$relevant = array_intersect_key($checks, array_fill_keys($mandatory ?: array_keys($requirements), true));
+	if (array_filter($relevant, static fn($value) => in_array($value,
+	    ['TCP check failed', 'DNS check failed', 'HTTPS check failed', 'Timed out'], true))) {
+		return 'Failed';
+	}
+	if (count($relevant) === count($mandatory ?: $requirements) &&
+	    count(array_keys($relevant, 'Not run', true)) === count($relevant)) {
+		return 'Not run';
+	}
+	return 'No measurement';
 }
 
 function sdwan_path_status(int $configured, int $eligible): string {
@@ -182,7 +214,7 @@ function sdwan_evaluate(array $config, array $gateways, int $now, array $invento
 		$sla = $slas[$policy['sla']] ?? null;
 		$selected = null;
 		$best = INF;
-		$candidates = [];
+		$candidates = $services = $soft = [];
 		// Gateways can change family outside this package after a restore.
 		$families = [];
 		$interfaces = [];
@@ -206,6 +238,21 @@ function sdwan_evaluate(array $config, array $gateways, int $now, array $invento
 			$sample = $samples[$name] ?? null;
 			$reason = $mixed ? 'Members now use different IP address families' :
 			    sdwan_candidate_reason($member, $sample, $sla);
+			$service = sdwan_policy_service_status($policy, $member ?? [], $sample['checks'] ?? []);
+			$services[$name] = $service;
+			$service_ok = in_array($service, ['Passed', 'Not selected'], true);
+			if ($service_ok && in_array($reason, ['RTT exceeds the SLA',
+			    'RTT standard deviation exceeds the SLA or is unavailable', 'Loss exceeds the SLA'], true) &&
+			    (!isset($sla['rttsd_ms']) || $sample['rttsd_ms'] !== null)) {
+				$soft[] = $name;
+			}
+			if ($reason === 'Eligible' && !$service_ok) {
+				$reason = match ($service) {
+					'Failed' => 'No configured service check passed',
+					'Not run' => 'Service checks were not run',
+					default => 'No service measurement',
+				};
+			}
 			$candidates[$name] = $reason;
 			if ($reason !== 'Eligible') {
 				continue;
@@ -239,6 +286,8 @@ function sdwan_evaluate(array $config, array $gateways, int $now, array $invento
 				default => 'Lowest measured RTT within SLA',
 			},
 			'candidates' => $candidates,
+			'services' => $services,
+			'soft' => $soft,
 			'eligible_count' => $eligible,
 			'path_status' => sdwan_path_status(count($candidates), $eligible),
 			'shared_interface' => count($interfaces) !== count(array_unique($interfaces)),
@@ -246,6 +295,11 @@ function sdwan_evaluate(array $config, array $gateways, int $now, array $invento
 		];
 	}
 	return ['generated_at' => $now, 'members' => $samples, 'policies' => $policies];
+}
+
+function sdwan_snapshot_expired(): bool {
+	$data = json_decode((string)@file_get_contents(SDWAN_SNAPSHOT_PATH), true);
+	return is_int($data['generated_at'] ?? null) && time() - $data['generated_at'] > SDWAN_MAX_SNAPSHOT_AGE;
 }
 
 function sdwan_read_snapshot(): ?array {

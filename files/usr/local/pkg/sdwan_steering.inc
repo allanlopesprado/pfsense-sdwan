@@ -7,6 +7,8 @@ require_once(__DIR__ . '/sdwan_log.inc');
 
 const SDWAN_BINDINGS_PATH = 'gateways/sdwan_bindings';
 const SDWAN_STEERING_HOLD = 30;
+const SDWAN_RELOAD_GRACE = 30;
+const SDWAN_RELOAD_ATTEMPTS = 3;
 
 function sdwan_steering_abi(): int {
 	if (!function_exists('filter_sdwan_binding_api') && stream_resolve_include_path('filter.inc')) {
@@ -303,7 +305,7 @@ function sdwan_steering_edit(string $group, ?string $policy, string $expected_re
 }
 
 /* Quarantine loss immediately. Keep a healthy incumbent while a better path settles. */
-function sdwan_steering_step(array $previous, array $eligible, ?string $best, int $now): array {
+function sdwan_steering_step(array $previous, array $eligible, ?string $best, int $now, int $hold = SDWAN_STEERING_HOLD): array {
 	$incumbent = $previous['gateway'] ?? null;
 	$candidate = null;
 	$since = null;
@@ -316,7 +318,7 @@ function sdwan_steering_step(array $previous, array $eligible, ?string $best, in
 		$since = ($previous['candidate'] ?? null) === $best &&
 		    is_int($previous['since'] ?? null) && $previous['since'] <= $now ? $previous['since'] : $now;
 		$chosen = $incumbent;
-		if ($now - $since >= SDWAN_STEERING_HOLD) {
+		if ($now - $since >= $hold) {
 			$chosen = $best;
 			$candidate = $since = null;
 		}
@@ -327,8 +329,10 @@ function sdwan_steering_step(array $previous, array $eligible, ?string $best, in
 function sdwan_steering_state(array $config, array $binding, array $result, array $old, int $now): array {
 	$eligible = [];
 	$best = null;
-	$policies = array_column($config['policies'], 'strategy', 'name');
+	$policy = array_column($config['policies'], null, 'name')[$binding['policy']] ?? [];
 	$revision = sdwan_config_revision($binding);
+	$prior = ($old['revision'] ?? null) === $revision ? $old : [];
+	$degraded = [];
 	if ($binding['policy_revision'] === sdwan_steering_policy_revision($config, $binding['policy'])) {
 		$members = array_column($config['members'], 'gateway', 'name');
 		foreach ($result['candidates'] ?? [] as $name => $reason) {
@@ -340,18 +344,37 @@ function sdwan_steering_state(array $config, array $binding, array $result, arra
 				}
 			}
 		}
+		$threshold = (int)($policy['degrade_samples'] ?? 1);
+		$active = $prior['pool'] ?? (isset($prior['gateway']) ? [$prior['gateway']] : []);
+		foreach ($result['soft'] ?? [] as $member) {
+			$gateway = $members[$member] ?? null;
+			if ($threshold <= 1 || $gateway === null || !in_array($gateway, $active, true) ||
+			    !in_array($gateway, $binding['gateways'], true)) {
+				continue;
+			}
+			$count = (int)($prior['degraded'][$gateway] ?? 0) + 1;
+			if ($count < $threshold) {
+				$degraded[$gateway] = $count;
+				$eligible[] = $gateway;
+			}
+		}
 	}
-	if (($policies[$binding['policy']] ?? null) === 'balance') {
+	$meta = ['revision' => $revision];
+	if ($degraded) {
+		$meta['degraded'] = $degraded;
+	}
+	if (($policy['strategy'] ?? null) === 'balance') {
 		$pool = array_values(array_intersect($binding['gateways'], $eligible));
-		return ['revision' => $revision, 'gateway' => $pool[0] ?? null, 'pool' => $pool];
+		return $meta + ['gateway' => $pool[0] ?? null, 'pool' => $pool];
 	}
-	$step = sdwan_steering_step(($old['revision'] ?? null) === $revision ? $old : [], $eligible, $best, $now);
-	return ['revision' => $revision] + $step;
+	$step = sdwan_steering_step($prior, $eligible, $best ?? array_key_first($degraded), $now,
+	    (int)($policy['recover_seconds'] ?? SDWAN_STEERING_HOLD));
+	return $meta + $step;
 }
 
 /* Run in the observer process. Recheck native membership/ACL drift on each
  * sample so a subsequent reload can close a binding that is no longer valid. */
-function sdwan_steering_observations(array $config, array $snapshot, array $previous): array {
+function sdwan_steering_observations(array $config, array $snapshot, array $previous, ?array $verified = null): array {
 	$states = [];
 	$native = sdwan_steering_native();
 	foreach (sdwan_steering_bindings() as $group => $binding) {
@@ -359,7 +382,11 @@ function sdwan_steering_observations(array $config, array $snapshot, array $prev
 		$approved = !$check['errors'] && $binding['rules_revision'] === $check['binding']['rules_revision'] &&
 		    $binding['gateways'] === $check['binding']['gateways'] && $binding['trackers'] === $check['binding']['trackers'];
 		$result = $approved ? ($snapshot['policies'][$binding['policy']] ?? []) : [];
-		$states[$group] = sdwan_steering_state($config, $binding, $result, $previous[$group] ?? [], $snapshot['generated_at']);
+		$old = $previous[$group] ?? [];
+		if (($verified[$group] ?? null) !== 'applied') {
+			unset($result['soft']);
+		}
+		$states[$group] = sdwan_steering_state($config, $binding, $result, $old, $snapshot['generated_at']);
 	}
 	return $states;
 }
@@ -403,7 +430,42 @@ function sdwan_steering_pf_rules(): ?array {
 	return $status === 0 && preg_match('/^Status:\s+Enabled(?:\s|$)/', $lines[0] ?? '') ? $lines : null;
 }
 
-function sdwan_steering_pf_status(array $binding, array $state, array $inventory, ?array $lines): string {
+function sdwan_steering_live_gateway(array $gateway): ?array {
+	if ($gateway['address'] === 'dynamic') {
+		$lookup = match ($gateway['family'] ?? null) {
+			'inet' => 'get_interface_gateway',
+			'inet6' => 'get_interface_gateway_v6',
+			default => null,
+		};
+		if ($lookup === null || !isset($gateway['interface'])) {
+			return null;
+		}
+		if (!function_exists($lookup)) {
+			require_once('gwlb.inc');
+		}
+		$gateway['address'] = $lookup($gateway['interface']);
+		if (!is_string($gateway['address'])) {
+			return null;
+		}
+	}
+	return $gateway;
+}
+
+function sdwan_steering_decision_id(array $snapshot, array $inventory): string {
+	$states = $snapshot['steering'];
+	$paths = [];
+	foreach ($states as $state) {
+		foreach ($state['pool'] ?? (isset($state['gateway']) ? [$state['gateway']] : []) as $name) {
+			$hop = isset($inventory[$name]) ? sdwan_steering_live_gateway($inventory[$name]) : null;
+			$paths[$name] = [$hop['device'] ?? null, $hop['address'] ?? null];
+		}
+	}
+	ksort($paths, SORT_STRING);
+	return sdwan_config_revision([$snapshot['config_revision'], $snapshot['gateway_inventory_revision'],
+	    sdwan_steering_signature($states), $paths]);
+}
+
+function sdwan_steering_pf_status(array $binding, array $state, array $inventory, ?array $lines, ?array $ingress = null): string {
 	if ($lines === null) {
 		return 'unavailable';
 	}
@@ -421,23 +483,9 @@ function sdwan_steering_pf_status(array $binding, array $state, array $inventory
 		    !isset($inventory[$name]['device'], $inventory[$name]['address'])) {
 			return 'pending';
 		}
-		$gateway = $inventory[$name];
-		if ($gateway['address'] === 'dynamic') {
-			$lookup = match ($gateway['family'] ?? null) {
-				'inet' => 'get_interface_gateway',
-				'inet6' => 'get_interface_gateway_v6',
-				default => null,
-			};
-			if ($lookup === null || !isset($gateway['interface'])) {
-				return 'pending';
-			}
-			if (!function_exists($lookup)) {
-				require_once('gwlb.inc');
-			}
-			$gateway['address'] = $lookup($gateway['interface']);
-			if (!is_string($gateway['address'])) {
-				return 'pending';
-			}
+		$gateway = sdwan_steering_live_gateway($inventory[$name]);
+		if ($gateway === null) {
+			return 'pending';
 		}
 		$gateways[$gateway['device']] = $gateway;
 	}
@@ -451,6 +499,10 @@ function sdwan_steering_pf_status(array $binding, array $state, array $inventory
 			continue;
 		}
 		[$rule] = explode(' label "', $line, 2);
+		if ($ingress !== null && (!preg_match('/\\bin quick on ([^\\s!]+)\\s/', $rule, $device) ||
+		    $device[1] !== ($ingress[$identifier[1]] ?? null))) {
+			return 'pending';
+		}
 		if ($target === null) {
 			if (!str_starts_with($rule, 'block ')) {
 				return 'pending';
@@ -466,6 +518,98 @@ function sdwan_steering_pf_status(array $binding, array $state, array $inventory
 	return $target === null ? 'blocked' : 'applied';
 }
 
+
+/* A persisted receipt belongs to one desired ruleset. A daemon restart must
+ * not reset the retry budget for unconfirmed rules. */
+function sdwan_steering_receipt(string $path): array {
+	$record = json_decode((string)@file_get_contents($path), true);
+	if (!is_string($record['decision'] ?? null) || !preg_match('/\A[0-9a-f]{64}\z/', $record['decision']) ||
+	    !is_int($record['attempts'] ?? null) || $record['attempts'] < 0 ||
+	    $record['attempts'] > SDWAN_RELOAD_ATTEMPTS || !is_int($record['at'] ?? null) ||
+	    $record['at'] < 0 || $record['at'] > time() || !is_bool($record['accepted'] ?? null)) {
+		return [];
+	}
+	return $record;
+}
+
+function sdwan_steering_write_receipt(string $path, array $receipt): void {
+	$body = json_encode($receipt, JSON_THROW_ON_ERROR);
+	$temp = tempnam(dirname($path), '.sdwan-ack-');
+	if ($temp === false) {
+		throw new RuntimeException('Cannot record the filter reload request');
+	}
+	try {
+		if (file_put_contents($temp, $body) !== strlen($body) || !rename($temp, $path)) {
+			throw new RuntimeException('Cannot record the filter reload request');
+		}
+	} finally {
+		if (file_exists($temp)) {
+			unlink($temp);
+		}
+	}
+}
+
+function sdwan_steering_reconcile(array $prior, string $decision, array $pf, int $now, bool $booting): array {
+	$same = ($prior['decision'] ?? null) === $decision;
+	$record = $same ? $prior : ['decision' => $decision, 'attempts' => 0, 'at' => 0, 'accepted' => false];
+	$diverged = in_array('pending', $pf, true);
+	$confirmed = $pf && !array_diff($pf, ['applied', 'blocked']);
+	if ($confirmed) {
+		$record = ['decision' => $decision, 'attempts' => 0, 'at' => 0, 'accepted' => false];
+	}
+	$due = $record['attempts'] === 0 || $now - $record['at'] >= SDWAN_RELOAD_GRACE;
+	$request = !$booting && !$confirmed && $due && $record['attempts'] < SDWAN_RELOAD_ATTEMPTS &&
+	    ($diverged || !$same || ($record['attempts'] > 0 && !$record['accepted']));
+	return [$record, $request];
+}
+
+function sdwan_steering_application(string $pf, ?array $snapshot, array $receipt): string {
+	if ($snapshot === null) {
+		return sdwan_snapshot_expired() ? 'expired' : 'no_sample';
+	}
+	if ($pf === 'applied' || $pf === 'blocked') {
+		return $pf;
+	}
+	$decision = $snapshot['forwarding_id'] ?? null;
+	if ($decision === null) {
+		return $pf;
+	}
+	if (($receipt['decision'] ?? null) !== $decision || !$receipt['attempts']) {
+		return $pf === 'unavailable' ? 'unavailable' : 'recommended';
+	}
+	$within_grace = time() - $receipt['at'] < SDWAN_RELOAD_GRACE;
+	if ($receipt['accepted'] && $within_grace) {
+		return 'requested';
+	}
+	if ($pf === 'unavailable') {
+		return 'unavailable';
+	}
+	return !$within_grace && $receipt['attempts'] >= SDWAN_RELOAD_ATTEMPTS ? 'persistent' : 'divergent';
+}
+
+/* Check the same rules for the daemon and WebGUI, including the actual ingress
+ * device for every tracker. Unrelated rules and states are never touched. */
+function sdwan_steering_runtime_pf_status(array $binding, array $state, array $inventory, ?array $lines): string {
+	if ($lines === null) {
+		return 'unavailable';
+	}
+	$scope = [];
+	$interfaces = config_get_path('interfaces', []);
+	foreach (config_get_path('filter/rule', []) as $rule) {
+		$tracker = (string)($rule['tracker'] ?? '');
+		if (in_array($tracker, $binding['trackers'], true)) {
+			$device = $interfaces[$rule['interface'] ?? '']['if'] ?? '';
+			if (!is_string($device) || $device === '' || isset($scope[$tracker])) {
+				return 'pending';
+			}
+			$scope[$tracker] = $device;
+		}
+	}
+	if (count($scope) !== count($binding['trackers'])) {
+		return 'pending';
+	}
+	return sdwan_steering_pf_status($binding, $state, $inventory, $lines, $scope);
+}
 
 /* The native state dump includes the originating rule identifier as well as
  * the next hop. Rule ordinals are transient across filter reloads. */
@@ -528,7 +672,7 @@ function sdwan_steering_reconnect(string $group, string $gateway, string $revisi
 		$reason = $snapshot['policies'][$binding['policy']]['candidates'][$member] ?? null;
 		$pool = $state['pool'] ?? array_filter([$state['gateway'] ?? null]);
 		if ($reason === null || $reason === 'Eligible' || in_array($gateway, $pool, true) ||
-		    sdwan_steering_pf_status($binding, $state, $inventory, sdwan_steering_pf_rules()) !== 'applied') {
+		    sdwan_steering_runtime_pf_status($binding, $state, $inventory, sdwan_steering_pf_rules()) !== 'applied') {
 			return ['errors' => ['Reconnect is available after the filter has applied a different eligible gateway.']];
 		}
 		$metadata = $inventory[$gateway] ?? [];
@@ -603,16 +747,22 @@ function sdwan_steering_gateways_for_rule(array $raw, array $rule): array {
 	if (($state['revision'] ?? null) !== sdwan_config_revision($binding)) {
 		return [];
 	}
-	$strategy = array_column($config['policies'], 'strategy', 'name')[$binding['policy']] ?? null;
-	$chosen = $strategy === 'balance' ? ($state['pool'] ?? []) : [$state['gateway'] ?? null];
+	$policy = array_column($config['policies'], null, 'name')[$binding['policy']] ?? [];
+	$chosen = ($policy['strategy'] ?? null) === 'balance' ? ($state['pool'] ?? []) : [$state['gateway'] ?? null];
 	if (!is_array($chosen) || !array_is_list($chosen)) {
 		return [];
 	}
 	$members = array_column($config['members'], 'name', 'gateway');
-	$reasons = $snapshot['policies'][$binding['policy']]['candidates'] ?? [];
+	$result = $snapshot['policies'][$binding['policy']] ?? [];
 	foreach ($chosen as $gateway) {
-		if (!is_string($gateway) || !in_array($gateway, $binding['gateways'], true) ||
-		    ($reasons[$members[$gateway] ?? ''] ?? null) !== 'Eligible') {
+		if (!is_string($gateway) || !in_array($gateway, $binding['gateways'], true)) {
+			return [];
+		}
+		$member = $members[$gateway] ?? '';
+		$degraded = $state['degraded'][$gateway] ?? null;
+		if (($result['candidates'][$member] ?? null) !== 'Eligible' &&
+		    !(is_int($degraded) && $degraded > 0 && $degraded < (int)($policy['degrade_samples'] ?? 1) &&
+		        in_array($member, $result['soft'] ?? [], true))) {
 			return [];
 		}
 	}

@@ -100,9 +100,17 @@ $pf_labels = [
 	'blocked' => gettext('Blocked by the active filter'),
 	'pending' => gettext('Waiting for a matching filter rule'),
 	'unavailable' => gettext('Filter verification unavailable'),
+	'no_sample' => gettext('No current sample'),
+	'expired' => gettext('Sample expired'),
+	'recommended' => gettext('Recommended, awaiting reload'),
+	'requested' => gettext('Reload requested, awaiting PF verification'),
+	'divergent' => gettext('Loaded PF rules differ from the current decision'),
+	'persistent' => gettext('Persistent PF divergence. Reload retry limit reached.'),
 ];
-$filter_status = $binding === null ? null : sdwan_steering_pf_status($binding, $steering, sdwan_gateways(),
-    $supported ? sdwan_steering_pf_rules() : null);
+$filter_status = $binding === null ? null : sdwan_steering_application(
+    sdwan_steering_runtime_pf_status($binding, is_array($steering) ? $steering : [], sdwan_gateways(),
+        $supported && $sample !== null ? sdwan_steering_pf_rules() : null),
+    $sample, sdwan_steering_receipt(SDWAN_SNAPSHOT_PATH . '.forwarded'));
 $default_families = [];
 foreach (['defaultgw4' => 'IPv4', 'defaultgw6' => 'IPv6'] as $key => $family) {
 	if ($group !== null && config_get_path('gateways/' . $key) === $group_name) {
@@ -146,11 +154,13 @@ if ($preview !== null):
 	<div class="panel-body">
 		<div class="container-fluid">
 		<dl class="dl-horizontal">
+			<dt><?=gettext('Mode')?></dt><dd><?=$supported ? gettext('Forwarding adapter') : gettext('Observation only')?></dd>
 			<dt><?=gettext('Recommendation')?></dt><dd><?=sdwan_ui_escape($gateway_name ?? gettext('No current eligible gateway'))?></dd>
 			<dt><?=gettext('Bound policy')?></dt><dd><?=sdwan_ui_escape($binding['policy'] ?? gettext('None'))?></dd>
 			<?php if ($binding !== null): ?>
 			<dt><?=gettext('Selected gateways')?></dt><dd><?=sdwan_ui_escape($target ?? gettext('No current target'))?></dd>
-			<dt><?=gettext('Active filter')?></dt><dd><?=sdwan_ui_escape($pf_labels[$filter_status])?></dd>
+			<dt><?=gettext('Active filter')?></dt><dd><?=sdwan_ui_escape($pf_labels[$filter_status])?>
+			    <?php if (!empty($steering['degraded'])): ?><small><?=gettext('Temporarily retaining a degraded path')?></small><?php endif; ?></dd>
 			<?php endif; ?>
 			<?php if ($default_families): ?>
 			<dt><?=gettext('Default gateway')?></dt><dd><?=sdwan_ui_escape(implode(', ', $default_families))?></dd>

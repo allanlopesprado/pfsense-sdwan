@@ -83,7 +83,8 @@ def run(binary, load_filter_extension):
         config["booting"] = True
         assert observe()["steering"]["G"]["gateway"] is None and not receipt.exists()
         config["booting"] = False
-        assert observe(fails=True)["steering"]["G"]["gateway"] is None and not receipt.exists()
+        # The installed rule survived a restart but does not reflect the new block decision.
+        config["fixture_pf_rules"] = ['pass in quick on igb0 inet all ridentifier 301']
 
         def reply(listener, response, delay):
             connection, _ = listener.accept()
@@ -108,62 +109,68 @@ def run(binary, load_filter_extension):
                 result = observe(fails)
                 assert event.result() == result, "event fired before snapshot publication"
 
-            for response, delay in [(b"ERROR\n", 0), (None, 0), (None, 0.75)]:
-                exchange(response, fails=True, delay=delay)
-                assert not receipt.exists()
-            exchange(b"OK\n")
-            original = receipt.read_text()
-            signature, _, at = original.rpartition(":")
-            assert signature.startswith("ack:") and int(at) <= int(time.time())
-            observe()  # Even a missing rule gets time for the queue to drain.
-            assert receipt.read_text() == original
-            receipt.write_text(signature)  # Acknowledgement from before PF verification.
-            exchange(b"OK\n")
-            assert receipt.read_text().rpartition(":")[0] == signature
-            snapshot.unlink()
-            exchange(b"OK\n")
-            assert receipt.read_text().rpartition(":")[0] == signature
+            def make_due():
+                data = json.loads(receipt.read_text())
+                receipt.write_text(json.dumps(dict(data, at=int(time.time()) - 60)))
+                return data
 
-            overdue = f"{signature}:{int(time.time()) - 60}"
-            receipt.write_text(overdue)
-            observe()  # PF is unavailable. Do not poll the reload queue in a loop.
-            assert receipt.read_text() == overdue
-            config["fixture_pf_rules"] = ['block drop in quick on igb0 inet all ridentifier 301']
+            exchange(b"OK\n")
+            first = json.loads(receipt.read_text())
+            assert first["attempts"] == 1 and first["accepted"]
+            observe()  # A new process inherits the budget and the grace period.
+            assert json.loads(receipt.read_text()) == first
+            # The native queue accepts a request twice without loading the expected rule.
+            make_due()
+            exchange(b"OK\n")
+            assert json.loads(receipt.read_text())["attempts"] == 2
+            make_due()
+            exchange(b"OK\n")
+            assert json.loads(receipt.read_text())["attempts"] == 3
+            make_due()
             observe()
-            assert receipt.read_text() == overdue
-            config["fixture_pf_rules"] = ['pass in quick on igb0 inet all ridentifier 301']
-            config["booting"] = True
+            exhausted = json.loads(receipt.read_text())
+            assert exhausted["attempts"] == 3
+            event_log = json.loads((work / "snapshot.json.events").read_text())
+            assert event_log["forwarding_application"]["G"] == "persistent"
+
+            # Convergence clears the budget. A reboot or service restart alone does not.
+            block = 'block drop in quick on igb0 inet all ridentifier 301'
+            config["fixture_pf_rules"] = [block]
+            assert observe()["forwarding_check"]["G"] == "blocked"
+            assert json.loads(receipt.read_text())["attempts"] == 0
+            config["fixture_pf_rules"] = None
             observe()
-            assert receipt.read_text() == overdue
-            config["booting"] = False
+            assert json.loads(receipt.read_text())["attempts"] == 0
+
+            config["fixture_pf_rules"] = [block.replace("igb0", "igb9")]
             exchange(b"ERROR\n", fails=True)
-            assert receipt.read_text() == overdue
-            exchange(b"OK\n")
-            current_receipt = receipt.read_text()
-            assert current_receipt != overdue
-            observe()  # The acknowledged retry was recent, so it is not requeued yet.
-            assert receipt.read_text() == current_receipt
-            config["fixture_pf_rules"] = ['block drop in quick on igb0 inet all ridentifier 301']
+            rejected = json.loads(receipt.read_text())
+            assert rejected["attempts"] == 1 and not rejected["accepted"]
+            make_due()
+            exchange(None, fails=True, delay=.75)
+            assert json.loads(receipt.read_text())["attempts"] == 2
+            make_due()
+            exchange(None, fails=True)
+            assert json.loads(receipt.read_text())["attempts"] == 3
 
-            # A revision can change without changing the selected route.
+            # A genuine config change has a different decision ID and budget.
             config["installedpackages/sdwan"]["slas"]["item"].append(
                 {"name": "unused", "latency_ms": "99", "loss_pct": "1"})
-            exchange(b"ERROR\n", fails=True)
-            assert receipt.read_text() == current_receipt
             exchange(b"OK\n")
-            new_signature = receipt.read_text().rpartition(":")[0]
-            assert new_signature != signature
-            assert new_signature.rsplit(":", 1)[1] == signature.rsplit(":", 1)[1]
+            assert json.loads(receipt.read_text())["attempts"] == 1
+            assert json.loads(receipt.read_text())["decision"] != rejected["decision"]
 
             config["gateways/sdwan_bindings"] = {"item": []}
             config["gateways/sdwan_bindings/item"] = []
             exchange(None, fails=True)
             assert receipt.exists()
+            make_due()
             exchange(b"OK\n")
             assert not receipt.exists() and not observe().get("steering")
-        print("ok - stock and boot stay passive; reloads recover from refusal, timeout, EOF and rejected acknowledgement")
-        print("ok - overdue or mismatched loaded rules are reconciled without touching disabled or unavailable PF")
-        print("ok - acknowledged requests are deduplicated; rejected revisions and unbinding retry")
+        print("ok - stock and boot stay passive and no request precedes snapshot publication")
+        print("ok - three acknowledged but unapplied requests persist across observer restarts and alert once")
+        print("ok - wrong ingress, rejected queue requests and timeout use a bounded budget; convergence resets it")
+
 
 
 if __name__ == "__main__":

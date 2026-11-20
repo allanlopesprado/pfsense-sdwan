@@ -58,6 +58,10 @@ function sdwan_log_plan(array $state, string $kind, array $snapshot, string $cau
 		}
 		return [$state, $entries];
 	}
+	if ($kind === 'expired') {
+		$entries[] = [LOG_WARNING, 'The previous observation expired before a new sample was published.'];
+		return [$state, $entries];
+	}
 	if ($kind === 'start' || $kind === 'stop') {
 		$was_running = $state['running'] ?? false;
 		$state['running'] = $kind === 'start';
@@ -94,6 +98,26 @@ function sdwan_log_plan(array $state, string $kind, array $snapshot, string $cau
 		$entries[] = [LOG_NOTICE, 'Gateway observation recovered.'];
 		unset($state['failure_reported']);
 	}
+
+	$verification = $snapshot['forwarding_application'] ?? [];
+	$previous_verification = $state['forwarding_application'] ?? [];
+	foreach ($verification as $group => $status) {
+		if (($previous_verification[$group] ?? null) === $status) {
+			continue;
+		}
+		$message = match ($status) {
+			'recommended' => 'recommended decision awaiting a native reload',
+			'requested' => 'native reload requested, awaiting verification',
+			'applied' => 'applied to new connections, verified in PF',
+			'blocked' => 'blocked for new connections, verified in PF',
+			'divergent' => 'loaded PF rules diverge from the current decision',
+			'persistent' => 'persistent PF rule divergence after the reload retry limit',
+			default => 'active PF verification unavailable',
+		};
+		$entries[] = [in_array($status, ['divergent', 'persistent', 'unavailable'], true) ? LOG_WARNING : LOG_NOTICE,
+		    'Group ' . sdwan_log_label((string)$group) . ': ' . $message . '.'];
+	}
+	$state['forwarding_application'] = $verification;
 
 	$current = [];
 	foreach ($snapshot['policies'] ?? [] as $name => $policy) {

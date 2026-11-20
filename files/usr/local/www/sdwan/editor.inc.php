@@ -66,10 +66,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 				$sdwan_record[$key] = sdwan_ui_scalar($_POST, $key);
 			}
 		}
-		$optional = ['members' => ['probe_primary', 'probe_secondary'], 'slas' => ['rttsd_ms']];
+		if ($collection === 'policies') {
+			foreach (['primary_check', 'secondary_check', 'degrade_samples', 'recover_seconds'] as $field) {
+				if (array_key_exists($field, $_POST)) {
+					$sdwan_record[$field] = sdwan_ui_scalar($_POST, $field);
+				}
+			}
+		}
+		$optional = ['members' => ['probe_primary', 'probe_secondary'], 'slas' => ['rttsd_ms'],
+		    'policies' => ['primary_check', 'secondary_check', 'degrade_samples', 'recover_seconds']];
 		$cleared = [];
 		foreach ($optional[$collection] ?? [] as $field) {
-			if ($sdwan_record[$field] === '') {
+			if (($sdwan_record[$field] ?? null) === '') {
 				unset($sdwan_record[$field]);
 				$cleared[$field] = true;
 			}
@@ -247,6 +255,19 @@ elseif (!$display_form): ?>
 			->setAttribute('required', 'required')
 			->setHelp(gettext('Select one member to monitor a path, or two or more of the same address family to compare paths. For equal scores the first selected member in the displayed list wins.'));
 		$section->addInput(new Form_Select('strategy', gettext('Selection strategy'), $sdwan_record['strategy'] ?? 'cost', $strategies));
+		$check_modes = ['' => gettext('Member default'), 'ignored' => gettext('Ignore'),
+		    'optional' => gettext('Optional'), 'required' => gettext('Required')];
+		foreach (['primary_check' => gettext('Primary service check'), 'secondary_check' => gettext('Secondary service check')] as $field => $label) {
+			$section->addInput(new Form_Select($field, $label, $sdwan_record[$field] ?? '', $check_modes))
+			    ->setHelp(gettext('With both slots at their default, any configured check can pass. Choosing a mode for either slot ignores a slot left at its default. All required checks must pass. Without required checks, one selected optional check must pass.'));
+		}
+		$section->addInput(new Form_Input('degrade_samples', gettext('Confirm WAN degradation'), 'number',
+		    $sdwan_record['degrade_samples'] ?? '', ['min' => '1', 'max' => '6', 'placeholder' => '1']))
+		    ->setHelp(gettext('Consecutive samples before replacing an already applied path that exceeds a WAN threshold. Values above one allow temporary degraded forwarding. Down links, missing measurements and service failures take effect immediately.'));
+		$section->addInput(new Form_Input('recover_seconds', gettext('Recovery hold (seconds)'), 'number',
+		    $sdwan_record['recover_seconds'] ?? '', ['min' => '0', 'max' => '300', 'placeholder' => '30']))
+		    ->setHelp(gettext('Keep a healthy current path while a better path recovers. Default is 30 seconds.'));
+
 	}
 	$form->add($section);
 	foreach (['revision' => $revision, 'action' => 'save', 'original' => $original] as $field => $value) {
