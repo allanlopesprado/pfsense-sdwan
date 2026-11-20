@@ -31,7 +31,7 @@ jobs:
           usesh: true
           prepare: |
             env ASSUME_ALWAYS_YES=yes pkg bootstrap
-            pkg install -y php84 php84-filter git python3 dpinger
+            pkg install -y php84 php84-filter php84-mbstring git python3 dpinger
           run: |
             set -eu
             SDWAN_CE291_CORE="$PWD/lab-ce291" sh tests/lab/freebsd-dataplane.sh
