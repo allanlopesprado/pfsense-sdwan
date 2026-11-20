@@ -155,6 +155,10 @@ def run(firewall, peer, remote_a, remote_b, remote_c, restore):
         backup = "192.0.2.163"
         members[1]["probe_primary"] = f"tcp://{backup}:7"
         config["fixture_devices"] = {"opt1": remote_a[:-1] + "a", "opt2": remote_b[:-1] + "a"}
+        config["fixture_sources"].update({
+            device: config["fixture_sources"][interface]
+            for interface, device in config["fixture_devices"].items()
+        })
         for address, peer_gateway in ((upstream, "198.51.100.2"), (backup, "203.0.113.2")):
             jexec(firewall, "route", "-n", "add", "-host", address, peer_gateway)
             cleanup.callback(jexec, firewall, "route", "-n", "delete", "-host", address)
