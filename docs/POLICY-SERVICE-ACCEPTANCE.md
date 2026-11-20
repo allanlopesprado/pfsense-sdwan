@@ -61,5 +61,5 @@ On an appliance clone, reproduce the same five phases with two client flows and 
 | Environment | Scope |
 | --- | --- |
 | Unit and PHP fixture tests | Per-policy requirements and legacy defaults, hard and soft degradation, recovery, DHCP next-hop changes, stale samples, restart and accepted reloads with divergent PF. |
-| FreeBSD 15.1 and PF with CE 2.9.1 source | The workflow compiles the exact generator against lab inputs and checks real probes, loaded rules and server-observed packet delivery. This VM uses the FreeBSD kernel, not the pfSense appliance image. |
+| FreeBSD 15.1 and PF with CE 2.9.1 source | The workflow compiles the exact generator against lab inputs and checks real probes, loaded rules and server-observed packet delivery on a stock FreeBSD kernel. The lab supplies configuration and gateway inventory fixtures and a Unix socket that acknowledges requests. It runs the renderer and loads the rules through the real PF separately. The appliance reload service needs its own acceptance run. |
 | pfSense CE 2.9.1 appliance clone | Pending. This session has no isolated CE 2.9.1 appliance with the two-WAN acceptance topology. The production firewall was previously verified as CE 2.9.2. |

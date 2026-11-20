@@ -62,3 +62,24 @@ verify(count($ledger['reported']) === 30 && count($logs) === 6, 'unreported fina
 $malicious = ['policies' => ["bad\ncredential" => ['selected' => "PSK\nsecret", 'path_status' => 'single']]];
 [, $logs] = sdwan_log_plan([], 'observation', $malicious, '', 400);
 verify(!str_contains($logs[0][1], 'credential') && !str_contains($logs[0][1], 'secret'), 'malformed names cannot inject new messages or disclose additional text');
+
+$application_events = [
+	'recommended' => [LOG_NOTICE, 'recommended decision'],
+	'requested' => [LOG_NOTICE, 'native reload requested'],
+	'applied' => [LOG_NOTICE, 'applied to new connections'],
+	'divergent' => [LOG_WARNING, 'loaded PF rules diverge'],
+	'persistent' => [LOG_WARNING, 'persistent PF rule divergence'],
+	'blocked' => [LOG_NOTICE, 'blocked for new connections'],
+];
+$ledger = [];
+foreach ($application_events as $application => [$priority, $message]) {
+	$sample = ['forwarding_application' => ['Dedicated' => $application]];
+	[$ledger, $logs] = sdwan_log_plan($ledger, 'observation', $sample, '', 500);
+	verify(count($logs) === 1 && $logs[0][0] === $priority && str_contains($logs[0][1], $message),
+	    'System Logs reports distinct forwarding state: ' . $application);
+	[$ledger, $logs] = sdwan_log_plan($ledger, 'observation', $sample, '', 505);
+	verify(!$logs, 'Repeated forwarding state stays quiet: ' . $application);
+}
+[, $logs] = sdwan_log_plan($ledger, 'expired', [], '', 540);
+verify(count($logs) === 1 && $logs[0][0] === LOG_WARNING && str_contains($logs[0][1], 'observation expired'),
+    'System Logs reports a stale sample separately from PF divergence');

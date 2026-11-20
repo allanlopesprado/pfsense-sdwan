@@ -503,7 +503,7 @@ function sdwan_steering_pf_status(array $binding, array $state, array $inventory
 			continue;
 		}
 		[$rule] = explode(' label "', $line, 2);
-		if ($ingress !== null && (!preg_match('/\\bin quick on ([^\\s!]+)\\s/', $rule, $device) ||
+		if ($ingress !== null && (!preg_match('/\\bin(?: log(?: [(][^()]+[)])?)? quick on ([^\\s!]+)\\s/', $rule, $device) ||
 		    $device[1] !== ($ingress[$identifier[1]] ?? null))) {
 			return 'pending';
 		}

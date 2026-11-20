@@ -53,7 +53,7 @@ def run(args):
         settings["policies"]["item"].append(dict(erp, name="Backup", primary_check="ignored", secondary_check="required"))
         config["gateways/gateway_group"].append(dict(config["gateways/gateway_group"][0], name="B"))
         config["interfaces"]["lan"]["if"] = args.lan
-        config["filter/rule"][0]["descr"] = "ERP"
+        config["filter/rule"][0].update(descr="ERP", log="")
         for rule in config["filter/rule"][2:]:
             rule["destination"] = {"address": BACKUP, "port": "7"}
         config["filter/rule"][2].update(gateway="B", descr="Backup")

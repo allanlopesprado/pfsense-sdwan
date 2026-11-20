@@ -203,6 +203,9 @@ verify(sdwan_steering_step(['gateway' => 'A'], ['A', 'B'], 'B', 100, 0)['gateway
     'a policy can explicitly choose immediate recovery');
 $pooled = ['revision' => sdwan_config_revision($edited_binding), 'gateway' => 'A', 'pool' => ['A', 'B']];
 $inventory['B'] = ['device' => 'igb1', 'address' => '192.0.2.2', 'weight' => 2];
+$logged = array_map(static fn($line) => str_replace('in quick on', 'in log (all) quick on', $line), $loaded);
+verify(sdwan_steering_pf_status($edited_binding, $runtime, $inventory, $logged, ['301' => 'igb2']) === 'applied',
+    'native rule logging preserves exact ingress and gateway verification');
 $weighted = 'pass in quick on igb2 route-to { ' . str_repeat('(igb0 192.0.2.1), ', 2) .
     str_repeat('(igb1 192.0.2.2), ', 3) . '(igb1 192.0.2.2) } round-robin inet all ridentifier 301';
 verify(sdwan_steering_pf_status($edited_binding, $pooled, $inventory, [$weighted]) === 'applied' &&
