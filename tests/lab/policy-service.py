@@ -249,6 +249,7 @@ with socket.socket(socket.AF_INET,socket.SOCK_DGRAM) as s:
         assert failed["members"]["a"]["status"] == "online"
         assert failed["policies"]["ERP"]["services"]["a"] == "Failed"
         assert failed["policies"]["Backup"]["services"]["a"] == "Passed"
+        print("WAN1 dpinger online; ERP probe failed; backup probe passed", flush=True)
         pair("ERP outage", (WAN_IPS[1], WAN_IPS[0]))
         send(held_erp, "outage-established")
         assert not receive(held_erp, .7), "Existing ERP socket unexpectedly migrated"
@@ -259,7 +260,11 @@ with socket.socket(socket.AF_INET,socket.SOCK_DGRAM) as s:
             def ids(states):
                 result = set()
                 for item in re.split(r"(?=^\S)", states, flags=re.M):
-                    if item and f"{target}:7" in item.splitlines()[0]:
+                    if not item:
+                        continue
+                    header = item.splitlines()[0]
+                    if (f"{target}:7" in header and "ESTABLISHED:ESTABLISHED" in header and
+                            f"route-to: {NEXT_HOPS[0]}@{args.wan_a}" in item):
                         result.update(re.findall(r"id: ([a-f0-9]+) creatorid: ([a-f0-9]+)", item))
                 return result
             same_states = sorted(ids(before_states) & ids(during_states))

@@ -117,6 +117,14 @@ load_rules() {
 }
 : >"$work/selected.pf"
 load_rules
+
+if [ -n "${SDWAN_CE291_CORE:-}" ]; then
+    python3 -B "$repo/tests/lab/policy-service.py" "$SDWAN_CE291_CORE" "$firewall" "$client" "$remote" \
+        "$lan" "$wan_a" "$wan_b" "$remote_a" "${wan_b%?}b" \
+        "$work/main.pf" "$work/before.pf" "$work/after.pf" "$work/remote.pf"
+    exit 0
+fi
+
 baseline() {
     jexec "$firewall" pfctl -sn
     jexec "$firewall" pfctl -sr | awk '!/label "(descr=)?(path-a|path-b|path-c|no-member)"/'
@@ -519,12 +527,6 @@ fi
 if [ "${SDWAN_REAL_DPINGER:-0}" = 1 ]; then
     python3 -B "$repo/tests/lab/freebsd_dpinger.py" "$firewall" "$remote" \
         "$remote_a" "${wan_b%?}b" "$remote_c" "$work/remote.pf"
-fi
-
-if [ -n "${SDWAN_CE291_CORE:-}" ]; then
-    python3 -B "$repo/tests/lab/policy-service.py" "$SDWAN_CE291_CORE" "$firewall" "$client" "$remote" \
-        "$lan" "$wan_a" "$wan_b" "$remote_a" "${wan_b%?}b" \
-        "$work/main.pf" "$work/before.pf" "$work/after.pf" "$work/remote.pf"
 fi
 
 sh "$repo/tests/lab/freebsd-vti-no-sa.sh" "$firewall" "$remote" "$wan_a" "$remote_a" "$work"
