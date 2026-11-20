@@ -141,7 +141,15 @@ def client(target, held):
 
 
 def command(qemu, script, timeout=60):
-    qemu.sendline("echo __START__; sh -ec " + shlex.quote(script) + "; echo __RESULT__$?")
+    invocation = "sh -ec " + shlex.quote(script)
+    if "\n" in script or len(invocation) > 240:
+        qemu.sendline("umask 077; cat >/tmp/sdwan-serial-command <<'SDWAN_SERIAL_END'")
+        for line in script.splitlines():
+            assert len(line) <= 240 and line != "SDWAN_SERIAL_END", line
+            qemu.sendline(line)
+        qemu.sendline("SDWAN_SERIAL_END")
+        invocation = "sh -e /tmp/sdwan-serial-command"
+    qemu.sendline("echo __START__; " + invocation + "; echo __RESULT__$?")
     qemu.expect(r"\r+\n__START__\r+\n", timeout=timeout)
     qemu.expect(r"(?:\r+\n)?__RESULT__(\d+)\r+\n", timeout=timeout)
     result = qemu.before.replace("\r", "").strip()
