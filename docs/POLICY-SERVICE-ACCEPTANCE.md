@@ -40,7 +40,7 @@ After reboot, compare the boot version, the adapter ABI, installed package, nati
 
 ## Reproduce the two-policy test
 
-The [Actions workflow](../.github/workflows/ce291-policy.yml) verifies the signed-release system archive by its pinned digest, extracts the CE 2.9.1 source used for the generator and runs isolated FreeBSD VNETs. To repeat it on a disposable FreeBSD VM as root with Git, Python, PHP with ctype, filter and mbstring and dpinger installed, obtain the official `pfSense-system-2.9.1.pkg` and run the same commands.
+The [Actions workflow](../.github/workflows/ce291-policy.yml) verifies the official system archive by its pinned digest and manifest version, extracts the CE 2.9.1 source used for the generator and runs isolated FreeBSD VNETs. To repeat it on a disposable FreeBSD VM as root with Git, Python, PHP with ctype, filter and mbstring and dpinger installed, obtain the official `pfSense-system-2.9.1.pkg` and run the same commands.
 
 ```sh
 python3 tests/lab/ce291-source.py /path/to/pfSense-system-2.9.1.pkg lab-ce291
@@ -58,8 +58,14 @@ On an appliance clone, reproduce the same five phases with two client flows and 
 | Both WANs unavailable | Blocked for the bound traffic | Blocked for the bound traffic | Record state behavior separately. |
 | Native rollback after WAN recovery | Native group via WAN1 | Native group via WAN1 | Confirm the kernel default and NAT agree with the baseline. |
 
+## Recorded FreeBSD results
+
+During the ERP outage, dpinger continued to report WAN1 online and the DNS control received a real A response. The ERP rule (tracker 41001) used route-to (epair2a 203.0.113.2) and the backup rule (tracker 41003) used route-to (epair1a 198.51.100.2). The echo server returned its observed peer address to each client. New ERP connections returned through 203.0.113.1 and backup connections through 198.51.100.1. Both returned through 198.51.100.1 at baseline, on recovery and after unbinding. The fixture compares the default route and NAT before and after applying each decision.
+
+The established ERP stream retained its path and stopped delivering during the outage. Backup continued on its existing socket. The original ERP stream delivered its pending message when WAN1 recovered. With both WANs unavailable, both bound trackers rendered quick blocks and neither new TCP flow received a reply. The held sockets delivered again after the WANs returned. The rollback rendered the stock rules byte for byte and kept the established sockets usable. [Policy traffic results on Actions](https://github.com/allanlopesprado/pfsense-sdwan/actions/workflows/ce291-policy.yml?query=branch%3Amilestone%2Fpolicy-service-forwarding)
+
 | Environment | Scope |
 | --- | --- |
-| Unit and PHP fixture tests | Per-policy requirements and legacy defaults, hard and soft degradation, recovery, DHCP next-hop changes, stale samples, restart and accepted reloads with divergent PF. |
+| Unit and PHP fixture tests | Passed. Per-policy requirements and legacy defaults, hard and soft degradation, recovery, DHCP next-hop changes, stale samples, restart and accepted reloads with divergent PF. |
 | FreeBSD 15.1 and PF with CE 2.9.1 source | The workflow compiles the exact generator against lab inputs and checks real probes, loaded rules and server-observed packet delivery on a stock FreeBSD kernel. The lab supplies configuration and gateway inventory fixtures and a Unix socket that acknowledges requests. It runs the renderer and loads the rules through the real PF separately. The appliance reload service needs its own acceptance run. |
 | pfSense CE 2.9.1 appliance clone | Pending. This session has no isolated CE 2.9.1 appliance with the two-WAN acceptance topology. The production firewall was previously verified as CE 2.9.2. |
