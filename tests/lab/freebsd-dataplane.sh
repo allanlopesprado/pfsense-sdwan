@@ -187,7 +187,9 @@ expect_roundtrip 192.0.2.163 198.51.100.1 baseline-A
 
 if [ -n "${SDWAN_RENDERED_RULES:-}" ]; then
     verify_pf() {
-        jexec "$firewall" /usr/local/bin/php -n -r '
+        node=$1
+        shift
+        jexec "$node" /usr/local/bin/php -n -r '
             require $argv[1] . "/files/usr/local/pkg/sdwan_steering.inc";
             $binding = ["gateways" => ["A", "B"], "trackers" => ["41001"]];
             $state = ["gateway" => $argv[4], "revision" => sdwan_config_revision($binding)];
@@ -202,13 +204,9 @@ if [ -n "${SDWAN_RENDERED_RULES:-}" ]; then
             }
         ' -- "$repo" "$wan_a" "$wan_b" "$1" "$2"
     }
-    verify_pf A applied
-    verify_pf B pending
-    jexec "$firewall" pfctl -d
-    verify_pf A unavailable
-    jexec "$firewall" pfctl -e
-    verify_pf A applied
-    echo 'ok - the package distinguishes loaded, mismatched and disabled native PF rules'
+    verify_pf "$firewall" A applied
+    verify_pf "$firewall" B pending
+    echo 'ok - the package distinguishes matching and mismatched native PF rules'
 fi
 
 # Hold one TCP session open on A. After switching the rule to B, a second
@@ -527,3 +525,13 @@ sh "$repo/tests/lab/freebsd-vti-no-sa.sh" "$firewall" "$remote" "$wan_a" "$remot
 sh "$repo/tests/lab/freebsd-vti-esp.sh" "$firewall" "$remote" "$wan_a" "$remote_a" "$work" 198.51.100.1 198.51.100.2
 sh "$repo/tests/lab/freebsd-vti-esp.sh" "$firewall" "$remote" "$wan_b" "${wan_b%?}b" "$work" 203.0.113.1 203.0.113.2
 sh "$repo/tests/lab/freebsd-vti-esp.sh" "$firewall" "$remote" "$wan_c" "$remote_c" "$work" 192.0.2.129 192.0.2.130
+
+if [ -n "${SDWAN_RENDERED_RULES:-}" ]; then
+    disabled=sdpfdisabled$$
+    jail -c name="$disabled" persist vnet
+    jails="$jails $disabled"
+    printf 'block drop all ridentifier 41001\n' >"$work/disabled.pf"
+    jexec "$disabled" pfctl -f "$work/disabled.pf"
+    verify_pf "$disabled" A unavailable
+    echo 'ok - an installed ruleset is reported unavailable while PF is disabled'
+fi
