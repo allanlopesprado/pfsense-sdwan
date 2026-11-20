@@ -26,6 +26,7 @@ SCRIPT = Path(__file__).resolve()
 LAB = "/root/sdwan-lab"
 ERP, BACKUP = "192.0.2.162", "192.0.2.163"
 A, B = "198.51.100.1", "203.0.113.1"
+WAN2_RENEWED = ("203.0.113.4", "203.0.113.3")
 GATEWAYS = {"GW_A": ("vtnet0", "198.51.100.2"), "GW_B": ("vtnet2", "203.0.113.2")}
 
 
@@ -67,7 +68,7 @@ def wire(cleanup):
     net_args = []
     for n, (namespace, address) in enumerate((
         ("sdwan-peer", "198.51.100.2/30"), ("sdwan-client", "192.0.2.11/25"),
-        ("sdwan-peer", "203.0.113.2/30"),
+        ("sdwan-peer", "203.0.113.2/29"),
     )):
         bridge, tap, outside, inside = (f"sw-{prefix}{n}" for prefix in ("br", "tap", "out", "wire"))
         run("ip", "link", "add", bridge, "type", "bridge")
@@ -85,6 +86,7 @@ def wire(cleanup):
         run("ip", "-n", namespace, "link", "set", inside, "up")
         net_args += ["-netdev", f"tap,id=lan{n},ifname={tap},script=no,downscript=no",
                      "-device", f"virtio-net-pci,netdev=lan{n}"]
+    run("ip", "-n", "sdwan-peer", "addr", "add", f"{WAN2_RENEWED[1]}/29", "dev", "sw-wire2")
     run("ip", "-n", "sdwan-client", "route", "add", "default", "via", "192.0.2.1")
     for n in range(162, 170):
         run("ip", "-n", "sdwan-peer", "addr", "add", f"192.0.2.{n}/32", "dev", "lo")
@@ -106,6 +108,30 @@ def wire(cleanup):
     if not select.select([server.stdout], [], [], 4)[0] or server.stdout.readline().strip() != "ready":
         raise RuntimeError("The isolated peer failed to start")
     return net_args
+
+
+def serve_lease(cleanup, address, gateway):
+    process = subprocess.Popen(in_ns("sdwan-peer", "dnsmasq", "--keep-in-foreground",
+                               "--conf-file=/dev/null", "--interface=sw-wire2", "--bind-interfaces",
+                               "--port=0", "--dhcp-authoritative", "--leasefile-ro", "--log-dhcp",
+                               f"--dhcp-range={address},{address},255.255.255.248,2m",
+                               f"--dhcp-option=option:router,{gateway}"))
+    cleanup.callback(stop, process)
+    time.sleep(.3)
+    if process.poll() is not None:
+        raise RuntimeError("The disconnected WAN2 DHCP server did not start")
+    return process
+
+
+def wait_lease(qemu, address, gateway):
+    result = command(qemu, f'''i=0
+        until ifconfig vtnet2 | grep -Fq 'inet {address} ' &&
+            test "$(cat /tmp/vtnet2_router 2>/dev/null)" = '{gateway}'; do
+            i=$((i+1)); test "$i" -le 50; sleep 1
+        done
+        ifconfig vtnet2 | grep -F 'inet {address} '
+        cat /tmp/vtnet2_router''', timeout=60)
+    print(f"DHCP lease: {result!r}", flush=True)
 
 
 def fault(*rules):
@@ -235,7 +261,7 @@ def observations(qemu):
     return json.loads(next(line for line in reversed(raw.splitlines()) if line.startswith("{")))
 
 
-def wait_paths(qemu, label, expected, wait_ack=False):
+def wait_paths(qemu, label, expected, wait_ack=False, wan2_hop=None):
     started = time.monotonic()
     deadline = started + 135
     seen = set()
@@ -254,7 +280,7 @@ def wait_paths(qemu, label, expected, wait_ack=False):
             if wait_ack:
                 assert snapshot["forwarding_id"] in seen, (label, "missing native acknowledgement", seen)
             rules = loaded(qemu)
-            assert_rules(rules, expected)
+            assert_rules(rules, expected, wan2_hop)
             for line in rules.values():
                 print(f"{label} PF {line}", flush=True)
             return snapshot
@@ -287,7 +313,7 @@ def loaded(qemu):
     return {line.split()[-1]: line for line in raw.splitlines() if re.search(r"ridentifier (41001|41003)$", line)}
 
 
-def assert_rules(rules, choices):
+def assert_rules(rules, choices, wan2_hop=None):
     assert set(rules) == {"41001", "41003"}, rules
     for group, tracker in (("G", "41001"), ("B", "41003")):
         wanted = choices[group]
@@ -296,6 +322,8 @@ def assert_rules(rules, choices):
             assert line.startswith("block "), line
         else:
             device, hop = GATEWAYS[wanted]
+            if wanted == "GW_B" and wan2_hop is not None:
+                hop = wan2_hop
             assert f"route-to ({device} {hop})" in line, line
 
 
@@ -448,6 +476,10 @@ def verify_unapplied_reload(qemu, primary, certificate):
         assert observations(qemu)["receipt"] == exhausted
         assert_rules(loaded(qemu), primary)
         print("NATIVE_RELOAD_ACCEPTED_BUT_DIVERGENT_RESTART_AND_RETRY_LIMIT_OK", flush=True)
+        command(qemu, f"cp -p {backup} {adapter}; /etc/rc.filter_configure_sync")
+        recovered = wait_paths(qemu, "verified after repairing the renderer", {"G": "GW_B", "B": "GW_A"})
+        assert recovered["forwarding_id"] == exhausted["decision"]
+        wait_receipt(qemu, lambda _, r: r.get("decision") == exhausted["decision"] and r["attempts"] == 0, 15)
     finally:
         command(qemu, f"mv {backup} {adapter}")
         fault()
@@ -455,7 +487,52 @@ def verify_unapplied_reload(qemu, primary, certificate):
     management("restored after divergence", certificate)
 
 
-def acceptance(qemu, cleanup):
+def verify_expired_sample(qemu, primary, certificate):
+    worker = command(qemu, 'pgrep -f -P "$(cat /var/run/sdwand.pid)" /usr/local/sbin/sdwand.php')
+    assert worker.isdecimal(), worker
+    command(qemu, f"kill -STOP {worker}")
+    try:
+        wait_receipt(qemu, lambda sample, _: not sample, 48)
+        command(qemu, "test -s /var/run/sdwan-observer.json; /etc/rc.filter_configure_sync")
+        assert_rules(loaded(qemu), {"G": None, "B": None})
+        tcp_pair("stale observation", (None, None))
+        management("stale observation", certificate)
+    finally:
+        command(qemu, f"kill -CONT {worker}")
+    wait_paths(qemu, "fresh observation after expiry", primary)
+    command(qemu, "grep -Fq 'previous observation expired before a new sample' /var/log/system.log")
+    tcp_pair("fresh observation after expiry", (A, A))
+    print("EXPIRED_SAMPLE_BLOCKED_AND_REPORTED_IN_SYSTEM_LOGS", flush=True)
+
+
+def verify_native_dhcp(qemu, cleanup, provider, certificate):
+    active = {"G": "GW_B", "B": "GW_A"}
+    reference = route_and_nat(qemu)
+    address, gateway = WAN2_RENEWED
+    fault(f'iifname "sw-wire0" ip saddr {A} ip daddr 192.0.2.164 tcp dport 7 drop')
+    try:
+        initial = wait_paths(qemu, "before WAN2 lease change", active)
+        tcp_pair("before WAN2 lease change", (B, A))
+        stop(provider)
+        renewed_provider = serve_lease(cleanup, address, gateway)
+        command(qemu, f"php {LAB}/ce291-guest.php renew_wan2", timeout=90)
+        wait_lease(qemu, address, gateway)
+        current = wait_paths(qemu, "after WAN2 lease change", active, wan2_hop=gateway)
+        assert current["forwarding_id"] != initial["forwarding_id"]
+        tcp_pair("after WAN2 lease change", (address, A))
+        assert route_and_nat(qemu) == reference
+        management("after WAN2 lease change", certificate)
+        print("NATIVE_DHCP_LEASE_NEW_ADDRESS_AND_HOP_APPLIED_IN_PF", flush=True)
+        stop(renewed_provider)
+        serve_lease(cleanup, B, GATEWAYS["GW_B"][1])
+        command(qemu, f"php {LAB}/ce291-guest.php renew_wan2", timeout=90)
+        wait_lease(qemu, B, GATEWAYS["GW_B"][1])
+    finally:
+        fault()
+    wait_paths(qemu, "original WAN2 lease restored", {"G": "GW_A", "B": "GW_A"})
+
+
+def acceptance(qemu, cleanup, provider):
     rv = command(qemu, f"pkg add {LAB}/pfSense-pkg-SDWAN-0.4.28.pkg", timeout=180)
     print(rv.splitlines()[-6:], flush=True)
     assert command(qemu, "pkg query '%v' pfSense-pkg-SDWAN") == "0.4.28"
@@ -488,6 +565,8 @@ def acceptance(qemu, cleanup):
     same_target_probes(qemu)
     vti_no_sa(qemu)
     verify_unapplied_reload(qemu, primary, certificate)
+    verify_expired_sample(qemu, primary, certificate)
+    verify_native_dhcp(qemu, cleanup, provider, certificate)
     old_erp, old_backup = held_connection(ERP, cleanup), held_connection(BACKUP, cleanup)
     assert established(old_erp, "established") == f"{A} established"
     assert established(old_backup, "established") == f"{A} established"
@@ -523,10 +602,16 @@ def acceptance(qemu, cleanup):
     wait_paths(qemu, "both WANs down", {"G": None, "B": None})
     tcp_pair("both WANs down", (None, None))
     management("both WANs down", certificate)
+    for stream in (old_erp, old_backup):
+        assert not established(stream, "held-during-both-down", .8)
     fault()
     wait_paths(qemu, "WANs recovered", primary)
     tcp_pair("WANs recovered", (A, A))
+    for stream in (old_erp, old_backup):
+        assert select.select([stream.stdout], [], [], 12)[0]
+        assert stream.stdout.readline().strip() == f"{A} held-during-both-down"
     assert route_and_nat(qemu) == reference
+    print("Original ERP and backup TCP sessions replied after both WANs recovered", flush=True)
 
     booted = command(qemu, "sysctl -n kern.boottime")
     qemu.sendline("shutdown -r now")
@@ -539,6 +624,9 @@ def acceptance(qemu, cleanup):
     assert route_and_nat(qemu) == reference
     print("REBOOT_WITH_NATIVE_SERVICES_OK", flush=True)
 
+    rollback_sessions = [held_connection(target, cleanup) for target in (ERP, BACKUP)]
+    for stream in rollback_sessions:
+        assert established(stream, "before rollback") == f"{A} before rollback"
     command(qemu, f"php {LAB}/ce291-guest.php unbind")
     command(qemu, f"cp -p {LAB}/filter.stock /etc/inc/filter.inc; rm /etc/inc/filter-sdwan.inc")
     command(qemu, "/usr/local/etc/rc.d/sdwand.sh restart; /etc/rc.filter_configure_sync")
@@ -551,6 +639,8 @@ def acceptance(qemu, cleanup):
     assert command(qemu, "pkg query '%v' pfSense-pkg-SDWAN") == "0.4.27"
     command(qemu, "pkg check -s pfSense-pkg-SDWAN; /usr/local/etc/rc.d/sdwand.sh status")
     tcp_pair("package rollback", (A, A))
+    for stream in rollback_sessions:
+        assert established(stream, "after rollback") == f"{A} after rollback"
     print("NATIVE_AND_PACKAGE_ROLLBACK_OK", flush=True)
 
 
@@ -558,6 +648,7 @@ def appliance(image):
     assert os.geteuid() == 0 and Path(image).is_file()
     with ExitStack() as cleanup:
         nets = wire(cleanup)
+        provider = serve_lease(cleanup, B, GATEWAYS["GW_B"][1])
         log = cleanup.enter_context(open("ce291-console.log", "w", encoding="utf-8"))
         qemu = pexpect.spawn("qemu-system-x86_64", [
             "-machine", "q35,accel=kvm:tcg", "-m", "3072", "-smp", "2",
@@ -567,7 +658,8 @@ def appliance(image):
         cleanup.callback(stop_vm, qemu)
         qemu.logfile_read = log
         first_boot(qemu)
-        acceptance(qemu, cleanup)
+        wait_lease(qemu, B, GATEWAYS["GW_B"][1])
+        acceptance(qemu, cleanup, provider)
         print("CE_291_TWO_WAN_APPLIANCE_ACCEPTED", flush=True)
 
 

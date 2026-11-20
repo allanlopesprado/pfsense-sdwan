@@ -23,7 +23,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: ce291.raw.gz
-          key: ce291-signed-disk-v1-${{ hashFiles('tests/lab/ce291-disk.sh', 'tests/lab/ce291-guest.php', 'tests/lab/ce291-source.py', 'core/filter-sdwan.*', 'tools/prepare-core.py', 'tools/build-lab-pkg.py', 'Makefile', 'pkg-plist', 'pkg-descr', 'files/**', 'dist/pfSense-pkg-SDWAN-0.4.27.pkg') }}
+          key: ce291-signed-disk-v1-${{ hashFiles('tests/lab/ce291-disk.sh', 'tests/lab/ce291-guest.php', 'tests/lab/ce291-source.py', 'core/filter-sdwan.*', 'tools/prepare-core.py', 'dist/pfSense-pkg-SDWAN-0.4.2[78].pkg', 'dist/pfSense-pkg-SDWAN-0.4.2[78].pkg.sha256') }}
       - name: Prepare the audited CE 2.9.1 adapter
         if: steps.disk.outputs.cache-hit != 'true'
         run: |
@@ -40,9 +40,7 @@ jobs:
         with:
           release: "15.1"
           usesh: true
-          prepare: |
-            env ASSUME_ALWAYS_YES=yes pkg bootstrap
-            pkg install -y python311
+          prepare: env ASSUME_ALWAYS_YES=yes pkg bootstrap
           run: sh tests/lab/ce291-disk.sh "$PWD"
       - name: Cache the unbooted disk
         if: steps.disk.outputs.cache-hit != 'true'
@@ -51,7 +49,7 @@ jobs:
           path: ce291.raw.gz
           key: ${{ steps.disk.outputs.cache-primary-key }}
       - name: Install QEMU for the isolated appliance
-        run: sudo apt-get install -y --no-install-recommends qemu-system-x86 nftables python3-pexpect
+        run: sudo apt-get install -y --no-install-recommends qemu-system-x86 nftables python3-pexpect dnsmasq-base
       - name: Run native installation, PF reload, reboot and rollback
         run: |
           set -euo pipefail

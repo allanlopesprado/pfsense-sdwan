@@ -53,9 +53,10 @@ mkdir -p "$root/root/sdwan-lab"
 cp "$work/repos/pfsense.conf" "$root/root/sdwan-lab/pfsense.conf"
 cp "$out/tests/lab/ce291-guest.php" "$root/root/sdwan-lab/"
 cp "$out"/lab-overlay/src/etc/inc/filter*.inc "$root/root/sdwan-lab/"
-cp "$out/dist/pfSense-pkg-SDWAN-0.4.27.pkg" "$root/root/sdwan-lab/"
-python3.11 "$out/tools/build-lab-pkg.py" --output "$work/package"
-cp "$work/package/pfSense-pkg-SDWAN-0.4.28.pkg" "$root/root/sdwan-lab/"
+for package in "$out"/dist/pfSense-pkg-SDWAN-0.4.2[78].pkg; do
+    test "$(sha256 -q "$package")" = "$(awk 'NR == 1 {print $1}' "$package.sha256")"
+done
+cp "$out"/dist/pfSense-pkg-SDWAN-0.4.2[78].pkg "$root/root/sdwan-lab/"
 test -s "$root/boot/gptboot"
 test -s "$root/boot/kernel/kernel"
 gpart bootcode -b "$root/boot/pmbr" -p "$root/boot/gptboot" -i 1 "$device"

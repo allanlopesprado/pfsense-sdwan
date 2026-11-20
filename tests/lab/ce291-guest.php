@@ -20,7 +20,7 @@ if ($action === 'topology') {
     foreach ([
         'wan' => ['vtnet0', '198.51.100.1', '30', 'GW_A'],
         'lan' => ['vtnet1', '192.0.2.1', '25', null],
-        'opt1' => ['vtnet2', '203.0.113.1', '30', 'GW_B'],
+        'opt1' => ['vtnet2', 'dhcp', '29', null],
     ] as $name => [$device, $address, $mask, $gateway]) {
         $interface = $interfaces->addChild($name);
         add_fields($interface, ['if' => $device, 'enable' => '', 'descr' => strtoupper($name),
@@ -30,9 +30,9 @@ if ($action === 'topology') {
         }
     }
     $gateways = $config->addChild('gateways');
-    foreach (['GW_A' => ['wan', '198.51.100.2'], 'GW_B' => ['opt1', '203.0.113.2']] as $name => [$iface, $hop]) {
+    foreach (['GW_A' => ['wan', '198.51.100.2'], 'GW_B' => ['opt1', '203.0.113.2']] as $name => [$iface, $monitor]) {
         add_fields($gateways->addChild('gateway_item'), ['name' => $name, 'interface' => $iface,
-            'gateway' => $hop, 'monitor' => $hop, 'ipprotocol' => 'inet',
+            'gateway' => $iface === 'opt1' ? 'dynamic' : $monitor, 'monitor' => $monitor, 'ipprotocol' => 'inet',
             'interval' => '150', 'loss_interval' => '500', 'time_period' => '3000']);
     }
     $gateways->addChild('defaultgw4', 'GW_A');
@@ -100,6 +100,14 @@ if ($action === 'probe') {
 
 require_once('config.inc');
 require_once('/usr/local/pkg/sdwan_steering.inc');
+if ($action === 'renew_wan2') {
+    require_once('interfaces.inc');
+    require_once('pfsense-utils.inc');
+    interface_bring_down('opt1');
+    restart_interface_services('opt1');
+    interface_configure('opt1');
+    exit;
+}
 if ($action === 'observations') {
     $package_settings = sdwan_get_config();
     $inventory = sdwan_gateways();
