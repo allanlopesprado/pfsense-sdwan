@@ -134,21 +134,15 @@ sdwan_ui_filter('/sdwan/forwarding.php', [
 	'group' => [gettext('Gateway Group'), sdwan_ui_choice($group_name), $group_options],
 ], gettext('Preview'), (bool)($policy_names && $groups_by_name));
 if (!$policy_names || !$groups_by_name) {
-	$preview_button->setAttribute('disabled', 'disabled');
-}
-print $form;
-
-if (!$policy_names || !$groups_by_name) {
 	print_info_box(gettext('A forwarding preview requires an SD-WAN policy and a native gateway group.'), 'info', false);
 }
 if ($preview !== null):
 	if ($preview['errors']) {
 		print_input_errors($preview['errors']);
-
 	}
 ?>
 <div class="panel panel-default">
-	<div class="panel-heading"><h2 class="panel-title"><?=sdwan_ui_escape(sprintf(gettext('Gateway Group %s'), $group_name))?></h2></div>
+	<div class="panel-heading"><h2 class="panel-title"><?=sdwan_ui_escape($group_name === '' ? gettext('Gateway Group') : sprintf(gettext('Gateway Group %s'), $group_name))?></h2></div>
 	<div class="panel-body">
 		<div class="container-fluid">
 		<dl class="dl-horizontal">
@@ -198,8 +192,10 @@ if ($preview !== null):
 			?><tr><td><?=sdwan_ui_escape($name)?></td><td><?=sdwan_ui_escape($tier)?></td></tr><?php endforeach; ?>
 			</tbody>
 		</table></div>
+		<?php endif; ?>
 	</div>
 </div>
+<?php if ($group !== null): ?>
 <div class="panel panel-default">
 	<div class="panel-heading"><h2 class="panel-title"><?=gettext('Firewall Rules')?></h2></div>
 	<div class="panel-body">
@@ -226,10 +222,10 @@ if ($preview !== null):
 			?></tbody>
 		</table></div>
 		<div class="container-fluid"><p class="help-block"><?=gettext('Review rule order and local or VPN exceptions on the ingress interface.')?></p></div>
-		<?php endif; ?>
 	</div>
 </div>
-<?php if ($supported && $native_edit && $binding === null && !$preview['errors'] && $preview['binding'] !== null): ?>
+<?php endif;
+if ($supported && $native_edit && $binding === null && !$preview['errors'] && $preview['binding'] !== null): ?>
 	<p class="help-block"><?=gettext('Experimental forwarding. Verify the active firewall rules after binding.')?></p>
 	<form method="post" action="/sdwan/forwarding.php" class="action-buttons">
 		<input type="hidden" name="policy" value="<?=sdwan_ui_escape($policy_name)?>">
