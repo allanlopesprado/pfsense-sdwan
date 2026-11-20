@@ -6,7 +6,7 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: ce291-appliance-${{ github.ref }}
+  group: ce291-native-${{ github.ref }}
   cancel-in-progress: true
 jobs:
   appliance:
@@ -35,8 +35,8 @@ jobs:
           prepare: env ASSUME_ALWAYS_YES=yes pkg bootstrap
           run: sh tests/lab/ce291-disk.sh "$PWD"
       - name: Install QEMU for the isolated appliance
-        run: sudo apt-get install -y --no-install-recommends qemu-system-x86 python3-pexpect
-      - name: Verify the Netgate kernel and start the installed system
+        run: sudo apt-get install -y --no-install-recommends qemu-system-x86 nftables python3-pexpect
+      - name: Run native installation, PF reload, reboot and rollback
         run: |
           set -euo pipefail
           gunzip ce291.raw.gz
