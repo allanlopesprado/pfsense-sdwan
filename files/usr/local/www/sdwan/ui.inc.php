@@ -87,7 +87,7 @@ function sdwan_ui_filter(string $url, array $fields, string $action, bool $enabl
 	?>
 	<style>
 	.sdwan-filter { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px 12px; padding: 12px 15px; }
-	.sdwan-filter .form-group { flex: 1 1 13rem; min-width: 0; max-width: 25rem; margin: 0; }
+	.sdwan-filter .form-group { flex: 1 1 13rem; min-width: 0; max-width: 25rem; margin: 0; padding: 0; border: 0; }
 	.sdwan-filter .form-control { width: 100%; }
 	@media (max-width: 575px) {
 		.sdwan-filter .form-group { flex-basis: 100%; max-width: none; }

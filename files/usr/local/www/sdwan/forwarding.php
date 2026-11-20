@@ -177,7 +177,7 @@ if ($preview !== null):
 		</form>
 		<?php endforeach; endif; ?>
 		<?php if (!$preview['errors'] && $preview['binding'] !== null): ?>
-		<p class="text-success"><i class="fa-solid fa-check fa-fw" aria-hidden="true"></i>
+		<p><i class="fa-solid fa-check fa-fw text-success" aria-hidden="true"></i>
 			<?=sdwan_ui_escape(sprintf(gettext('The policy matches the native group. Ingress rules in scope: %d.'), count($preview['binding']['trackers'])))?></p>
 		<?php endif; ?>
 		</div>
@@ -260,7 +260,10 @@ if ($bindings_by_group): ?>
 </div>
 <?php endif;
 if (!$bindings_by_group && $native_edit): ?>
-<details class="panel panel-default">
+<style>
+.sdwan-forwarding-setup > summary { display: list-item; list-style-position: inside; cursor: pointer; }
+</style>
+<details class="panel panel-default sdwan-forwarding-setup">
 	<summary class="panel-heading"><span class="panel-title"><?=gettext('Set up forwarding')?></span></summary>
 	<div class="panel-body">
 		<ol>
