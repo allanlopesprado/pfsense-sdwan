@@ -166,6 +166,20 @@ $answer = pack('nnnnnn', 17, 0x8180, 1, 1, 0, 0) . $question .
 check('DNS probe requires a response matching its transaction and question',
     sdwan_probe_dns_answer($answer, 17, $question) && !sdwan_probe_dns_answer($answer, 18, $question) &&
     !sdwan_probe_dns_answer($answer, 17, sdwan_probe_dns_question('another.example')));
+$base = pack('nnnnnn', 17, 0x8180, 1, 1, 0, 0) . $question;
+$alias = substr(sdwan_probe_dns_question('target.example.net'), 0, -4);
+$cname = pack('nnnNn', 0xc00c, 5, 1, 60, strlen($alias)) . $alias;
+$rr = pack('nnNnC4', 1, 1, 60, 4, 192, 0, 2, 43);
+$alias_offset = strlen($base) + 12;
+$chain = pack('nnnnnn', 17, 0x8180, 1, 2, 0, 0) . $question .
+    $cname . pack('n', 0xc000 | $alias_offset) . $rr;
+check('DNS probes require a complete A answer for the requested name or its CNAME',
+    sdwan_probe_dns_answer($chain, 17, $question) &&
+    !sdwan_probe_dns_answer($base . $cname, 17, $question) &&
+    !sdwan_probe_dns_answer($base . $alias . $rr, 17, $question) &&
+    !sdwan_probe_dns_answer(substr($answer, 0, -1), 17, $question) &&
+    !sdwan_probe_dns_answer(substr_replace($answer, pack('n', 0x8380), 2, 2), 17, $question));
+
 $route = "gateway: 192.0.2.1\ninterface: wan0\nflags: <UP,GATEWAY,HOST,DONE,STATIC>";
 check('service probes require an exact host route over the intended next hop',
     sdwan_probe_route_matches($route, 'wan0', '192.0.2.1') &&

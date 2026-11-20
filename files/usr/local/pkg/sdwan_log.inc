@@ -50,6 +50,14 @@ function sdwan_log_plan(array $state, string $kind, array $snapshot, string $cau
 		}
 		return [$state, $entries];
 	}
+	if ($kind === 'filter_pending') {
+		$last = $state['filter_pending_at'] ?? null;
+		if ($last === null || $now < $last || $now - $last >= 300) {
+			$entries[] = [LOG_WARNING, 'The active filter differs from the SD-WAN decision. Requesting a native reload.'];
+			$state['filter_pending_at'] = $now;
+		}
+		return [$state, $entries];
+	}
 	if ($kind === 'start' || $kind === 'stop') {
 		$was_running = $state['running'] ?? false;
 		$state['running'] = $kind === 'start';

@@ -185,6 +185,32 @@ expect_roundtrip 192.0.2.162 198.51.100.1 initial-A
 jexec "$firewall" pfctl -s labels | counter path-a
 expect_roundtrip 192.0.2.163 198.51.100.1 baseline-A
 
+if [ -n "${SDWAN_RENDERED_RULES:-}" ]; then
+    verify_pf() {
+        jexec "$firewall" /usr/local/bin/php -n -r '
+            require $argv[1] . "/files/usr/local/pkg/sdwan_steering.inc";
+            $binding = ["gateways" => ["A", "B"], "trackers" => ["41001"]];
+            $state = ["gateway" => $argv[4], "revision" => sdwan_config_revision($binding)];
+            $inventory = [
+                "A" => ["device" => $argv[2], "address" => "198.51.100.2"],
+                "B" => ["device" => $argv[3], "address" => "203.0.113.2"],
+            ];
+            $status = sdwan_steering_pf_status($binding, $state, $inventory, sdwan_steering_pf_rules());
+            if ($status !== $argv[5]) {
+                fwrite(STDERR, "Expected {$argv[5]}, found {$status}\n");
+                exit(1);
+            }
+        ' -- "$repo" "$wan_a" "$wan_b" "$1" "$2"
+    }
+    verify_pf A applied
+    verify_pf B pending
+    jexec "$firewall" pfctl -d
+    verify_pf A unavailable
+    jexec "$firewall" pfctl -e
+    verify_pf A applied
+    echo 'ok - the package distinguishes loaded, mismatched and disabled native PF rules'
+fi
+
 # Hold one TCP session open on A. After switching the rule to B, a second
 # transaction on this same socket must retain its A translation and state.
 (

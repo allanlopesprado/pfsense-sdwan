@@ -61,14 +61,85 @@ function sdwan_probe_dns_question(string $name): string {
 	return $question . "\0" . pack('nn', 1, 1);
 }
 
+/* Expand a bounded DNS name, retaining label boundaries for comparisons. */
+function sdwan_probe_dns_name(string $packet, int &$offset): ?string {
+	$size = strlen($packet);
+	$cursor = $offset;
+	$end = null;
+	$jumps = 0;
+	$name = '';
+	while ($cursor < $size && strlen($name) < 255) {
+		$length = ord($packet[$cursor]);
+		if (($length & 0xc0) === 0xc0) {
+			if ($cursor + 1 >= $size) {
+				return null;
+			}
+			$pointer = (($length & 0x3f) << 8) | ord($packet[$cursor + 1]);
+			if ($pointer < 12 || $pointer >= $cursor || ++$jumps > 32) {
+				return null;
+			}
+			$end ??= $cursor + 2;
+			$cursor = $pointer;
+			continue;
+		}
+		if ($length > 63 || $cursor + 1 + $length > $size) {
+			return null;
+		}
+		if ($length === 0) {
+			$offset = $end ?? ($cursor + 1);
+			return $name . "\0";
+		}
+		$name .= chr($length) . strtolower(substr($packet, $cursor + 1, $length));
+		$cursor += $length + 1;
+	}
+	return null;
+}
+
 function sdwan_probe_dns_answer(string $reply, int $id, string $question): bool {
-	if (strlen($reply) <= 12 + strlen($question)) {
+	$size = strlen($reply);
+	$offset = 12 + strlen($question);
+	if ($size <= $offset) {
 		return false;
 	}
 	$header = unpack('nid/nflags/nquestions/nanswers', $reply);
-	return $header['id'] === $id && ($header['flags'] & 0xfa0f) === 0x8000 &&
-	    $header['questions'] === 1 && $header['answers'] > 0 &&
-	    substr($reply, 12, strlen($question)) === $question;
+	if ($header['id'] !== $id || ($header['flags'] & 0xfa0f) !== 0x8000 ||
+	    $header['questions'] !== 1 || $header['answers'] > 128 ||
+	    substr($reply, 12, strlen($question)) !== $question) {
+		return false;
+	}
+	$addresses = $aliases = [];
+	for ($i = 0; $i < $header['answers']; $i++) {
+		$owner = sdwan_probe_dns_name($reply, $offset);
+		if ($owner === null || $offset + 10 > $size) {
+			return false;
+		}
+		$rr = unpack('ntype/nclass/Nttl/nlength', $reply, $offset);
+		$offset += 10;
+		$end = $offset + $rr['length'];
+		if ($end > $size) {
+			return false;
+		}
+		if ($rr['class'] === 1 && $rr['type'] === 1 && $rr['length'] === 4) {
+			$addresses[$owner] = true;
+		} elseif ($rr['class'] === 1 && $rr['type'] === 5) {
+			$alias = sdwan_probe_dns_name($reply, $offset);
+			if ($alias === null || $offset !== $end || (isset($aliases[$owner]) && $aliases[$owner] !== $alias)) {
+				return false;
+			}
+			$aliases[$owner] = $alias;
+		}
+		$offset = $end;
+	}
+	$name = strtolower(substr($question, 0, -4));
+	while (isset($aliases[$name])) {
+		$target = $aliases[$name];
+		unset($aliases[$name]); // This also bounds a loop in a CNAME chain.
+		if (isset($addresses[$name])) {
+			return false;
+		}
+		$name = $target;
+	}
+	return isset($addresses[$name]);
 }
 
 /* All sockets are bound to the live interface source. Require an exact native
@@ -93,12 +164,13 @@ function sdwan_probe_path(array $target, array $gateway): ?array {
 	if ($next === 'dynamic') {
 		$next = $family === 'inet' ? get_interface_gateway($interface) : get_interface_gateway_v6($interface);
 	}
-	if (!is_string($next) || sdwan_monitor_address($next, $family, $device, true) === null) {
+	$next = is_string($next) ? sdwan_monitor_address($next, $family, $device, true) : null;
+	if ($next === null) {
 		return null;
 	}
 	exec('/bin/timeout 0.3 /sbin/route -n get -' . $family . ' ' . escapeshellarg($target['address']) . ' 2>/dev/null', $lines, $result);
 	return $result === 0 && sdwan_probe_route_matches(implode("\n", $lines), $device, $next)
-	    ? ['device' => $device, 'source' => $source] : null;
+	    ? ['device' => $device, 'source' => $source, 'next_hop' => $next] : null;
 }
 
 function sdwan_probe_observe(array $members, array $inventory, array $observations): array {

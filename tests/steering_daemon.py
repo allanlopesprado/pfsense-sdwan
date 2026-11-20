@@ -22,6 +22,12 @@ def run(binary, load_filter_extension):
         daemon.write_text(daemon.read_text().replace(installed, str(work / "sdwan_steering.inc")))
         for name in ("sdwan_preflight.inc", "sdwan_steering.inc"):
             shutil.copy(PKG / name, work)
+        hook = work / "sdwan_steering.inc"
+        source = hook.read_text()
+        start = source.index("function sdwan_steering_pf_rules(): ?array {")
+        end = source.index("\n}", start)
+        hook.write_text(source[:start] + "function sdwan_steering_pf_rules(): ?array {"
+                        + "return config_get_path('fixture_pf_rules');" + source[end:])
         event_socket = work / "reload.sock"
         (work / "filter.inc").write_text(
             "<?php\nfunction filter_sdwan_binding_api(): int { return config_get_path('abi', 0); }\n"
@@ -107,24 +113,47 @@ def run(binary, load_filter_extension):
                 assert not receipt.exists()
             exchange(b"OK\n")
             original = receipt.read_text()
-            assert original.startswith("ack:")
-            observe()  # With no listener reply, a duplicate request would fail.
+            signature, _, at = original.rpartition(":")
+            assert signature.startswith("ack:") and int(at) <= int(time.time())
+            observe()  # Even a missing rule gets time for the queue to drain.
             assert receipt.read_text() == original
-            receipt.write_text(original.rsplit(":", 1)[1])  # Receipt from v0.4.3.
+            receipt.write_text(signature)  # Acknowledgement from before PF verification.
             exchange(b"OK\n")
-            assert receipt.read_text() == original
+            assert receipt.read_text().rpartition(":")[0] == signature
             snapshot.unlink()
             exchange(b"OK\n")
-            assert receipt.read_text() == original
+            assert receipt.read_text().rpartition(":")[0] == signature
+
+            overdue = f"{signature}:{int(time.time()) - 60}"
+            receipt.write_text(overdue)
+            observe()  # PF is unavailable. Do not poll the reload queue in a loop.
+            assert receipt.read_text() == overdue
+            config["fixture_pf_rules"] = ['block drop in quick on igb0 inet all ridentifier 301']
+            observe()
+            assert receipt.read_text() == overdue
+            config["fixture_pf_rules"] = ['pass in quick on igb0 inet all ridentifier 301']
+            config["booting"] = True
+            observe()
+            assert receipt.read_text() == overdue
+            config["booting"] = False
+            exchange(b"ERROR\n", fails=True)
+            assert receipt.read_text() == overdue
+            exchange(b"OK\n")
+            current_receipt = receipt.read_text()
+            assert current_receipt != overdue
+            observe()  # The acknowledged retry was recent, so it is not requeued yet.
+            assert receipt.read_text() == current_receipt
+            config["fixture_pf_rules"] = ['block drop in quick on igb0 inet all ridentifier 301']
 
             # A revision can change without changing the selected route.
             config["installedpackages/sdwan"]["slas"]["item"].append(
                 {"name": "unused", "latency_ms": "99", "loss_pct": "1"})
             exchange(b"ERROR\n", fails=True)
-            assert receipt.read_text() == original
+            assert receipt.read_text() == current_receipt
             exchange(b"OK\n")
-            assert receipt.read_text() != original
-            assert receipt.read_text().rsplit(":", 1)[1] == original.rsplit(":", 1)[1]
+            new_signature = receipt.read_text().rpartition(":")[0]
+            assert new_signature != signature
+            assert new_signature.rsplit(":", 1)[1] == signature.rsplit(":", 1)[1]
 
             config["gateways/sdwan_bindings"] = {"item": []}
             config["gateways/sdwan_bindings/item"] = []
@@ -133,6 +162,7 @@ def run(binary, load_filter_extension):
             exchange(b"OK\n")
             assert not receipt.exists() and not observe().get("steering")
         print("ok - stock and boot stay passive; reloads recover from refusal, timeout, EOF and rejected acknowledgement")
+        print("ok - overdue or mismatched loaded rules are reconciled without touching disabled or unavailable PF")
         print("ok - acknowledged requests are deduplicated; rejected revisions and unbinding retry")
 
 

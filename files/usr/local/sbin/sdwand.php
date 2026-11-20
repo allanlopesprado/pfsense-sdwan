@@ -118,8 +118,23 @@ function sdwan_observe_once(): void {
 					$snapshot['steering'] = [];
 				}
 				$signature = 'ack:' . $snapshot['config_revision'] . ':' . sdwan_steering_signature($snapshot['steering']);
-				$reload = $prior === null ||
-				    !is_file($receipt) || file_get_contents($receipt) !== $signature;
+				$ack = is_file($receipt) ? file_get_contents($receipt) : false;
+				$ack_time = is_string($ack) &&
+				    preg_match('/\\A' . preg_quote($signature, '/') . ':([0-9]{1,12})\\z/', $ack, $match)
+				    ? (int)$match[1] : null;
+				$now = time();
+				$reload = $prior === null || $ack_time === null || $ack_time > $now;
+				// A queue acknowledgement does not prove the new rules were loaded.
+				if (!$reload && $snapshot['steering'] && $now - $ack_time >= SDWAN_MAX_SNAPSHOT_AGE &&
+				    !is_platform_booting() && ($rules = sdwan_steering_pf_rules()) !== null) {
+					foreach (sdwan_steering_bindings() as $group => $binding) {
+						if (sdwan_steering_pf_status($binding, $snapshot['steering'][$group], $inventory, $rules) === 'pending') {
+							$reload = true;
+							sdwan_log_event('filter_pending');
+							break;
+						}
+					}
+				}
 			}
 		}
 		$json = json_encode($snapshot, JSON_THROW_ON_ERROR);
@@ -144,7 +159,8 @@ function sdwan_observe_once(): void {
 				throw new RuntimeException('pfSense did not accept the filter reload request');
 			}
 			if (config_get_path('gateways/sdwan_bindings/item', [])) {
-				if (file_put_contents($receipt, $signature, LOCK_EX) !== strlen($signature)) {
+				$ack = $signature . ':' . time();
+				if (file_put_contents($receipt, $ack, LOCK_EX) !== strlen($ack)) {
 					throw new RuntimeException('Cannot record the filter reload request');
 				}
 			} elseif (is_file($receipt)) {

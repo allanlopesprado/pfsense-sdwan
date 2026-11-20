@@ -377,8 +377,8 @@ function sdwan_steering_loaded_path_matches(string $rule, array $gateways): bool
 	foreach ($paths as [, $device, $address]) {
 		$gateway = $gateways[$device] ?? null;
 		$next = @inet_pton(explode('%', $address, 2)[0]);
-		if ($gateway === null || $next === false || ($gateway['address'] !== 'dynamic' &&
-		    $next !== @inet_pton(explode('%', $gateway['address'], 2)[0]))) {
+		if ($gateway === null || $next === false ||
+		    $next !== @inet_pton(explode('%', $gateway['address'], 2)[0])) {
 			return false;
 		}
 		$seen[$device] = ($seen[$device] ?? 0) + 1;
@@ -399,8 +399,8 @@ function sdwan_steering_pf_rules(): ?array {
 	if (!function_exists('exec') || !is_executable('/sbin/pfctl') || !is_executable('/bin/timeout')) {
 		return null;
 	}
-	exec('/bin/timeout 2 /sbin/pfctl -sr 2>/dev/null', $lines, $status);
-	return $status === 0 ? $lines : null;
+	exec("/bin/timeout 2 /bin/sh -c '/sbin/pfctl -si && /sbin/pfctl -sr' 2>/dev/null", $lines, $status);
+	return $status === 0 && preg_match('/^Status:\s+Enabled(?:\s|$)/', $lines[0] ?? '') ? $lines : null;
 }
 
 function sdwan_steering_pf_status(array $binding, array $state, array $inventory, ?array $lines): string {
@@ -421,7 +421,25 @@ function sdwan_steering_pf_status(array $binding, array $state, array $inventory
 		    !isset($inventory[$name]['device'], $inventory[$name]['address'])) {
 			return 'pending';
 		}
-		$gateways[$inventory[$name]['device']] = $inventory[$name];
+		$gateway = $inventory[$name];
+		if ($gateway['address'] === 'dynamic') {
+			$lookup = match ($gateway['family'] ?? null) {
+				'inet' => 'get_interface_gateway',
+				'inet6' => 'get_interface_gateway_v6',
+				default => null,
+			};
+			if ($lookup === null || !isset($gateway['interface'])) {
+				return 'pending';
+			}
+			if (!function_exists($lookup)) {
+				require_once('gwlb.inc');
+			}
+			$gateway['address'] = $lookup($gateway['interface']);
+			if (!is_string($gateway['address'])) {
+				return 'pending';
+			}
+		}
+		$gateways[$gateway['device']] = $gateway;
 	}
 	if (count($gateways) !== count($pool)) {
 		return 'pending';

@@ -166,6 +166,16 @@ verify(sdwan_steering_pf_status($edited_binding, $runtime, $inventory, [str_repl
     sdwan_steering_pf_status($edited_binding, $runtime, $inventory, [$loaded[0] . '0']) === 'pending' &&
     sdwan_steering_pf_status($edited_binding, [], $inventory, $loaded) === 'pending',
     'wrong next hop, wrong tracker and stale samples are never shown as applied');
+$dynamic = ['A' => ['device' => 'igb0', 'address' => 'dynamic', 'family' => 'inet', 'interface' => 'wan']];
+$current['fixture/dynamic/wan'] = '192.0.2.1';
+verify(sdwan_steering_pf_status($edited_binding, $runtime, $dynamic, $loaded) === 'applied',
+    'active PF verifies a resolved dynamic next hop');
+$current['fixture/dynamic/wan'] = '192.0.2.2';
+verify(sdwan_steering_pf_status($edited_binding, $runtime, $dynamic, $loaded) === 'pending',
+    'a renewed dynamic gateway requires the new next hop in PF');
+unset($current['fixture/dynamic/wan']);
+verify(sdwan_steering_pf_status($edited_binding, $runtime, $dynamic, $loaded) === 'pending',
+    'an unresolved dynamic gateway is not shown as applied');
 $pooled = ['revision' => sdwan_config_revision($edited_binding), 'gateway' => 'A', 'pool' => ['A', 'B']];
 $inventory['B'] = ['device' => 'igb1', 'address' => '192.0.2.2', 'weight' => 2];
 $weighted = 'pass in quick on igb2 route-to { ' . str_repeat('(igb0 192.0.2.1), ', 2) .
