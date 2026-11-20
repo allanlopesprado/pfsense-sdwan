@@ -169,6 +169,7 @@ echo json_encode([http_response_code() ?: 200, $body, $sdwan_title_link,
     retargeted = render("ajax")[1]
     assert "No current data" in retargeted and "GW_B" not in retargeted
     fixture["gateways/gateway_item"][0].pop("monitor")
+    config.write_text(json.dumps(fixture))
 
     def voice_paths(voice):
         save({"policies": dict(snapshot["policies"], Voice=voice)})
