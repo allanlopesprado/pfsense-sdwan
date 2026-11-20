@@ -25,136 +25,138 @@ require_once('/usr/local/pkg/sdwan_engine.inc');
 
 $sdwanRender = static function (): void {
 	$escape = static fn($value) => htmlspecialchars((string)$value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
-	$notice = static function (string $message) use ($escape): void {
-		echo '<p class="text-center sdwan-widget-note">' . $escape($message) . '</p>';
-	};
 	try {
 		$config = sdwan_get_config();
 	} catch (UnexpectedValueException $error) {
-		$notice(gettext('The stored SD-WAN configuration cannot be read.'));
+		echo '<p class="sdwan-widget-note">' . $escape(gettext('The stored SD-WAN configuration cannot be read.')) . '</p>';
+		return;
+	}
+	if (!$config['policies']) {
+		echo '<p class="sdwan-widget-note">' . $escape(gettext('No SD-WAN policies configured.'));
+		if (isAllowedPage('/sdwan/policies.php')) {
+			echo ' <a href="/sdwan/policies.php">' . $escape(gettext('Configure policies')) . '</a>';
+		}
+		echo '</p>';
 		return;
 	}
 
 	$inventory = sdwan_gateways();
-	$members = array_column($config['members'], 'gateway', 'name');
-	$gateways = $members ? array_values($members) : array_keys($inventory);
-	if (!$gateways) {
-		$notice(gettext('No available gateways.'));
-		return;
-	}
 	$snapshot = sdwan_current_snapshot($config, $inventory);
-	if ($members) {
-		$samples = [];
-		foreach ($members as $member => $gateway) {
-			$samples[$gateway] = $snapshot['members'][$member] ?? [];
+	$members = array_column($config['members'], 'gateway', 'name');
+	$can_inspect = isAllowedPage('/sdwan/diagnostics.php');
+	$can_view_forwarding = sdwan_can_view_forwarding();
+	$bindings_by_policy = [];
+	$bindings_error = false;
+	$pf_rules = null;
+	if ($can_view_forwarding) {
+		require_once('/usr/local/pkg/sdwan_steering.inc');
+		try {
+			foreach (sdwan_steering_bindings() as $binding) {
+				$bindings_by_policy[$binding['policy']][] = $binding;
+			}
+		} catch (UnexpectedValueException $error) {
+			$bindings_error = true;
 		}
-	} else {
-		$samples = $snapshot['gateways'] ?? [];
+		if ($snapshot !== null && $bindings_by_policy && sdwan_steering_supported()) {
+			$pf_rules = sdwan_steering_pf_rules();
+		}
 	}
-
-	$unavailable = [];
-	foreach ($config['policies'] as $policy) {
-		$name = $policy['name'];
-		$result = $snapshot['policies'][$name] ?? null;
-		if ($result === null || $result['selected'] !== null) {
-			continue;
-		}
-		$candidates = $result['candidates'] ?? [];
-		if (count($candidates) !== count($policy['members']) ||
-		    array_diff($policy['members'], array_keys($candidates))) {
-			continue;
-		}
-		$unavailable[] = $name;
-	}
-	$defaults = [
-		'inet' => config_get_path('gateways/defaultgw4', ''),
-		'inet6' => config_get_path('gateways/defaultgw6', ''),
-	];
-	$canSeeDetails = isAllowedPage('/sdwan/diagnostics.php');
-	$policyLinks = static function (array $policies) use ($escape, $canSeeDetails): string {
-		$labels = [];
-		foreach ($policies as $policy) {
-			$label = $escape($policy);
-			$labels[] = $canSeeDetails ?
-			    '<a href="/sdwan/diagnostics.php?policy=' . rawurlencode($policy) . '">' . $label . '</a>' : $label;
-		}
-		return implode(', ', $labels);
-	};
-	$metric = static function (?float $number, int $precision, string $unit): string {
-		return $number === null ? '—' : number_format($number, $precision, '.', '') . $unit;
-	};
 	?>
 	<div class="table-responsive">
 	<table class="table table-striped table-hover table-condensed">
-		<caption class="sr-only"><?=gettext('SD-WAN link monitoring')?></caption>
+		<caption class="sr-only"><?=gettext('SD-WAN policy forwarding')?></caption>
 		<thead><tr>
-			<th scope="col" class="sdwan-widget-icon" aria-hidden="true"></th>
-			<th scope="col"><?=gettext('Name')?></th>
-			<th scope="col" class="sdwan-widget-latency" title="<?=gettext('Round-trip time')?>">RTT</th>
-			<th scope="col" class="sdwan-widget-latency" title="<?=gettext('RTT standard deviation')?>">RTTsd</th>
-			<th scope="col" class="sdwan-widget-loss"><?=gettext('Loss')?></th>
-			<th scope="col" class="sdwan-widget-state"><?=gettext('Status')?></th>
+			<th scope="col" class="sdwan-widget-policy"><?=gettext('Policy')?></th>
+			<th scope="col" class="sdwan-widget-egress"><?=gettext('Egress for new connections')?></th>
+			<th scope="col"><?=gettext('Status')?></th>
 		</tr></thead>
 		<tbody>
-		<?php foreach ($gateways as $gateway):
-			$entry = $inventory[$gateway] ?? null;
-			$sample = $samples[$gateway] ?? [];
-			$address = $entry['address'] ?? null;
-			if ($address === 'dynamic') {
-				require_once('gwlb.inc');
-				$address = $entry['family'] === 'inet6' ? get_interface_gateway_v6($entry['interface']) :
-				    get_interface_gateway($entry['interface']);
+		<?php foreach ($config['policies'] as $policy):
+			$name = $policy['name'];
+			$result = $snapshot['policies'][$name] ?? [];
+			$candidates = $result['candidates'] ?? [];
+			$evaluated = count($candidates) === count($policy['members']) &&
+			    !array_diff($policy['members'], array_keys($candidates));
+			$eligible = [];
+			if ($evaluated) {
+				foreach (array_keys($candidates, 'Eligible', true) as $member) {
+					$eligible[] = $members[$member];
+				}
 			}
-			$display_address = is_string($address) && filter_var(explode('%', $address, 2)[0], FILTER_VALIDATE_IP);
-			$is_default = ($defaults[$entry['family'] ?? ''] ?? '') === $gateway;
-			$status = $sample['status'] ?? 'unknown';
-			if ($entry === null || $entry['force_down']) {
-				$status = 'down';
-				$sample = [];
-			} elseif ($entry['monitor_disabled']) {
-				$status = 'unmonitored';
-				$sample = [];
-			} elseif ($status === 'unknown') {
-				$sample = [];
-			}
-			$loss = $sample['loss_pct'] ?? null;
-			$rtt = $loss >= 100 ? null : ($sample['rtt_ms'] ?? null);
-			$rttsd = $loss >= 100 ? null : ($sample['rttsd_ms'] ?? null);
-			[$icon, $state_class, $label] = match ($status) {
-				'online' => ['fa-regular fa-circle-check', 'bg-success', gettext('Online')],
-				'degraded' => ['fa-solid fa-triangle-exclamation', 'bg-warning', gettext('Warning')],
-				'down' => ['fa-regular fa-circle-xmark', 'bg-danger', gettext('Down')],
-				'unmonitored' => ['fa-solid fa-ban', 'bg-info', gettext('Monitor off')],
-				default => ['fa-regular fa-circle-question', 'bg-info', gettext('No data')],
-			};
+			$bindings = $bindings_by_policy[$name] ?? [null];
+			foreach ($bindings as $binding):
+				$group = $binding['group'] ?? null;
+				$url = $can_inspect ? '/sdwan/diagnostics.php?policy=' . rawurlencode($name) : null;
+				$egress = [];
+				$backup = '';
+				$detail = '';
+				if ($binding !== null) {
+					$url = '/sdwan/forwarding.php?' . http_build_query(['policy' => $name, 'group' => $group]);
+					$state = $snapshot['steering'][$group] ?? [];
+					$verified = sdwan_steering_pf_status($binding, is_array($state) ? $state : [], $inventory, $pf_rules);
+					[$color, $status] = match (true) {
+						$snapshot === null => ['bg-info', gettext('No current data')],
+						$verified === 'applied' => ['bg-success', gettext('Applied')],
+						$verified === 'blocked' => ['bg-danger', gettext('Blocked')],
+						$verified === 'pending' => ['bg-warning', gettext('Rules pending')],
+						default => ['bg-warning', gettext('Rules unverified')],
+					};
+					if ($verified === 'applied') {
+						$egress = $state['pool'] ?? [$state['gateway']];
+						if ($evaluated) {
+							$alternatives = array_diff(array_intersect($eligible, $binding['gateways']), $egress);
+							if (array_diff($egress, $eligible)) {
+								$color = 'bg-warning';
+								$detail = gettext('Outside SLA');
+							}
+							if ($alternatives && (!empty($result['shared_interface']) || !empty($result['shared_underlay']))) {
+								$backup = gettext('Shared link');
+							} elseif ($alternatives && ($result['shared_interface'] ?? null) === false &&
+							    ($result['shared_underlay'] ?? null) === false) {
+								$backup = sprintf(gettext('Backup: %s'), implode(', ', $alternatives));
+							} elseif (!$alternatives && count($egress) === 1) {
+								$backup = gettext('No SLA backup');
+							}
+						}
+					} elseif ($verified === 'blocked' && $evaluated && !$eligible) {
+						$detail = gettext('No eligible link');
+					}
+				} elseif ($bindings_error) {
+					[$color, $status] = ['bg-warning', gettext('Bindings unreadable')];
+				} elseif ($can_view_forwarding) {
+					[$color, $status] = [$evaluated && !$eligible ? 'bg-warning' : '', gettext('Monitor only')];
+					$detail = match (true) {
+						!$evaluated => gettext('No current data'),
+						!$eligible => gettext('No eligible link'),
+						default => '',
+					};
+				} else {
+					[$color, $status] = match (true) {
+						!$evaluated => ['bg-info', gettext('No current data')],
+						!$eligible => ['bg-warning', gettext('No eligible link')],
+						default => ['', gettext('Within SLA')],
+					};
+				}
 		?>
 			<tr>
-				<td class="sdwan-widget-icon" aria-hidden="true"><i class="<?=$icon?> fa-fw"></i></td>
 				<th scope="row" class="sdwan-widget-name">
-					<span class="sdwan-widget-label"><?=$escape($gateway)?></span>
-					<?php if ($is_default): ?>
-						<i class="fa-solid fa-globe" role="img" aria-label="<?=$escape(gettext('Configured default gateway'))?>"
-						    title="<?=$escape(gettext('Configured default gateway'))?>"></i>
-					<?php endif; ?>
-					<?php if ($display_address): ?>
-						<strong class="sdwan-widget-address"><?=$escape($address)?></strong>
-					<?php endif; ?>
+					<?php if ($url !== null): ?><a href="<?=$escape($url)?>"><?=$escape($name)?></a><?php else: ?><?=$escape($name)?><?php endif; ?>
+					<?php if (count($bindings) > 1): ?><small><?=$escape($group)?></small><?php endif; ?>
 				</th>
-				<td class="sdwan-widget-rtt"><?=$metric($rtt, 3, 'ms')?></td>
-				<td class="sdwan-widget-rttsd"><?=$metric($rttsd, 3, 'ms')?></td>
-				<td class="sdwan-widget-loss"><?=$metric($loss, 1, '%')?></td>
-				<td class="sdwan-widget-status <?=$state_class?>"><?=$escape($label)?></td>
+				<td class="sdwan-widget-route">
+					<?=$egress ? $escape(implode(', ', $egress)) : '?'?>
+					<?php if ($backup !== ''): ?><small><?=$escape($backup)?></small><?php endif; ?>
+				</td>
+				<td class="sdwan-widget-status <?=$color?>">
+					<?=$escape($status)?>
+					<?php if ($detail !== ''): ?><small><?=$escape($detail)?></small><?php endif; ?>
+				</td>
 			</tr>
-		<?php endforeach; ?>
+		<?php endforeach; endforeach; ?>
 		</tbody>
 	</table>
 	</div>
-	<?php if ($unavailable): ?>
-		<p class="sdwan-widget-note bg-warning small">
-			<i class="fa-solid fa-triangle-exclamation fa-fw" aria-hidden="true"></i>
-			<?=sprintf($escape(gettext('No eligible path: %s')), $policyLinks($unavailable))?>
-		</p>
-	<?php endif;
+	<?php
 };
 
 // Mark valid fragments so a login or error page cannot replace the widget.
@@ -171,38 +173,20 @@ if ($sdwanDirectRequest) {
 $sdwanBodyId = 'sdwan-status-' . $widgetkey;
 ?>
 <style>
-.sdwan-status-widget { container-type: inline-size; }
 .sdwan-status-widget .table { table-layout: fixed; margin-bottom: 0; }
 .sdwan-status-widget .table-responsive .table th,
 .sdwan-status-widget .table-responsive .table td { white-space: normal; overflow-wrap: anywhere; }
 .sdwan-status-widget .table-responsive { margin-bottom: 0; }
-.sdwan-status-widget a { color: inherit; text-decoration: underline; }
-.sdwan-status-widget .sdwan-widget-icon { width: 8%; text-align: center; }
-.sdwan-status-widget .sdwan-widget-icon i { font-size: 1.13em; }
-.sdwan-status-widget .sdwan-widget-name { font-weight: normal; }
-.sdwan-status-widget .sdwan-widget-latency { width: 19%; text-align: right; }
-.sdwan-status-widget .sdwan-widget-loss { width: 11%; text-align: right; }
-.sdwan-status-widget .sdwan-widget-state { width: 14%; }
-.sdwan-status-widget .sdwan-widget-rtt,
-.sdwan-status-widget .sdwan-widget-rttsd,
-.sdwan-status-widget .sdwan-widget-loss { font-variant-numeric: tabular-nums; text-align: right; }
-.sdwan-status-widget .sdwan-widget-address { display: block; }
-@container (max-width: 439px) {
-	.sdwan-status-widget .table { font-size: 12px; }
-	.sdwan-status-widget .table > thead > tr > th,
-	.sdwan-status-widget .table > tbody > tr > th,
-	.sdwan-status-widget .table > tbody > tr > td { padding-right: 2px; padding-left: 2px; }
-	.sdwan-status-widget .sdwan-widget-icon { width: 20px; }
-	.sdwan-status-widget .sdwan-widget-address { font-size: .9em; }
-	.sdwan-status-widget .sdwan-widget-latency { width: 18.5%; }
-	.sdwan-status-widget .sdwan-widget-loss { width: 14.5%; }
-	.sdwan-status-widget .sdwan-widget-state { width: 16.5%; }
-}
-.sdwan-status-widget .sdwan-widget-note { padding: .4em .5em; margin: 0; overflow-wrap: anywhere; }
+.sdwan-status-widget .sdwan-widget-policy { width: 27%; }
+.sdwan-status-widget .sdwan-widget-egress { width: 42%; }
+.sdwan-status-widget .sdwan-widget-name a { color: inherit; text-decoration: underline; }
+.sdwan-status-widget .sdwan-widget-route { font-weight: bold; }
+.sdwan-status-widget small { display: block; font-weight: normal; }
+.sdwan-status-widget .sdwan-widget-note { padding: .5em; margin: 0; overflow-wrap: anywhere; }
 </style>
-<div class="sdwan-status-widget" tabindex="-1" role="region" aria-label="<?=gettext('SD-WAN link monitoring')?>" id="<?=htmlspecialchars($sdwanBodyId, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8')?>">
+<div class="sdwan-status-widget" tabindex="-1" role="region" aria-label="<?=gettext('SD-WAN policy forwarding')?>" id="<?=htmlspecialchars($sdwanBodyId, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8')?>">
 	<?php $sdwanFragment(); ?>
-	<p class="sdwan-widget-note text-center" role="status" hidden><?=gettext('Gateway status unavailable.')?></p>
+	<p class="sdwan-widget-note text-center" role="status" hidden><?=gettext('SD-WAN status unavailable.')?></p>
 </div>
 <script>
 events.push(function () {

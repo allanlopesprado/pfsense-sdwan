@@ -4,6 +4,7 @@ Versions are listed newest first, in numeric order. The [dist directory](dist/) 
 
 | Version | Main changes | Notes |
 | --- | --- | --- |
+| 0.4.26 | Show verified egress and backup availability per policy in the dashboard widget. | [Notes](docs/releases/v0.4.26.md) |
 | 0.4.25 | Align Status, Diagnostics, Forwarding and the dashboard widget with the native WebGUI. | [Notes](docs/releases/v0.4.25.md) |
 | 0.4.24 | Add source-bound TCP service checks with dedicated native host routes. | [Notes](docs/releases/v0.4.24.md) |
 | 0.4.23 | Add service-aware SLAs, weighted forwarding, guided setup and selective session recovery. | [Notes](docs/releases/v0.4.23.md) |

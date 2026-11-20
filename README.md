@@ -13,7 +13,7 @@ An experimental package for monitoring links, comparing gateways against SLAs, a
 - **Status → Services** lists the `sdwan` service with native controls. Events appear under **Status → System Logs → General**.
 - **Updates** checks GitHub, verifies the SHA-256 checksum, and installs the published release from the WebGUI.
 
-![SD-WAN widget showing metrics and status for three gateways in the light theme](https://github.com/allanlopesprado/pfsense-sdwan/releases/latest/download/widget-light-554.png)
+![SD-WAN widget showing verified egress, backup availability and policy status in the light theme](https://github.com/allanlopesprado/pfsense-sdwan/releases/latest/download/widget-light-554.png)
 
 [Dark-theme widget](https://github.com/allanlopesprado/pfsense-sdwan/releases/latest/download/widget-dark-554.png) · [Status screen](https://github.com/allanlopesprado/pfsense-sdwan/releases/latest/download/status-pfSense.png) · [Updates screen](https://github.com/allanlopesprado/pfsense-sdwan/releases/latest/download/updates-pfSense.png)
 

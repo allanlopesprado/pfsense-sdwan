@@ -130,19 +130,18 @@ def verify_dashboard_layout(core, output, widget, fragment):
                     call("/actions", {"actions": [{"type": "key", "id": "keyboard", "actions":
                          [{"type": "keyDown", "value": "\ue004"}, {"type": "keyUp", "value": "\ue004"}]}]})
                     tabs.append(js("return document.activeElement.getAttribute('href')"))
-                warning_link = "/sdwan/diagnostics.php?policy=Backups"
-                assert tabs[-1] == warning_link, tabs
-                assert js("return !document.querySelector('.sdwan-status-widget tbody a')")
+                forwarding_link = "/sdwan/forwarding.php?policy=Voice&group=LAN_SDWAN"
+                assert tabs[-1] == forwarding_link, tabs
                 # Drive the real fragment callback, including its HTTP method and parameter names.
                 updated = call("/execute/async", {"args": [], "script": """
                     const done=arguments[0], w=ajaxspecs[0];
-                    document.querySelector('.sdwan-widget-rtt').textContent='pending-test';
+                    document.querySelector('.sdwan-widget-route').textContent='pending-test';
                     $.post(w.url,w.parms).done(html=>{
                         w.callback(html);
-                        done(document.querySelector('.sdwan-widget-rtt').textContent==='23.450ms');
+                        done(document.querySelector('.sdwan-widget-route').textContent.includes('GW_B'));
                     }).fail(()=>done(false));
                 """})
-                assert updated and js("return document.activeElement.getAttribute('href')") == warning_link
+                assert updated and js("return document.activeElement.getAttribute('href')") == forwarding_link
                 js("document.activeElement.blur();")
                 layout_script = """
                     const panel=document.querySelector('.panel'), region=panel.querySelector('.sdwan-status-widget');
@@ -164,43 +163,29 @@ def verify_dashboard_layout(core, output, widget, fragment):
                         const a=luminance(bg),b=luminance(over(bg,rgba(getComputedStyle(el).color)));
                         return (Math.max(a,b)+.05)/(Math.min(a,b)+.05);
                     }
-                    const readouts=region.querySelectorAll('tbody th, tbody a, tbody td, .sdwan-widget-note, .sdwan-widget-note a');
+                    const readouts=region.querySelectorAll('tbody th, tbody a, tbody td, tbody small, .sdwan-widget-note, .sdwan-widget-note a');
                     const rows=region.querySelectorAll('tbody tr');
-                    const labels=region.querySelectorAll('.sdwan-widget-latency, .sdwan-widget-loss, .sdwan-widget-status, .sdwan-widget-rtt, .sdwan-widget-rttsd');
-                    function wraps(el) {
-                        const range=document.createRange();
-                        range.selectNodeContents(el);
-                        return range.getClientRects().length !== 1;
-                    }
-                    const wrappedLabels=Array.from(labels).filter(wraps).map(el=>el.textContent.trim());
-                    const addresses=Array.from(region.querySelectorAll('tbody .sdwan-widget-address'));
                     return {width:box.width,height:Math.ceil(box.height),viewport:innerWidth,
                             horizontalOverflow:Math.max(...nodes.map(e=>e.scrollWidth-e.clientWidth)),
                             background:getComputedStyle(document.body).backgroundColor,
                             rows:rows.length,
                             statusBackgrounds:Array.from(rows).map(row=>getComputedStyle(row.lastElementChild).backgroundColor),
                             rowBackgrounds:Array.from(rows).map(row=>getComputedStyle(row.firstElementChild).backgroundColor),
-                            addresses:addresses.length, wrappedAddresses:addresses.filter(wraps).map(el=>({text:el.textContent.trim(), font:getComputedStyle(el).font,
-                                width:el.getBoundingClientRect().width})),
-                            iconWidth:rows[0].cells[0].getBoundingClientRect().width,
-                            nameWidth:rows[0].cells[1].getBoundingClientRect().width,
-                            gatewayStates:Array.from(rows).map(row=>row.lastElementChild.textContent.trim()),
-                            latency:Array.from(rows).map(row=>row.querySelector('.sdwan-widget-rtt').textContent.trim()),
-                            variation:Array.from(rows).map(row=>row.querySelector('.sdwan-widget-rttsd').textContent.trim()),
-                            timestamps:region.querySelectorAll('time').length,wrappedLabels,
+                            states:Array.from(rows).map(row=>row.lastElementChild.firstChild.textContent.trim()),
+                            egress:Array.from(rows).map(row=>row.querySelector('.sdwan-widget-route').firstChild.textContent.trim()),
+                            backups:Array.from(region.querySelectorAll('.sdwan-widget-route small')).map(el=>el.textContent),
+                            timestamps:region.querySelectorAll('time').length,
                             minimumReadoutContrast:Math.min(...Array.from(readouts,contrast)),
                             positiveTabindex:panel.querySelectorAll('[tabindex]:not([tabindex="-1"]):not([tabindex="0"])').length};
                 """
                 data = js(layout_script)
                 assert data["width"] == width and data["viewport"] == width and data["horizontalOverflow"] <= 1, data
-                assert data["rows"] == 3 and data["positiveTabindex"] == 0
-                assert data["gatewayStates"] == ["Warning", "Online", "Down"] and data["addresses"] == 3, data
-                assert data["iconWidth"] <= width * .09 and data["nameWidth"] > data["iconWidth"] * 2, data
-                assert not data["wrappedAddresses"], data
-                assert len(set(data["statusBackgrounds"])) == 3, data
-                assert all(a != b for a, b in zip(data["statusBackgrounds"], data["rowBackgrounds"])), data
-                assert data["latency"] == ["23.450ms", "9.800ms", "—"] and data["timestamps"] == 0 and not data["wrappedLabels"], data
-                assert data["variation"] == ["11.400ms", "0.000ms", "—"], data
+                assert data["rows"] == 4 and data["positiveTabindex"] == 0
+                assert data["states"] == ["Applied", "Rules pending", "Blocked", "Monitor only"], data
+                assert data["egress"] == ["GW_B", "?", "?", "?"] and data["timestamps"] == 0, data
+                assert data["backups"] == ["Backup: GW_A"], data
+                assert len(set(data["statusBackgrounds"])) == 4, data
+                assert all(a != b for a, b in zip(data["statusBackgrounds"][:3], data["rowBackgrounds"][:3])), data
                 assert data["minimumReadoutContrast"] >= 4.5, data
                 expected_bg = "rgb(245, 245, 245)" if theme == "light" else "rgb(33, 33, 33)"
                 assert data["background"] == expected_bg, data
@@ -210,9 +195,9 @@ def verify_dashboard_layout(core, output, widget, fragment):
                 png = base64.b64decode(shot["data"], validate=True)
                 assert png[:8] == b"\x89PNG\r\n\x1a\n" and struct.unpack(">II", png[16:24]) == (width, data["height"])
                 (output / f"widget-{theme}-{width}.png").write_bytes(png)
-                js("""document.querySelector('.sdwan-widget-label').textContent='X'.repeat(32);
-                      document.querySelector('.sdwan-widget-address').textContent='2001:db8:abcd:abcd:abcd:abcd:abcd:abcd%vlan100';
-                      document.querySelector('.sdwan-widget-note a').append('Y'.repeat(96));""")
+                js("""document.querySelector('.sdwan-widget-name a').textContent='X'.repeat(32);
+                      document.querySelector('.sdwan-widget-route').prepend('WAN'.repeat(16) + ', ');
+                      document.querySelector('.sdwan-widget-route small').append('Y'.repeat(96));""")
                 stress = js(layout_script)["horizontalOverflow"]
                 assert stress <= 1, (theme, width, stress)
                 metrics.append(dict(data, theme=theme, tabOrder=tabs, focusRetainedAfterRefresh=True,
@@ -239,7 +224,7 @@ def verify_dashboard_layout(core, output, widget, fragment):
                 }).fail(()=>done(false));
             }, 10000);
             setTimeout(()=>done(content.hidden && !notice.hidden &&
-                notice.textContent.includes('Gateway status unavailable') &&
+                notice.textContent.includes('SD-WAN status unavailable') &&
                 document.activeElement===notice.parentElement), 32000);
         """})
         failure.unlink()
@@ -249,10 +234,10 @@ def verify_dashboard_layout(core, output, widget, fragment):
                 w.callback(html);
                 done(!document.querySelector('.sdwan-widget-content').hidden &&
                     document.querySelector('.sdwan-status-widget [role="status"]').hidden &&
-                    document.querySelector('.sdwan-widget-rtt').textContent==='23.450ms');
+                    document.querySelector('.sdwan-widget-route').textContent.includes('GW_B'));
             }).fail(()=>done(false));
         """})
-        print("ok - failed and invalid refreshes expire the visible readings, and a valid response restores them")
+        print("ok - failed and invalid refreshes expire the visible status, and a valid response restores them")
         (output / "widget-fragment.html").write_text(widget)
         (output / "metrics.json").write_text(json.dumps(metrics, indent=2) + "\n")
         print("ok - eight native theme/width screenshots, status contrast, keyboard navigation and AJAX focus")

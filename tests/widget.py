@@ -6,11 +6,18 @@ from pathlib import Path
 import tempfile
 import time
 
-from daemon_integration import ROOT, php, stage
+from daemon_integration import PKG, ROOT, php, stage
 
 
 def check(binary, directory):
     stage(directory)
+    (directory / "sdwan_preflight.inc").write_bytes((PKG / "sdwan_preflight.inc").read_bytes())
+    steering = (PKG / "sdwan_steering.inc").read_text()
+    begin = steering.index("function sdwan_steering_pf_rules(): ?array {")
+    end = steering.index("\n}", begin)
+    (directory / "sdwan_steering.inc").write_text(
+        steering[:begin] + "function sdwan_steering_pf_rules(): ?array {"
+        + "return config_get_path('fixture_pf_rules');" + steering[end:])
     widget = ROOT / "files/usr/local/www/widgets"
     source = (widget / "widgets/sdwan.widget.php").read_text()
     (directory / "sdwan.widget.php").write_text(source.replace("/usr/local/pkg/", f"{directory}/"))
@@ -21,10 +28,13 @@ function isAllowedPage($page) {
     $role = $GLOBALS['allowed'];
     return match ($page) {
         '/sdwan/status.php' => $role !== 'no',
-        '/sdwan/diagnostics.php' => $role === 'view',
+        '/sdwan/diagnostics.php' => in_array($role, ['view', 'manage', 'admin'], true),
+        '/sdwan/forwarding.php' => in_array($role, ['manage', 'admin'], true),
+        '/firewall_rules.php', '/system_gateway_groups.php', '/sdwan/policies.php' => $role === 'admin',
         default => false,
     };
 }
+function filter_sdwan_binding_api() { return 2; }
 function is_valid_widgetkey($key, $settings, $file) {
     return in_array($key, $settings, true) && basename($file) === 'sdwan.widget.php';
 }
@@ -47,13 +57,13 @@ $body = ob_get_clean();
 echo json_encode([http_response_code() ?: 200, $body, $sdwan_title_link,
                   function_exists('sdwan_read_snapshot')]);"""
 
-    def render(mode, allowed="view", key="sdwan-0"):
+    def render(mode, allowed="admin", key="sdwan-0"):
         return json.loads(php(binary, "-d", f"include_path={directory}",
                               "-r", script, "--", mode, allowed, key))
 
     def package_value(expression):
         return php(binary, "-d", f"include_path={directory}", "-r",
-                   "require 'sdwan.inc'; require 'config.inc'; echo " + expression + ";")
+                   "require 'sdwan.inc'; require 'config.inc'; require 'sdwan_steering.inc'; echo " + expression + ";")
 
     for mode, code in (("embed", 200), ("ajax", 403)):
         status, body, link, loaded = render(mode, allowed="no")
@@ -65,8 +75,7 @@ echo json_encode([http_response_code() ?: 200, $body, $sdwan_title_link,
 
     status, body, link, _ = render("embed")
     assert status == 200 and link == "/sdwan/status.php" and "register_ajax" in body
-    assert "GW_A" in body and "GW_B" in body and body.count("No data") == 2
-    assert "RTTsd" in body and ">192.0.2.1</strong>" in body
+    assert "Monitor only" in body and "No current data" in body and "GW_A" not in body
     assert "<time" not in body and "Last sample" not in body
 
     config = directory / "fixture.json"
@@ -74,109 +83,136 @@ echo json_encode([http_response_code() ?: 200, $body, $sdwan_title_link,
     settings = fixture["installedpackages/sdwan"]
     rules = settings["policies"]["item"]
     rules[0]["name"] = "Voice"
-    rules.extend([dict(rules[0], name="BranchVPN"), dict(rules[0], name="Backups")])
-    fixture["interfaces"]["opt3"] = {"enable": ""}
-    fixture["gateways/gateway_item"].append({"name": "GW_C", "gateway": "203.0.113.254", "interface": "opt3"})
-    settings["members"]["item"].append({"name": "c", "gateway": "GW_C", "cost": "30"})
-    fixture["gateways/sdwan_bindings"] = {"item": [{"group": "PrivateForwardingGroup"}]}
-    fixture["gateways/defaultgw4"] = "GW_B"
-    fixture["gateways/gateway_item"][1]["monitor"] = "198.51.100.22"
+    rules.extend([dict(rules[0], name="BranchVPN"), dict(rules[0], name="Backups"),
+                  dict(rules[0], name="Lab")])
+    groups = {"Voice": "LAN_SDWAN", "BranchVPN": "PRIVATE_VPN", "Backups": "BACKUP_NET"}
+    bindings = [
+        {"group": group, "policy": policy, "gateways": {"item": ["GW_A", "GW_B"]},
+         "trackers": {"item": [str(300 + index)]}, "rules_revision": "0" * 64,
+         "policy_revision": "1" * 64}
+        for index, (policy, group) in enumerate(groups.items(), 1)
+    ]
+    fixture["gateways/sdwan_bindings"] = {"item": bindings}
+    fixture["fixture_pf_rules"] = [
+        'pass in quick on lan route-to (opt2 198.51.100.1) inet all label "descr=Voice" ridentifier 301',
+        'pass in quick on lan route-to (opt1 192.0.2.1) inet all ridentifier 302',
+        'block drop in quick on lan inet all ridentifier 303',
+    ]
     config.write_text(json.dumps(fixture))
     revision = package_value("sdwan_config_revision(sdwan_get_config())")
     runtime = directory / "snapshot.json"
     samples = {
-        "a": {"status": "degraded", "rtt_ms": 23.45, "rttsd_ms": 11.4, "loss_pct": 2},
+        "a": {"status": "online", "rtt_ms": 23.45, "rttsd_ms": 11.4, "loss_pct": 0},
         "b": {"status": "online", "rtt_ms": 9.8, "rttsd_ms": 0, "loss_pct": 0},
-        "c": {"status": "down", "rtt_ms": 0, "rttsd_ms": 0, "loss_pct": 100},
     }
 
     def policy(selected, a, b):
-        return {"selected": selected, "reason": "SLA evaluation", "candidates": {"a": a, "b": b}}
+        count = [a, b].count("Eligible")
+        return {"selected": selected, "reason": "SLA evaluation", "candidates": {"a": a, "b": b},
+                "eligible_count": count, "path_status": ("no_eligible", "degraded", "alternatives")[count],
+                "shared_interface": False, "shared_underlay": False}
+
+    def binding_revision(group):
+        return package_value(f"sdwan_config_revision(sdwan_steering_bindings()['{group}'])")
 
     snapshot = {
         "generated_at": int(time.time()), "config_revision": revision, "members": samples,
         "gateway_inventory_revision": package_value("sdwan_gateway_inventory_revision(sdwan_get_config(), sdwan_gateways())"),
         "policies": {"Voice": policy("a", "Eligible", "Eligible"),
                      "BranchVPN": policy("b", "High RTT", "Eligible"),
-                     "Backups": policy(None, "High RTT", "Packet loss")},
-        "steering": {"PrivateForwardingGroup": {"gateway": "PrivateGateway"}},
+                     "Backups": policy(None, "High RTT", "Packet loss"),
+                     "Lab": policy("b", "High RTT", "Eligible")},
+        "steering": {
+            "LAN_SDWAN": {"gateway": "GW_B", "candidate": "GW_A", "revision": binding_revision("LAN_SDWAN")},
+            "PRIVATE_VPN": {"gateway": "GW_B", "revision": binding_revision("PRIVATE_VPN")},
+            "BACKUP_NET": {"gateway": None, "revision": binding_revision("BACKUP_NET")},
+        },
     }
-    runtime.write_text(json.dumps(snapshot))
+
+    def save(override=None):
+        current = dict(snapshot, generated_at=int(time.time()))
+        current.update(override or {})
+        runtime.write_text(json.dumps(current))
+
+    def row(html, name):
+        return next(part for part in html.split("<tr>")[2:] if name in part.split("</th>")[0])
+
+    save()
     status, body, _, _ = render("ajax")
     assert status == 200 and "<script>" not in body
-    for label in ("GW_A", "GW_B", "GW_C", ">RTT<", ">RTTsd<", "23.450ms", "9.800ms", "11.400ms",
-                  "0.000ms", "2.0%", "0.0%", "100.0%", "Warning", "Online", "Down", "No eligible path:"):
-        assert label in body, label
-    assert "198.51.100.1</strong>" in body and "198.51.100.22" not in body
-    assert body.count("fa-globe") == 1 and "Configured default gateway" in body
-    assert 'class="sdwan-widget-rttsd">—</td>' in body and 'class="sdwan-widget-rtt">—</td>' in body
-    for state_class in ("bg-warning", "bg-success", "bg-danger"):
-        assert f'class="sdwan-widget-status {state_class}"' in body
-    assert 'class="table table-striped table-hover table-condensed"' in body and 'scope="row"' in body
-    assert all(label not in body for label in ("<time", "Last sample", "Requested gateway",
-                                               "PrivateForwardingGroup", "PrivateGateway", "Forwarding requests"))
-    restricted = render("ajax", "status")[1]
-    assert 'href="/sdwan/diagnostics.php?' not in restricted and "No eligible path: Backups" in restricted
+    assert "Backup: GW_A" in row(body, "Voice") and "GW_B" in row(body, "Voice")
+    assert "Applied" in row(body, "Voice") and "bg-success" in row(body, "Voice")
+    assert "Rules pending" in row(body, "BranchVPN") and "GW_B" not in row(body, "BranchVPN")
+    assert "Blocked" in row(body, "Backups") and "No eligible link" in row(body, "Backups")
+    assert "Monitor only" in row(body, "Lab") and "GW_B" not in row(body, "Lab")
+    assert "Egress for new connections" in body and 'scope="row"' in body
+    assert all(label not in body for label in ("<time", "Last sample", ">RTT<", "23.450ms", "192.0.2.1", "Preferred:"))
+    assert '/sdwan/forwarding.php?policy=Voice&amp;group=LAN_SDWAN' in body
+    assert '/sdwan/diagnostics.php?policy=Lab' in body
+    restricted = render("ajax", "view")[1]
+    assert "Within SLA" in row(restricted, "Voice") and "No eligible link" in row(restricted, "Backups")
+    assert all(label not in restricted for label in ("LAN_SDWAN", "GW_B", "Applied", "/sdwan/forwarding.php"))
+    assert 'href="/sdwan/diagnostics.php?policy=Voice"' in restricted
+    assert 'href="/sdwan/diagnostics.php?' not in render("ajax", "status")[1]
+    assert "/sdwan/forwarding.php" not in render("ajax", "manage")[1]
     preview = render("embed")[1]
-    for rendered in (body, preview):
-        assert all(label not in rendered for label in ("Preferred:", "Voice", "BranchVPN"))
-        assert 'href="/sdwan/diagnostics.php?policy=Backups"' in rendered
 
-    for changed in (dict(snapshot, generated_at=int(time.time()) - 300),
-                    dict(snapshot, config_revision="0" * 64)):
-        runtime.write_text(json.dumps(changed))
+    for changed in ({"generated_at": int(time.time()) - 300}, {"config_revision": "0" * 64}):
+        save(changed)
         stale = render("ajax")[1]
-        assert stale.count("No data") == 3
-        assert "23.450ms" not in stale and "No eligible path:" not in stale
-
-    runtime.write_text(json.dumps(snapshot))
+        assert "No current data" in stale and all(label not in stale for label in ("GW_B", "Applied", "Blocked"))
+    save()
     fixture["gateways/gateway_item"][0]["monitor"] = "192.0.2.55"
     config.write_text(json.dumps(fixture))
     retargeted = render("ajax")[1]
-    assert "23.450ms" not in retargeted and "No eligible path:" not in retargeted
+    assert "No current data" in retargeted and "GW_B" not in retargeted
     fixture["gateways/gateway_item"][0].pop("monitor")
-    fixture["gateways/gateway_item"][0]["monitor_disable"] = ""
-    fixture["gateways/gateway_item"][1]["force_down"] = ""
-    del fixture["interfaces"]["opt3"]
-    config.write_text(json.dumps(fixture))
-    unavailable = render("ajax")[1]
-    assert "Monitor off" in unavailable and unavailable.count(">Down</td>") == 2
-    assert all(label not in unavailable for label in ("23.450ms", "9.800ms", "100.0%"))
 
-    fixture["gateways/gateway_item"][0].pop("monitor_disable")
-    fixture["gateways/gateway_item"][1].pop("force_down")
-    fixture.pop("installedpackages/sdwan")
-    config.write_text(json.dumps(fixture))
-    native = {"generated_at": int(time.time()), "members": [], "policies": [],
-              "config_revision": package_value("sdwan_config_revision(sdwan_get_config())"),
-              "gateway_inventory_revision": package_value("sdwan_gateway_inventory_revision(sdwan_get_config(), sdwan_gateways())"),
-              "gateways": {"GW_A": samples["a"], "GW_B": samples["b"]}}
-    runtime.write_text(json.dumps(native))
-    native_dashboard = render("ajax")[1]
-    assert "GW_A" in native_dashboard and "GW_B" in native_dashboard and "23.450ms" in native_dashboard
-    assert "GW_C" not in native_dashboard
-    assert "<time" not in native_dashboard
-    runtime.write_text(json.dumps(dict(native, gateways={"GW_A": dict(samples["a"], loss_pct=800)})))
-    assert "23.450ms" not in render("ajax")[1]
-    fixture["gateways/gateway_item"][0]["monitor"] = "192.0.2.2"
-    config.write_text(json.dumps(fixture))
-    runtime.write_text(json.dumps(native))
-    assert render("ajax")[1].count("No data") == 2
+    def voice_paths(voice):
+        save({"policies": dict(snapshot["policies"], Voice=voice)})
 
-    fixture["gateways/gateway_item"][0]["gateway"] = "dynamic"
-    fixture["gateways/gateway_item"][1].update(gateway="dynamic", ipprotocol="inet6")
-    fixture["fixture_dynamic_targets"] = {"opt1": "192.0.2.200", "opt2": "fe80::1%opt2"}
+    voice_paths(dict(snapshot["policies"]["Voice"], shared_underlay=True))
+    shared = row(render("ajax")[1], "Voice")
+    assert "Shared link" in shared and "Backup:" not in shared
+    voice_paths(policy("b", "High RTT", "Eligible"))
+    assert "No SLA backup" in row(render("ajax")[1], "Voice")
+    voice_paths(policy("a", "Eligible", "High RTT"))
+    assert "Outside SLA" in row(render("ajax")[1], "Voice")
+    voice_paths({"selected": "a", "reason": "Incomplete snapshot", "candidates": {"a": "Eligible"}})
+    assert "No SLA backup" not in row(render("ajax")[1], "Voice")
+    save()
+
+    pool = 'pass in quick on lan route-to { (opt2 198.51.100.1), (opt1 192.0.2.1) } round-robin inet all ridentifier 301'
+    fixture["fixture_pf_rules"][0] = pool
     config.write_text(json.dumps(fixture))
-    dynamic = render("ajax")[1]
-    assert "192.0.2.200</strong>" in dynamic and "fe80::1%opt2</strong>" in dynamic, dynamic
-    fixture.pop("fixture_dynamic_targets")
+    multipath = dict(snapshot["steering"], LAN_SDWAN=dict(snapshot["steering"]["LAN_SDWAN"], pool=["GW_B", "GW_A"]))
+    save({"steering": multipath})
+    balanced = row(render("ajax")[1], "Voice")
+    assert "Applied" in balanced and "GW_B, GW_A" in balanced and "Backup:" not in balanced
+    save({"steering": dict(snapshot["steering"], LAN_SDWAN="unreadable")})
+    assert "Rules pending" in row(render("ajax")[1], "Voice")
+
+    second = dict(bindings[0], group="OPT_SDWAN", trackers={"item": ["305"]})
+    bindings.append(second)
+    fixture["fixture_pf_rules"].append(
+        'pass in quick on lan route-to (opt1 192.0.2.1) inet all ridentifier 305')
     config.write_text(json.dumps(fixture))
-    assert 'class="sdwan-widget-address"' not in render("ajax")[1]
+    multipath["OPT_SDWAN"] = {"gateway": "GW_A", "revision": binding_revision("OPT_SDWAN")}
+    save({"steering": multipath})
+    multi = render("ajax")[1]
+    assert multi.count("policy=Voice") == 2 and "LAN_SDWAN</small>" in multi and "OPT_SDWAN</small>" in multi
+
+    fixture["fixture_pf_rules"] = None
+    config.write_text(json.dumps(fixture))
+    assert "Rules unverified" in row(render("ajax")[1], "Voice")
+    fixture["gateways/sdwan_bindings"] = {"item": [{"group": "Invalid"}]}
+    config.write_text(json.dumps(fixture))
+    assert "Bindings unreadable" in row(render("ajax")[1], "Voice")
     config.write_text("{}")
-    assert "No available gateways." in render("ajax")[1]
+    assert "No SD-WAN policies configured." in render("ajax")[1]
     config.write_text(json.dumps({"installedpackages/sdwan": {"version": "invalid"}}))
     assert "cannot be read" in render("ajax")[1]
-    print("ok - gateway telemetry with or without policies, SLA warnings, stale data and role-scoped diagnostic links")
+    print("ok - verified egress and standby paths, blocked and pending rules, stale data and role-scoped links")
     return preview, body
 
 
