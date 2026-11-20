@@ -94,7 +94,8 @@ def screenshots(directory, www, pages):
                                           ("diagnostics", "pfSense", "1440,900"), ("diagnostics", "pfSense-dark", "390,844"),
                                           ("members", "pfSense", "1440,900"),
                                           ("members-edit", "pfSense-dark", "1440,900"), ("updates", "pfSense", "1440,900"),
-                                          ("updates", "pfSense-dark", "390,844"), ("forwarding", "pfSense", "1440,900")]:
+                                          ("updates", "pfSense-dark", "390,844"), ("forwarding", "pfSense", "1440,900"),
+                                          ("forwarding", "pfSense-dark", "390,844")]:
                     preview = name + "-" + theme
                     styles = ('<link rel="stylesheet" href="/vendor/font-awesome/css/all.min.css">'
                               f'<link rel="stylesheet" href="/css/{theme}.css">')

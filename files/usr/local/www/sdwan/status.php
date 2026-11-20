@@ -22,6 +22,32 @@ if (!$sdwan['members']) {
 }
 ?>
 <div class="panel panel-default">
+	<div class="panel-heading"><h2 class="panel-title"><?=gettext('Gateway Status')?></h2></div>
+	<div class="panel-body">
+	<div class="table-responsive"><table class="table table-striped table-hover table-condensed sortable-theme-bootstrap" data-sortable>
+		<thead><tr><th scope="col"><?=gettext('Member')?></th><th scope="col"><?=gettext('Gateway')?></th>
+			<th scope="col" class="text-right"><?=gettext('RTT')?></th><th scope="col" class="text-right" title="<?=gettext('RTT standard deviation')?>"><?=gettext('RTTsd')?></th>
+			<th scope="col" class="text-right"><?=gettext('Loss')?></th><th scope="col"><?=gettext('Status')?></th></tr></thead>
+		<tbody>
+		<?php foreach ($sdwan['members'] as $member):
+			$reading = $snapshot['members'][$member['name']] ?? [];
+			[$cell_class, $state_text] = sdwan_ui_gateway_state($reading['status'] ?? null);
+		?>
+			<tr><th scope="row"><?=sdwan_ui_escape($member['name'])?></th><td><?=sdwan_ui_escape($member['gateway'])?></td>
+				<td class="text-right text-nowrap"><?=sdwan_ui_metric($reading['rtt_ms'] ?? null, ' ms')?></td>
+				<td class="text-right text-nowrap"><?=sdwan_ui_metric($reading['rttsd_ms'] ?? null, ' ms')?></td>
+				<td class="text-right text-nowrap"><?=sdwan_ui_metric($reading['loss_pct'] ?? null, '%')?></td>
+				<td class="<?=$cell_class?>"><?=sdwan_ui_escape($state_text)?></td></tr>
+		<?php endforeach;
+		if (!$sdwan['members']) {
+			sdwan_ui_empty(gettext('Add a member to observe an existing gateway.'), 6);
+		}
+		?>
+		</tbody>
+	</table></div>
+	</div>
+</div>
+<div class="panel panel-default">
 	<div class="panel-heading"><h2 class="panel-title"><?=gettext('Policy Status')?></h2></div>
 	<div class="panel-body">
 	<div class="table-responsive"><table class="table table-striped table-hover table-condensed sortable-theme-bootstrap" data-sortable>
@@ -45,32 +71,6 @@ if (!$sdwan['members']) {
 		<?php endforeach;
 		if (!$sdwan['policies']) {
 			sdwan_ui_empty(gettext('No policies configured.'), 4);
-		}
-		?>
-		</tbody>
-	</table></div>
-	</div>
-</div>
-<div class="panel panel-default">
-	<div class="panel-heading"><h2 class="panel-title"><?=gettext('Gateway Status')?></h2></div>
-	<div class="panel-body">
-	<div class="table-responsive"><table class="table table-striped table-hover table-condensed sortable-theme-bootstrap" data-sortable>
-		<thead><tr><th scope="col"><?=gettext('Member')?></th><th scope="col"><?=gettext('Gateway')?></th>
-			<th scope="col"><?=gettext('RTT')?></th><th scope="col" title="<?=gettext('RTT standard deviation')?>"><?=gettext('RTTsd')?></th>
-			<th scope="col"><?=gettext('Loss')?></th><th scope="col"><?=gettext('Status')?></th></tr></thead>
-		<tbody>
-		<?php foreach ($sdwan['members'] as $member):
-			$reading = $snapshot['members'][$member['name']] ?? [];
-			[$cell_class, $state_text] = sdwan_ui_gateway_state($reading['status'] ?? null);
-		?>
-			<tr><th scope="row"><?=sdwan_ui_escape($member['name'])?></th><td><?=sdwan_ui_escape($member['gateway'])?></td>
-				<td><?=sdwan_ui_metric($reading['rtt_ms'] ?? null, ' ms')?></td>
-				<td><?=sdwan_ui_metric($reading['rttsd_ms'] ?? null, ' ms')?></td>
-				<td><?=sdwan_ui_metric($reading['loss_pct'] ?? null, '%')?></td>
-				<td class="<?=$cell_class?>"><?=sdwan_ui_escape($state_text)?></td></tr>
-		<?php endforeach;
-		if (!$sdwan['members']) {
-			sdwan_ui_empty(gettext('Add a member to observe an existing gateway.'), 6);
 		}
 		?>
 		</tbody>

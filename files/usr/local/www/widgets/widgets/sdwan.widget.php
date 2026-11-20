@@ -147,12 +147,15 @@ $sdwanRender = static function (): void {
 			</tr>
 		<?php endforeach; ?>
 		</tbody>
+		<?php if ($unavailable): ?>
+		<tfoot><tr><td colspan="6" class="sdwan-widget-note bg-warning small">
+			<i class="fa-solid fa-triangle-exclamation fa-fw" aria-hidden="true"></i>
+			<?=sprintf($escape(gettext('No eligible path: %s')), $policyLinks($unavailable))?>
+		</td></tr></tfoot>
+		<?php endif; ?>
 	</table>
 	</div>
-	<?php if ($unavailable): ?>
-		<p class="sdwan-widget-note small"><i class="fa-solid fa-triangle-exclamation text-warning fa-fw" aria-hidden="true"></i>
-			<?=sprintf($escape(gettext('No eligible path: %s')), $policyLinks($unavailable))?></p>
-	<?php endif;
+	<?php
 };
 
 // Mark valid fragments so a login or error page cannot replace the widget.
@@ -175,15 +178,15 @@ $sdwanBodyId = 'sdwan-status-' . $widgetkey;
 .sdwan-status-widget .table-responsive .table td { white-space: normal; overflow-wrap: anywhere; }
 .sdwan-status-widget .table-responsive { margin-bottom: 0; }
 .sdwan-status-widget a { color: inherit; text-decoration: underline; }
-.sdwan-status-widget .sdwan-widget-icon { width: 8%; }
+.sdwan-status-widget .sdwan-widget-icon { width: 28px; text-align: center; }
 .sdwan-status-widget .sdwan-widget-icon i { font-size: 1.13em; }
 .sdwan-status-widget .sdwan-widget-name { font-weight: normal; }
-.sdwan-status-widget .sdwan-widget-latency { width: 19%; }
-.sdwan-status-widget .sdwan-widget-loss { width: 11%; }
+.sdwan-status-widget .sdwan-widget-latency { width: 18%; text-align: right; }
+.sdwan-status-widget .sdwan-widget-loss { width: 12%; text-align: right; }
 .sdwan-status-widget .sdwan-widget-state { width: 14%; }
 .sdwan-status-widget .sdwan-widget-rtt,
 .sdwan-status-widget .sdwan-widget-rttsd,
-.sdwan-status-widget .sdwan-widget-loss { font-variant-numeric: tabular-nums; }
+.sdwan-status-widget .sdwan-widget-loss { font-variant-numeric: tabular-nums; text-align: right; }
 .sdwan-status-widget .sdwan-widget-address { display: block; }
 @container (max-width: 439px) {
 	.sdwan-status-widget .table { font-size: 12px; }

@@ -24,14 +24,9 @@ if (!$policies) {
 	foreach ($sdwan['policies'] as $entry) {
 		$options[sdwan_ui_choice($entry['name'])] = $entry['name'];
 	}
-	$form = new Form(false);
-	$form->setAction('/sdwan/diagnostics.php')->setMethod('get');
-	$section = new Form_Section(gettext('Policy Lookup'));
-	$section->addInput(new Form_Select('policy', gettext('Policy'), $policy === null ? '' : sdwan_ui_choice($current), $options))
-	    ->setAttribute('required', 'required');
-	$form->add($section);
-	$form->addGlobal(new Form_Button('inspect', gettext('Inspect'), null, 'fa-solid fa-search'))->addClass('btn-primary');
-	print $form;
+	sdwan_ui_filter('/sdwan/diagnostics.php', [
+		'policy' => [gettext('Policy'), $policy === null ? '' : sdwan_ui_choice($current), $options],
+	], gettext('Inspect'));
 }
 if ($policy !== null):
 	$sla = $slas[$policy['sla']];

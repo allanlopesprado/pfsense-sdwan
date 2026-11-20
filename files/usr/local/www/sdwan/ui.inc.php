@@ -82,13 +82,44 @@ function sdwan_ui_gateway_state(?string $state): array {
 	};
 }
 
+/* Read-only filters use native inputs and the current pfSense theme. */
+function sdwan_ui_filter(string $url, array $fields, string $action, bool $enabled = true): void {
+	?>
+	<style>
+	.sdwan-filter { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px 12px; padding: 12px 15px; }
+	.sdwan-filter .form-group { flex: 1 1 13rem; min-width: 0; max-width: 25rem; margin: 0; }
+	.sdwan-filter .form-control { width: 100%; }
+	@media (max-width: 575px) {
+		.sdwan-filter .form-group { flex-basis: 100%; max-width: none; }
+	}
+	</style>
+	<div class="panel panel-default">
+		<form method="get" action="<?=sdwan_ui_escape($url)?>" class="sdwan-filter" aria-label="<?=sdwan_ui_escape($action)?>">
+			<?php foreach ($fields as $name => [$label, $selected, $choices]): ?>
+			<div class="form-group">
+				<label for="<?=sdwan_ui_escape($name)?>"><?=sdwan_ui_escape($label)?></label>
+				<select class="form-control" id="<?=sdwan_ui_escape($name)?>" name="<?=sdwan_ui_escape($name)?>" required>
+					<?php foreach ($choices as $value => $text): ?>
+					<option value="<?=sdwan_ui_escape($value)?>"<?=$value === $selected ? ' selected' : ''?>><?=sdwan_ui_escape($text)?></option>
+					<?php endforeach; ?>
+				</select>
+			</div>
+			<?php endforeach; ?>
+			<button type="submit" class="btn btn-primary"<?=$enabled ? '' : ' disabled'?>>
+				<i class="fa-solid fa-magnifying-glass fa-fw" aria-hidden="true"></i> <?=sdwan_ui_escape($action)?>
+			</button>
+		</form>
+	</div>
+	<?php
+}
+
 /* Follow the action toolbar below native Gateway Groups and Firewall Aliases. */
 function sdwan_ui_actions(array $links, bool $events = false): void {
 	$buttons = [];
 	$can_view_events = $events && isAllowedPage('/status_logs.php');
 	if ($can_view_events) {
-		$buttons[] = '<button type="submit" form="sdwan-system-logs" class="btn btn-primary btn-sm">' .
-		    '<i class="fa-solid fa-list icon-embed-btn" aria-hidden="true"></i> ' .
+		$buttons[] = '<button type="submit" form="sdwan-system-logs" class="btn btn-default btn-sm">' .
+		    '<i class="fa-solid fa-list fa-fw" aria-hidden="true"></i> ' .
 		    sdwan_ui_escape(gettext('System Logs')) . '</button>';
 	}
 	foreach ($links as $url => [$label, $icon]) {
