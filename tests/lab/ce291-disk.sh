@@ -70,4 +70,3 @@ mounted=
 mdconfig -d -u "${device#md}"
 device=
 gzip -1c "$image" > "$out/ce291.raw.gz"
-

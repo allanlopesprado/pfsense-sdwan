@@ -76,9 +76,9 @@ if ($action === 'topology') {
 require_once('config.inc');
 require_once('/usr/local/pkg/sdwan_steering.inc');
 if ($action === 'observations') {
-    $config = sdwan_get_config();
+    $package_settings = sdwan_get_config();
     $inventory = sdwan_gateways();
-    $snapshot = sdwan_current_snapshot($config, $inventory);
+    $snapshot = sdwan_current_snapshot($package_settings, $inventory);
     $record = sdwan_steering_receipt(SDWAN_SNAPSHOT_PATH . '.forwarded');
     echo json_encode(['snapshot' => $snapshot, 'receipt' => $record], JSON_THROW_ON_ERROR), PHP_EOL;
     exit;
@@ -121,4 +121,3 @@ if ($action === 'mode') {
     exit;
 }
 throw new InvalidArgumentException('Unknown acceptance action');
-
