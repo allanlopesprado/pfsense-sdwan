@@ -4,6 +4,7 @@ Versions are listed newest first, in numeric order. The [dist directory](dist/) 
 
 | Version | Main changes | Notes |
 | --- | --- | --- |
+| 0.4.24 | Add source-bound TCP service checks with dedicated native host routes. | [Notes](docs/releases/v0.4.24.md) |
 | 0.4.23 | Add service-aware SLAs, weighted forwarding, guided setup and selective session recovery. | [Notes](docs/releases/v0.4.23.md) |
 | 0.4.22 | Edit active policy settings in place and verify the selected path against PF. | [Notes](docs/releases/v0.4.22.md) |
 | 0.4.21 | Protect sources covered by policy-based IPsec full tunnels from direct WAN steering. | [Notes](docs/releases/v0.4.21.md) |

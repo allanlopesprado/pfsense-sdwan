@@ -9,7 +9,7 @@ An experimental package for monitoring links, comparing gateways against SLAs, a
 ## What the package does
 
 - **Dashboard** shows each gateway's IP address, RTT, RTT standard deviation, loss, and status.
-- **Policies** select a path by latency or cost, or distribute new connections across healthy links with the native forwarding adapter. **Diagnostics** shows SLA and DNS or HTTPS results.
+- **Policies** select a path by latency or cost, or distribute new connections across healthy links with the native forwarding adapter. **Diagnostics** shows SLA and TCP, DNS or HTTPS results.
 - **Status → Services** lists the `sdwan` service with native controls. Events appear under **Status → System Logs → General**.
 - **Updates** checks GitHub, verifies the SHA-256 checksum, and installs the published release from the WebGUI.
 
@@ -41,7 +41,7 @@ If installation defers WebGUI registration, wait for PHP-FPM to return and run `
 ## Configure and update
 
 1. Confirm measurements in **Status → Gateways** and add the links under **Services → SD-WAN → Members**.
-2. Set RTT, loss and optional RTT standard deviation limits in **Performance SLAs**. To monitor application reachability, configure DNS or HTTPS checks in **Members** with dedicated native host routes.
+2. Set RTT, loss and optional RTT standard deviation limits in **Performance SLAs**. To monitor application reachability, configure TCP, DNS or HTTPS checks in **Members** with dedicated native host routes. A TCP check such as tcp://192.0.2.20:587 verifies the connection. An HTTPS check also verifies the certificate and response.
 3. Select a strategy in **Policies** and review **Diagnostics**. Use **Forwarding** to inspect the gateway group, paired rules and active PF paths. Under **Status → Dashboard**, use **+ → SD-WAN** to add the widget.
 
 For installations running **0.4.8** or later, open **SD-WAN → Updates**, click **Check GitHub**, and select **Upgrade to …** when a release is available. This action uses the native package installation privilege.

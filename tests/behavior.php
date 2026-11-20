@@ -125,11 +125,41 @@ $result = sdwan_evaluate($checks, $gateways, 1700000000, $inventory, [
 check('a healthy secondary service check keeps a link eligible', $result['policies']['calls']['selected'] === 'a');
 $checks['members'][1]['probe_primary'] = 'dns://example.com 192.0.2.53';
 check('a service IP cannot take host routes on different members', sdwan_validate_config($checks, $inventory) !== []);
-check('service targets always require DNS or HTTPS and a concrete next destination',
+check('service targets require a supported protocol and a concrete destination IP',
     sdwan_probe_target('http://example.com 192.0.2.53') === null &&
     sdwan_probe_target('https://admin@example.com 192.0.2.53') === null &&
     sdwan_probe_target('dns://example.com 127.0.0.1') === null &&
     sdwan_probe_target('dns://example.com ::ffff:127.0.0.1') === null);
+check('TCP probes accept only a literal routed IP and a valid port',
+    sdwan_probe_target('tcp://192.0.2.2:587') === ['protocol' => 'tcp', 'port' => 587, 'address' => '192.0.2.2', 'family' => 'inet'] &&
+    sdwan_probe_target('tcp://[2001:db8::20]:8443')['family'] === 'inet6' &&
+    sdwan_probe_target('tcp://[192.0.2.2]:443') === null &&
+    sdwan_probe_target('tcp://2001:db8::20:8443') === null &&
+    sdwan_probe_target('tcp://example.com:443') === null &&
+    sdwan_probe_target('tcp://192.0.2.2:0') === null &&
+    sdwan_probe_target('tcp://192.0.2.2:65536') === null &&
+    sdwan_probe_target('tcp://127.0.0.1:443') === null);
+$listener = stream_socket_server('tcp://127.0.0.1:0');
+check('a local TCP listener is available for the socket test', is_resource($listener));
+$endpoint = 'tcp://' . stream_socket_get_name($listener, false);
+$tcp_flags = STREAM_CLIENT_CONNECT | STREAM_CLIENT_ASYNC_CONNECT;
+$socket = stream_socket_client($endpoint, $errno, $error, 0, $tcp_flags);
+$accepted = stream_socket_accept($listener, 1);
+check('a completed TCP handshake passes the check', is_resource($accepted) && sdwan_probe_tcp_status($socket) === true);
+fclose($accepted);
+fclose($socket);
+fclose($listener);
+$socket = @stream_socket_client($endpoint, $errno, $error, 0, $tcp_flags);
+$status = false;
+if (is_resource($socket)) {
+    $status = null;
+    for ($attempt = 0; $attempt < 100 && $status === null; $attempt++) {
+        $status = sdwan_probe_tcp_status($socket);
+        if ($status === null) usleep(1000);
+    }
+    fclose($socket);
+}
+check('a refused TCP connection is distinguished from a successful handshake', $status === false);
 $question = sdwan_probe_dns_question('example.com');
 $answer = pack('nnnnnn', 17, 0x8180, 1, 1, 0, 0) . $question .
     pack('nnnNnC4', 0xc00c, 1, 1, 60, 4, 192, 0, 2, 43);

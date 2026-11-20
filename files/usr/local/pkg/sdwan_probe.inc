@@ -1,14 +1,28 @@
 <?php
 
-/* A probe pairs a DNS name or HTTPS URL with an explicitly routed IP address. */
+/* Every probe uses an explicitly routed destination IP. */
 function sdwan_probe_target($value): ?array {
-	if (!is_string($value) || strlen($value) > 512 ||
-	    !preg_match('~\A(https|dns)://([A-Za-z0-9.-]+)(/[^ \x00-\x20\x7f#]*)? ([A-Fa-f0-9:.]+)\z~D', $value, $parts)) {
+	if (!is_string($value) || strlen($value) > 512) {
 		return null;
 	}
-	[, $protocol, $host, $path, $address] = $parts;
-	if (strlen($host) > 253 || !preg_match('/\A(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?\z/iD', $host) ||
-	    ($protocol === 'dns' && $path !== '') || filter_var($address, FILTER_VALIDATE_IP) === false) {
+	if (preg_match('~\Atcp://(\[[A-Fa-f0-9:.]+\]|[0-9.]+):([1-9][0-9]{0,4})\z~D', $value, $parts)) {
+		$address = trim($parts[1], '[]');
+		$port = (int) $parts[2];
+		if ($port > 65535 || str_starts_with($parts[1], '[') !== str_contains($address, ':')) {
+			return null;
+		}
+		$target = ['protocol' => 'tcp', 'port' => $port];
+	} elseif (preg_match('~\A(https|dns)://([A-Za-z0-9.-]+)(/[^ \x00-\x20\x7f#]*)? ([A-Fa-f0-9:.]+)\z~D', $value, $parts)) {
+		[, $protocol, $host, $path, $address] = $parts;
+		if (strlen($host) > 253 || !preg_match('/\A(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?\z/iD', $host) ||
+		    ($protocol === 'dns' && $path !== '')) {
+			return null;
+		}
+		$target = ['protocol' => $protocol, 'host' => strtolower($host), 'path' => $path ?: '/'];
+	} else {
+		return null;
+	}
+	if (filter_var($address, FILTER_VALIDATE_IP) === false) {
 		return null;
 	}
 	$packed = inet_pton($address);
@@ -19,8 +33,15 @@ function sdwan_probe_target($value): ?array {
 	    (ord($packed[0]) === 0 || ord($packed[0]) === 127 || ord($packed[0]) >= 224)) {
 		return null;
 	}
-	return ['protocol' => $protocol, 'host' => strtolower($host), 'path' => $path ?: '/',
-	    'address' => inet_ntop($packed), 'family' => $ipv6 ? 'inet6' : 'inet'];
+	return $target + ['address' => inet_ntop($packed), 'family' => $ipv6 ? 'inet6' : 'inet'];
+}
+
+/* A writable asynchronous socket can signal either a connection or a refusal. */
+function sdwan_probe_tcp_status($socket): ?bool {
+	$read = $except = null;
+	$write = [$socket];
+	$ready = @stream_select($read, $write, $except, 0, 0);
+	return $ready === 0 ? null : ($ready === 1 && @stream_socket_get_name($socket, true) !== false);
 }
 
 function sdwan_probe_route_matches(string $output, string $device, string $next_hop): bool {
@@ -106,9 +127,19 @@ function sdwan_probe_observe(array $members, array $inventory, array $observatio
 			$ipv6 = $target['family'] === 'inet6';
 			$destination = $ipv6 ? '[' . $target['address'] . ']' : $target['address'];
 			$job = ['member' => $name, 'field' => $field, 'target' => $target, 'gateway' => $gateway, 'path' => $path];
-			if ($target['protocol'] === 'dns') {
+			if ($target['protocol'] === 'tcp' || $target['protocol'] === 'dns') {
 				$bind = ($ipv6 ? "[{$source}]" : $source) . ':0';
 				$context = stream_context_create(['socket' => ['bindto' => $bind]]);
+				if ($target['protocol'] === 'tcp') {
+					$socket = @stream_socket_client("tcp://{$destination}:{$target['port']}", $error, $message, 0,
+					    STREAM_CLIENT_CONNECT | STREAM_CLIENT_ASYNC_CONNECT, $context);
+					if ($socket === false) {
+						$results[$name][$field] = 'TCP check failed';
+					} else {
+						$jobs[] = $job + ['socket' => $socket];
+					}
+					continue;
+				}
 				$socket = @stream_socket_client("udp://{$destination}:53", $error, $message, 0.1, STREAM_CLIENT_CONNECT, $context);
 				if ($socket === false) {
 					continue;
@@ -152,6 +183,17 @@ function sdwan_probe_observe(array $members, array $inventory, array $observatio
 		}
 		foreach ($jobs as $index => $job) {
 			if (!isset($job['socket'])) {
+				continue;
+			}
+			if ($job['target']['protocol'] === 'tcp') {
+				$connected = sdwan_probe_tcp_status($job['socket']);
+				if ($connected === null) {
+					continue;
+				}
+				$success = $connected && sdwan_probe_path($job['target'], $job['gateway']) === $job['path'];
+				$results[$job['member']][$job['field']] = $success ? 'Passed' : 'TCP check failed';
+				fclose($job['socket']);
+				unset($jobs[$index]);
 				continue;
 			}
 			$reply = @fread($job['socket'], 4096);
