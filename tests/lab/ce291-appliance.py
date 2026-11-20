@@ -219,12 +219,17 @@ def first_boot(qemu):
 
 
 def wait_paths(qemu, label, expected, wait_ack=False):
-    deadline = time.monotonic() + 135
+    started = time.monotonic()
+    deadline = started + 135
     seen = set()
+    valid_sample = False
     while time.monotonic() < deadline:
         raw = command(qemu, f"php {LAB}/ce291-guest.php observations")
         parsed = json.loads(next(line for line in reversed(raw.splitlines()) if line.startswith("{")))
         snapshot, receipt = parsed["snapshot"] or {}, parsed["receipt"]
+        valid_sample |= bool(snapshot)
+        if not valid_sample and time.monotonic() - started >= 28:
+            break
         if receipt and receipt["accepted"]:
             seen.add(receipt["decision"])
         steering = {name: row["gateway"] for name, row in snapshot.get("steering", {}).items()}
@@ -238,7 +243,27 @@ def wait_paths(qemu, label, expected, wait_ack=False):
                 print(f"{label} PF {line}", flush=True)
             return snapshot
         time.sleep(1)
+    diagnostics(qemu)
     raise RuntimeError(f"{label} did not converge: last observer response {raw}")
+
+
+def diagnostics(qemu):
+    raw = command(qemu, """date +%s
+        ls -l /var/run/sdwan-observer* /var/run/dpinger*.sock || :
+        cat /var/run/sdwan-observer.json || :
+        pfctl -sr 2>/dev/null | grep -E 'ridentifier 4100[1-5]$' || :
+        grep -iE 'sdwan|check_reload_status|dpinger' /var/log/system.log | tail -22 || :
+        php -r '
+            require "config.inc";
+            require "/usr/local/pkg/sdwan_steering.inc";
+            $c=sdwan_get_config();
+            echo "config=",sdwan_config_revision($c),PHP_EOL;
+            echo "inventory=",sdwan_gateway_inventory_revision($c,sdwan_gateways()),PHP_EOL;
+            echo "reader=",sdwan_read_snapshot() === null ? "invalid" : "valid",PHP_EOL;
+        '
+    """)
+    print(raw, flush=True)
+
 
 
 def loaded(qemu):
