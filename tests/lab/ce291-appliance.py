@@ -524,7 +524,13 @@ def verify_native_dhcp(qemu, cleanup, provider, certificate):
         current = wait_paths(qemu, "after WAN2 lease change", active, wan2_hop=gateway)
         assert current["forwarding_id"] != initial["forwarding_id"]
         tcp_pair("after WAN2 lease change", (address, A))
-        assert route_and_nat(qemu) == reference
+        default, nat = reference
+        expected = "\n".join(
+            rule.replace(f" -> {B} ", f" -> {address} ", 1) if rule.startswith("nat on vtnet2 inet ") else rule
+            for rule in nat.splitlines()
+        )
+        assert expected != nat, "The NAT baseline lacks a WAN2 IPv4 translation"
+        assert route_and_nat(qemu) == (default, expected)
         management("after WAN2 lease change", certificate)
         print("NATIVE_DHCP_LEASE_NEW_ADDRESS_AND_HOP_APPLIED_IN_PF", flush=True)
         stop(renewed_provider)
@@ -534,6 +540,7 @@ def verify_native_dhcp(qemu, cleanup, provider, certificate):
     finally:
         fault()
     wait_paths(qemu, "original WAN2 lease restored", {"G": "GW_A", "B": "GW_A"})
+    assert route_and_nat(qemu) == reference
 
 
 def acceptance(qemu, cleanup, provider):
