@@ -19,7 +19,7 @@ Restart the SD-WAN service after changing the native adapter so its long-running
 
 ### CE 2.9.1 lab copy
 
-To prepare a copy off the appliance, use `--ce-291-lab` on a tree containing the original `src/etc/inc/filter.inc`. This mode requires SHA-256 `6acd8621e4f88660759c5656488d81f580b49f4c9848b19048ae6a2570e177b4`. The hook runs after the native decision that may omit unavailable gateways. The lab checked patch application and PHP syntax on the exact copy. Two-path traffic, filter reloads, and rollback still require validation on a clone before using the image.
+To prepare a copy off the appliance, use `--ce-291-lab` on a tree containing the original `src/etc/inc/filter.inc`. The original generator previously validated on an appliance has SHA-256 `6acd8621e4f88660759c5656488d81f580b49f4c9848b19048ae6a2570e177b4`. The official 2.9.1 system package contains generator SHA-256 70758089d12a271ff08ccf3e20a180d3f441f8d468e984be6b1476c366c66c30, identical to the audited 2.9.2 generator. The tool accepts either audited 2.9.1 input. The hook runs after the native decision that may omit unavailable gateways. The lab checked patch application and PHP syntax on the exact copy. Two-path traffic, filter reloads, and rollback still require validation on a clone before using the image.
 
 ### CE 2.9.2 lab copy
 

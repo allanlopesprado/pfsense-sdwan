@@ -2,6 +2,7 @@
 """Extract only audited generator inputs for the CE 2.9.1 policy lab."""
 import argparse
 import hashlib
+import json
 from pathlib import Path
 import tarfile
 
@@ -14,6 +15,9 @@ def stage(archive, output):
             raise SystemExit("Expected the audited pfSense-system-2.9.1 archive")
     output.mkdir()
     with tarfile.open(archive, mode="r:*") as package:
+        manifest = json.load(package.extractfile("+MANIFEST"))
+        if manifest["name"] != "pfSense-system" or manifest["version"] != "2.9.1":
+            raise SystemExit("The archive does not identify itself as pfSense-system 2.9.1")
         for name in ("filter.inc", "globals.inc", "util.inc"):
             matching = [item for item in package.getmembers() if item.name.lstrip("./") == f"etc/inc/{name}"]
             if len(matching) != 1 or not matching[0].isfile():

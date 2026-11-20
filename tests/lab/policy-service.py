@@ -32,7 +32,11 @@ def run(args):
         raise RuntimeError("Run only in the disposable FreeBSD VNET topology")
 
     def jexec(node, *argv, **kwargs):
-        return subprocess.run(["jexec", node, *argv], capture_output=True, timeout=15, check=True, **kwargs).stdout
+        result = subprocess.run(["jexec", node, *argv], capture_output=True, timeout=15, **kwargs)
+        if result.returncode:
+            raise RuntimeError(f"{node} {argv[0]} failed ({result.returncode})\n"
+                               f"{result.stderr.decode(errors='replace')}{result.stdout.decode(errors='replace')}")
+        return result.stdout
 
     with tempfile.TemporaryDirectory(prefix="sdwan-service-", dir="/tmp") as directory, ExitStack() as cleanup:
         work = Path(directory)
@@ -183,7 +187,7 @@ def run(args):
             print(f"{label} ERP return={result[0]!r}, backup return={result[1]!r}", flush=True)
 
         def open_flow(target):
-            child = subprocess.Popen(["jexec", args.client, "nc", "-n", "-w", "35", target, "7"],
+            child = subprocess.Popen(["jexec", args.client, "nc", "-n", "-w", "70", target, "7"],
                                      stdin=subprocess.PIPE, stdout=subprocess.PIPE)
             cleanup.callback(stop, child)
             cleanup.callback(child.stdout.close)
@@ -266,16 +270,23 @@ with socket.socket(socket.AF_INET,socket.SOCK_DGRAM) as s:
         fault([])
         transition("recovery", "GW_A", "GW_A")
         pair("recovery", (WAN_IPS[0], WAN_IPS[0]))
-
+        assert receive(held_erp, 7) == WAN_IPS[0] + " outage-established"
         for workstream in (held_erp, held_backup):
-            stop(workstream)
+            send(workstream, "recovered-established")
+            assert receive(workstream) == WAN_IPS[0] + " recovered-established"
+        print("both original sockets replied after ERP recovery", flush=True)
         fault([f"block drop in quick on {device} inet from {source} to any"
                for device, source in ((args.remote_a, WAN_IPS[0]), (args.remote_b, WAN_IPS[1]))])
         transition("both WANs down", None, None)
         pair("both WANs down", (None, None))
+        for workstream in (held_erp, held_backup):
+            send(workstream, "both-down-established")
+            assert not receive(workstream, .6)
         fault([])
         transition("WANs recovered", "GW_A", "GW_A")
         pair("WANs recovered", (WAN_IPS[0], WAN_IPS[0]))
+        for workstream in (held_erp, held_backup):
+            assert receive(workstream, 8) == WAN_IPS[0] + " both-down-established"
 
         config["gateways/sdwan_bindings"] = {"item": []}
         config["gateways/sdwan_bindings/item"] = []
@@ -283,6 +294,9 @@ with socket.socket(socket.AF_INET,socket.SOCK_DGRAM) as s:
         observe()
         load_rules(rollback=True)
         pair("native rollback", (WAN_IPS[0], WAN_IPS[0]))
+        for workstream in (held_erp, held_backup):
+            send(workstream, "rollback-established")
+            assert receive(workstream) == WAN_IPS[0] + " rollback-established"
         assert jexec(args.firewall, "pfctl", "-sn") == nat
         assert jexec(args.firewall, "route", "-n", "get", "default") == default
         print("ok - CE 2.9.1 rule generator, live FreeBSD probes and PF verified two-policy traffic", flush=True)

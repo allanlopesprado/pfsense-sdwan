@@ -10,7 +10,7 @@ import tempfile
 
 BASE_HASH = "4d0e6bb6b8d21ee614f61f4905fc6e6a22c2cba6937629349cb606bf62e6bc89"
 CE_291_LAB_HASH = "6acd8621e4f88660759c5656488d81f580b49f4c9848b19048ae6a2570e177b4"
-CE_292_LAB_HASH = "70758089d12a271ff08ccf3e20a180d3f441f8d468e984be6b1476c366c66c30"
+CE_RELEASE_FILTER_HASH = "70758089d12a271ff08ccf3e20a180d3f441f8d468e984be6b1476c366c66c30"
 FILTER = Path("src/etc/inc/filter.inc")
 HERE = Path(__file__).resolve().parents[1] / "core"
 
@@ -20,18 +20,18 @@ def main():
     parser.add_argument("--source", type=Path, required=True, help="Unmodified upstream source checkout")
     parser.add_argument("--out", type=Path, required=True, help="New directory for the two build inputs")
     release = parser.add_mutually_exclusive_group()
-    release.add_argument("--ce-291-lab", dest="fingerprint", action="store_const", const=CE_291_LAB_HASH,
+    release.add_argument("--ce-291-lab", dest="fingerprints", action="store_const", const=(CE_291_LAB_HASH, CE_RELEASE_FILTER_HASH),
                          help="Use the explicitly fingerprinted CE 2.9.1 laboratory input")
-    release.add_argument("--ce-292-lab", dest="fingerprint", action="store_const", const=CE_292_LAB_HASH,
+    release.add_argument("--ce-292-lab", dest="fingerprints", action="store_const", const=(CE_RELEASE_FILTER_HASH,),
                          help="Use the explicitly fingerprinted CE 2.9.2 laboratory input")
-    parser.set_defaults(fingerprint=BASE_HASH)
+    parser.set_defaults(fingerprints=(BASE_HASH,))
     args = parser.parse_args()
     source = args.source.resolve()
     out = args.out.resolve()
     if out.exists() or source == out or source in out.parents:
         parser.error("Use a new output directory outside the source checkout.")
     original = source / FILTER
-    if not original.is_file() or hashlib.sha256(original.read_bytes()).hexdigest() != args.fingerprint:
+    if not original.is_file() or hashlib.sha256(original.read_bytes()).hexdigest() not in args.fingerprints:
         parser.error("This filter.inc differs from the audited upstream input. Review this base before porting.")
     out.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(dir=out.parent) as work:

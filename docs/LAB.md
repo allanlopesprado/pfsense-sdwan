@@ -112,6 +112,8 @@ Attribution is easier if the initial native policy fixes a path for the test flo
 
 ## Additional acceptance for active steering
 
+The [two-policy service acceptance](POLICY-SERVICE-ACCEPTANCE.md) describes the ERP and backup traffic test, its evidence and the procedure for an isolated CE 2.9.1 appliance.
+
 The reviewed PF generator snapshot can omit package rules during a `packagelock` or when a generated rule fails validation. Verify that any mandatory VPN policy continues to apply during reload, upgrade, and package unavailability on the exact CE build.
 
 1. Degrade A while both SAs remain up. Capture **new** sessions in the configured class on the expected path at both ends. Measure established flows and preserved NAT separately.
