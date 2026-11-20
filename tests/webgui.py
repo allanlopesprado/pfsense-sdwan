@@ -325,7 +325,8 @@ def run(php, classes, screenshot_dir=None):
         event_attrs, event_post = event_form
         assert event_attrs.get("method") == "post" and event_attrs.get("id") == "sdwan-system-logs"
         assert 'form="sdwan-system-logs"' in fresh and "__csrf_magic" in event_post
-        assert 'form="sdwan-system-logs" class="btn btn-primary btn-sm"' in fresh
+        assert 'form="sdwan-system-logs" class="btn btn-default btn-sm"' in fresh
+        assert fresh.index('Gateway Status') < fresh.index('Policy Status')
         assert 'class="btn btn-default btn-sm" role="button" href="/status_gateways.php"' in fresh
         assert 'class="fa-solid fa-network-wired fa-fw"' in fresh
         assert "Last sample" not in fresh and "<time" not in fresh
@@ -359,6 +360,7 @@ def run(php, classes, screenshot_dir=None):
             report = request("diagnostics", **args)
             assert notice in report and 'aria-label="Member evaluation"' not in report and "2 of 2" not in report
         print("ok - diagnostics reports the policy decision, both SLA breaches, gateway state and sample availability")
+        assert 'class="sdwan-filter"' in diagnostics
         diagnostic_form = Choices(diagnostics)
         assert diagnostic_form.gets == 1 and diagnostic_form.posts == 1 and len(diagnostic_form.tokens) == 1
         assert all("__csrf_magic" not in values for form, values in diagnostic_form.forms if form.get("method") == "get")
@@ -437,6 +439,8 @@ def run(php, classes, screenshot_dir=None):
         stock = request("forwarding", native=fixture, get=names)
         assert "matches the native group" in stock and "50321" in stock and "Voice &lt;A&gt;" in stock, stock
         assert "Preview mode" in stock and 'value="bind"' not in stock
+        assert 'class="sdwan-filter"' in stock and 'aria-label="Firewall Rules"' in stock
+        assert stock.index("Gateway Group PBR") < stock.index('aria-label="Firewall Rules"') < stock.index("Set up forwarding")
         shared_monitor = dict(fixture, fixture_dynamic_targets={"wan": "192.0.2.1", "opt1": "192.0.2.1"})
         blocked = request("forwarding", native=shared_monitor, get=names, steering_abi=True)
         assert "shares its Monitor IP" in blocked and 'value="bind"' not in blocked
