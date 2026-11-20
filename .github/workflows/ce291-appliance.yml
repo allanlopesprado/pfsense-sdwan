@@ -62,4 +62,3 @@ jobs:
           path: |
             ce291-result.log
             ce291-console.log
-

@@ -73,7 +73,7 @@ def wire(cleanup):
     for n in range(162, 168):
         run("ip", "-n", "sdwan-peer", "addr", "add", f"192.0.2.{n}/32", "dev", "lo")
     run(*in_ns("sdwan-peer", "nft", "-f", "-"), input=
-        "table inet test { chain input { type filter hook input priority filter; policy accept; } }\n")
+        "table inet test {\n chain input {\n  type filter hook input priority filter; policy accept;\n }\n}\n")
     server = subprocess.Popen(in_ns("sdwan-peer", sys.executable, SCRIPT, "serve"),
                               stdout=subprocess.PIPE, text=True)
     cleanup.callback(stop, server)
@@ -128,7 +128,7 @@ def client(target, held):
 
 
 def command(qemu, script, timeout=60):
-    qemu.sendline("echo __START__; sh -c " + shlex.quote(script) + "; echo __RESULT__$?")
+    qemu.sendline("echo __START__; sh -ec " + shlex.quote(script) + "; echo __RESULT__$?")
     qemu.expect(r"\r+\n__START__\r+\n", timeout=timeout)
     qemu.expect(r"(?:\r+\n)?__RESULT__(\d+)\r+\n", timeout=timeout)
     result = qemu.before.replace("\r", "").strip()
@@ -338,4 +338,3 @@ if __name__ == "__main__":
         client(sys.argv[2], held=sys.argv[1] == "held")
     else:
         appliance(Path(sys.argv[1]).resolve())
-
