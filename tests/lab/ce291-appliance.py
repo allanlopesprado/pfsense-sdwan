@@ -57,7 +57,7 @@ def wire(cleanup):
         run("ip", "link", "add", bridge, "type", "bridge")
         cleanup.callback(run, "ip", "link", "del", bridge)
         run("ip", "tuntap", "add", "dev", tap, "mode", "tap")
-        cleanup.callback(run, "ip", "tuntap", "del", "dev", tap, "mode", "tap")
+        cleanup.callback(run, "ip", "link", "del", tap)
         run("ip", "link", "add", outside, "type", "veth", "peer", "name", inside)
         cleanup.callback(run, "ip", "link", "del", outside)
         run("ip", "link", "set", inside, "netns", namespace)
@@ -150,6 +150,7 @@ def first_boot(qemu):
     qemu.sendline("")
     qemu.expect(r"# ")
     command(qemu, "mount -uw /")
+    command(qemu, "test -r /etc/master.passwd; grep -q '^nobody:' /etc/master.passwd; pwd_mkdb -p /etc/master.passwd")
     version = command(qemu, "uname -a; pkg query '%n %v' pfSense-base pfSense-kernel-pfSense")
     print(version, flush=True)
     assert "pfSense-kernel-pfSense 2.9.1" in version, version
@@ -320,7 +321,7 @@ def appliance(image):
             "-drive", f"file={image},format=raw,if=virtio", "-display", "none",
             "-serial", "stdio", "-monitor", "none", *nets,
         ], encoding="utf-8", codec_errors="replace", timeout=120)
-        cleanup.callback(qemu.terminate, force=True)
+        cleanup.callback(qemu.close, force=True)
         qemu.logfile_read = log
         first_boot(qemu)
         acceptance(qemu, cleanup)
