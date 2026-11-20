@@ -161,9 +161,10 @@ def command(qemu, script, timeout=60):
 def console_shell(qemu, timeout=300):
     qemu.expect("Enter an option:", timeout=timeout)
     qemu.sendline("8")
-    qemu.expect(r"[#%] ")
-    qemu.sendline("/bin/sh")
-    qemu.expect(r"# ")
+    qemu.expect(r"(?:[#%] |/root(?:\x1b\[[0-9;]*m)*:(?:\x1b\[[0-9;]*m)* )", timeout=30)
+    qemu.sendline("exec /bin/sh")
+    qemu.sendline("echo __SDWAN_SHELL__")
+    qemu.expect(r"\r+\n__SDWAN_SHELL__\r+\n", timeout=15)
 
 
 def first_boot(qemu):
