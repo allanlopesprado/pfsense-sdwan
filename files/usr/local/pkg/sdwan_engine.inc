@@ -248,7 +248,8 @@ function sdwan_evaluate(array $config, array $gateways, int $now, array $invento
 			}
 			if ($reason === 'Eligible' && !$service_ok) {
 				$reason = match ($service) {
-					'Failed' => 'No configured service check passed',
+					'Failed' => in_array('required', sdwan_policy_probe_requirements($policy, $member ?? []), true)
+					    ? 'Required service check failed' : 'No configured service check passed',
 					'Not run' => 'Service checks were not run',
 					default => 'No service measurement',
 				};
@@ -350,6 +351,19 @@ function sdwan_read_snapshot(): ?array {
 		foreach ($policy['candidates'] as $member => $reason) {
 			if (!isset($data['members'][$member]) || !is_string($reason)) {
 				return null;
+			}
+		}
+		if (array_key_exists('soft', $policy)) {
+			if (!is_array($policy['soft']) || !array_is_list($policy['soft'])) {
+				return null;
+			}
+			foreach ($policy['soft'] as $member) {
+				if (!is_string($member) || !in_array($policy['candidates'][$member] ?? null, [
+				    'RTT exceeds the SLA', 'RTT standard deviation exceeds the SLA or is unavailable',
+				    'Loss exceeds the SLA'], true) || !in_array($data['members'][$member]['status'] ?? null,
+				    ['online', 'degraded'], true)) {
+					return null;
+				}
 			}
 		}
 		/* Old snapshots remain readable for their normal 30-second lifetime. */

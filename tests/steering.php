@@ -195,6 +195,10 @@ verify($retained['gateway'] === 'A' && $retained['degraded']['A'] === 1 &&
     sdwan_steering_state($controlled, $binding, $soft, $retained, 110)['gateway'] === null &&
     sdwan_steering_state($controlled, $binding, array_diff_key($soft, ['soft' => 1]), $before, 110)['gateway'] === null,
     'only an explicitly permitted incumbent survives a bounded soft degradation; a hard failure blocks immediately');
+$alternate = ['selected' => 'b', 'candidates' => ['a' => 'Loss exceeds the SLA', 'b' => 'Eligible'], 'soft' => ['a']];
+verify(sdwan_steering_state($controlled, $binding, $alternate, $before, 100)['gateway'] === 'A' &&
+    sdwan_steering_state($controlled, $binding, $alternate, $retained, 110)['gateway'] === 'B',
+    'degradation confirmation precedes recovery timing even when recovery hold is zero');
 verify(sdwan_steering_step(['gateway' => 'A'], ['A', 'B'], 'B', 100, 0)['gateway'] === 'B',
     'a policy can explicitly choose immediate recovery');
 $pooled = ['revision' => sdwan_config_revision($edited_binding), 'gateway' => 'A', 'pool' => ['A', 'B']];

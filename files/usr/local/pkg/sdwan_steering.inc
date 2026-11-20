@@ -367,7 +367,10 @@ function sdwan_steering_state(array $config, array $binding, array $result, arra
 		$pool = array_values(array_intersect($binding['gateways'], $eligible));
 		return $meta + ['gateway' => $pool[0] ?? null, 'pool' => $pool];
 	}
-	$step = sdwan_steering_step($prior, $eligible, $best ?? array_key_first($degraded), $now,
+	if (isset($degraded[$prior['gateway'] ?? ''])) {
+		$best = $prior['gateway'];
+	}
+	$step = sdwan_steering_step($prior, $eligible, $best, $now,
 	    (int)($policy['recover_seconds'] ?? SDWAN_STEERING_HOLD));
 	return $meta + $step;
 }
@@ -403,9 +406,10 @@ function sdwan_steering_loaded_path_matches(string $rule, array $gateways): bool
 	$seen = [];
 	foreach ($paths as [, $device, $address]) {
 		$gateway = $gateways[$device] ?? null;
-		$next = @inet_pton(explode('%', $address, 2)[0]);
-		if ($gateway === null || $next === false ||
-		    $next !== @inet_pton(explode('%', $gateway['address'], 2)[0])) {
+		$family = str_contains($address, ':') ? 'inet6' : 'inet';
+		$next = sdwan_monitor_address($address, $family, $device, true);
+		if ($gateway === null || $next === null ||
+		    $next !== sdwan_monitor_address($gateway['address'], $family, $device, true)) {
 			return false;
 		}
 		$seen[$device] = ($seen[$device] ?? 0) + 1;

@@ -134,7 +134,7 @@ if ($policy !== null):
 					<?php $requirements = sdwan_policy_probe_requirements($policy, $members[$member] ?? []);
 					foreach (['probe_primary' => gettext('Primary'), 'probe_secondary' => gettext('Secondary')] as $field => $label): ?>
 						<?php if (isset($requirements[$field])): ?>
-						<div><?=sdwan_ui_escape($label)?> · <?=sdwan_ui_escape(gettext($reading['checks'][$field] ?? 'No measurement'))?></div>
+						<div><?=sdwan_ui_escape($requirements[$field] === 'required' ? sprintf(gettext('%s (required)'), $label) : $label)?> · <?=sdwan_ui_escape(gettext($reading['checks'][$field] ?? 'No measurement'))?></div>
 						<?php endif; ?>
 					<?php endforeach; ?></td>
 					<?php endif; ?>
