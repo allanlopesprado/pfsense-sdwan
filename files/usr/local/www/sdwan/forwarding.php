@@ -230,7 +230,7 @@ if ($preview !== null):
 	</div>
 </div>
 <?php if ($supported && $native_edit && $binding === null && !$preview['errors'] && $preview['binding'] !== null): ?>
-	<p class="help-block"><?=gettext('Forwarding integration is experimental. Verify the active firewall rules after binding.')?></p>
+	<p class="help-block"><?=gettext('Experimental forwarding. Verify the active firewall rules after binding.')?></p>
 	<form method="post" action="/sdwan/forwarding.php" class="action-buttons">
 		<input type="hidden" name="policy" value="<?=sdwan_ui_escape($policy_name)?>">
 		<input type="hidden" name="group" value="<?=sdwan_ui_escape($group_name)?>">
@@ -265,7 +265,7 @@ if ($bindings_by_group): ?>
 <?php endif;
 if (!$bindings_by_group && $native_edit): ?>
 <details class="panel panel-default">
-	<summary class="panel-heading"><?=gettext('Set up forwarding')?></summary>
+	<summary class="panel-heading"><span class="panel-title"><?=gettext('Set up forwarding')?></span></summary>
 	<div class="panel-body">
 		<ol>
 			<li><?=gettext('Configure members, a performance SLA and a policy.')?></li>

@@ -365,7 +365,7 @@ def run(php, classes, screenshot_dir=None):
         assert diagnostic_form.gets == 1 and diagnostic_form.posts == 1 and len(diagnostic_form.tokens) == 1
         assert all("__csrf_magic" not in values for form, values in diagnostic_form.forms if form.get("method") == "get")
         assert diagnostic_form.fields["policy"] == [(":VOICE", True)]
-        assert "fa-solid fa-search" in diagnostics
+        assert "fa-solid fa-magnifying-glass" in diagnostics
         numeric = {**config, "policies": [{**config["policies"][0], "name": n} for n in ("1", "01")]}
         numeric_options = Choices(request("diagnostics", config=numeric, get={"policy": ":01"})).fields["policy"]
         assert numeric_options == [(":1", False), (":01", True)], numeric_options
