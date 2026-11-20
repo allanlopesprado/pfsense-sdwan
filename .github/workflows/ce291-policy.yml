@@ -1,0 +1,37 @@
+name: CE 2.9.1 policy traffic lab
+on:
+  push:
+    branches: ['milestone/policy-service-forwarding']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  policy-traffic:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Verify the original CE 2.9.1 rule generator
+        run: |
+          set -eu
+          archive="$RUNNER_TEMP/pfSense-system-2.9.1.pkg"
+          curl --fail --silent --show-error --retry 2 --max-time 150 --proto '=https' \
+            --output "$archive" \
+            'https://pkg01-atx.netgate.com/pfSense_v2_9_1_amd64-pfSense_v2_9_1/All/pfSense-system-2.9.1.pkg'
+          python3 tests/lab/ce291-source.py "$archive" lab-ce291
+          python3 tools/prepare-core.py --ce-291-lab --source lab-ce291 --out "$RUNNER_TEMP/ce291-overlay"
+      - name: Configure the Ubuntu dependency mirror
+        run: bash .github/scripts/ubuntu-archive.sh
+      - name: Run two-policy acceptance with real FreeBSD PF and dpinger
+        uses: vmactions/freebsd-vm@4441bea20b31bfa77329a5af583199362489567e # v1.4.9
+        with:
+          release: "15.1"
+          usesh: true
+          prepare: |
+            env ASSUME_ALWAYS_YES=yes pkg bootstrap
+            pkg install -y php84 php84-filter git python3 dpinger
+          run: |
+            set -eu
+            SDWAN_CE291_CORE="$PWD/lab-ce291" sh tests/lab/freebsd-dataplane.sh

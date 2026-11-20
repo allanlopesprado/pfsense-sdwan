@@ -16,7 +16,9 @@ function get_gateways() { return config_get_path('reload_gateways'); }
 function lookup_gateway_ip_by_name($name) { return get_gateways()[$name]['address']; }
 function is_gateway_online($gateway) { return $gateway['online']; }
 function is_gateway_action_enabled($gateway) { return !isset($gateway['action_disable']); }
-function return_gateway_groups_array($fixed) { return ['G' => []]; }
+function return_gateway_groups_array($fixed) {
+	return array_fill_keys(array_column(config_get_path('gateways/gateway_group', []), 'name'), []);
+}
 function config_path_enabled($path, $key) { return isset(config_get_path($path, [])[$key]); }
 function get_failover_gateway_group_label_item($gateway) { return []; }
 function interface_has_gateway($interface) { return $interface === 'wan'; }
@@ -43,6 +45,11 @@ $FilterIflist = [
 $vpns_list = false;
 $use_floating_states_for_ipsec = false;
 $rule = config_get_path('filter/rule')[0];
+if ($operation === 'preview_policy') {
+	require $work . '/sdwan_steering.inc';
+	echo json_encode(sdwan_steering_preview(sdwan_get_config(), $argv[4], $argv[5]), JSON_THROW_ON_ERROR);
+	return;
+}
 if ($operation === 'preview') {
 	require $work . '/sdwan_steering.inc';
 	echo json_encode(sdwan_steering_preview(sdwan_get_config(), 'calls', 'G'), JSON_THROW_ON_ERROR);
@@ -51,6 +58,14 @@ if ($operation === 'preview') {
 filter_generate_gateways(); // Starts a single generation, populating the native route inventory.
 if ($operation === 'render') {
 	echo filter_generate_user_rule($rule);
+} elseif (in_array($operation, ['paired', 'paired_rollback'], true)) {
+	foreach (config_get_path('filter/rule') as $native_rule) {
+		$compiled = filter_generate_user_rule($native_rule);
+		if ($operation === 'paired_rollback' && $compiled !== lab_stock_user_rule($native_rule)) {
+			throw new RuntimeException('The native rule changed after unbinding.');
+		}
+		echo $compiled, PHP_EOL;
+	}
 } elseif ($operation === 'freeze') {
 	// Publishing the newer snapshot between two rule compilations must not split a binding.
 	$first = filter_generate_user_rule($rule);

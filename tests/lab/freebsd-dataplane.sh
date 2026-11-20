@@ -521,6 +521,12 @@ if [ "${SDWAN_REAL_DPINGER:-0}" = 1 ]; then
         "$remote_a" "${wan_b%?}b" "$remote_c" "$work/remote.pf"
 fi
 
+if [ -n "${SDWAN_CE291_CORE:-}" ]; then
+    python3 -B "$repo/tests/lab/policy-service.py" "$SDWAN_CE291_CORE" "$firewall" "$client" "$remote" \
+        "$lan" "$wan_a" "$wan_b" "$remote_a" "${wan_b%?}b" \
+        "$work/main.pf" "$work/before.pf" "$work/after.pf" "$work/remote.pf"
+fi
+
 sh "$repo/tests/lab/freebsd-vti-no-sa.sh" "$firewall" "$remote" "$wan_a" "$remote_a" "$work"
 sh "$repo/tests/lab/freebsd-vti-esp.sh" "$firewall" "$remote" "$wan_a" "$remote_a" "$work" 198.51.100.1 198.51.100.2
 sh "$repo/tests/lab/freebsd-vti-esp.sh" "$firewall" "$remote" "$wan_b" "${wan_b%?}b" "$work" 203.0.113.1 203.0.113.2
