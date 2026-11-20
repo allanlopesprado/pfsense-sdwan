@@ -221,15 +221,26 @@ function widget_request(array $privileges, string $method, array $post, string $
 	return [http_response_code(), ob_get_clean()];
 }
 $test_config = [
+	SDWAN_CONFIG_PATH => sdwan_encode_config($single),
 	'interfaces' => ['wan' => ['enable' => '', 'if' => 'vtnet0']],
-	'gateways/gateway_item' => [['name' => 'WANGW', 'interface' => 'wan', 'gateway' => '192.0.2.1']],
+	'gateways/gateway_item' => [['name' => 'GW', 'interface' => 'wan', 'gateway' => '192.0.2.1']],
 ];
 $sequence = 'sdwan:col1:show:0,';
 $post = ['ajax' => 'ajax', 'widgetkey' => 'sdwan-0'];
+$policy_link = 'href="/sdwan/diagnostics.php?policy=calls"';
 [$code, $content] = widget_request($view, 'GET', [], $sequence, true);
-verify($code === 200 && str_contains($content, 'register_ajax') && str_contains($content, 'WANGW'), 'Dashboard include');
+verify($code === 200 && str_contains($content, 'register_ajax') && str_contains($content, $policy_link),
+    'Dashboard include shows a configured policy');
 [$code, $content] = widget_request($view, 'POST', $post, $sequence, false);
-verify($code === 200 && str_contains($content, 'WANGW') && !str_contains($content, 'register_ajax') && !str_contains($content, '<time'), 'Authorized fragment');
+verify($code === 200 && str_contains($content, $policy_link) && str_contains($content, 'No current data') &&
+    !str_contains($content, 'register_ajax') && !str_contains($content, '<time'), 'Authorized policy fragment');
+unset($test_config[SDWAN_CONFIG_PATH]);
+foreach ([[$view, false], [$manage, true]] as [$privileges, $can_configure]) {
+	[$code, $content] = widget_request($privileges, 'POST', $post, $sequence, false);
+	verify($code === 200 && str_contains($content, 'No SD-WAN policies configured.') &&
+	    str_contains($content, 'href="/sdwan/policies.php"') === $can_configure, 'Policy setup link respects privileges');
+}
+$test_config[SDWAN_CONFIG_PATH] = sdwan_encode_config($single);
 foreach ([
 	[[], 'POST', $post, $sequence, 403],
 	[$view, 'GET', $post, $sequence, 400],
@@ -237,6 +248,6 @@ foreach ([
 	[$view, 'POST', ['ajax' => 'ajax', 'widgetkey' => 'sdwan-1'], $sequence, 400],
 ] as [$privileges, $method, $body, $layout, $status]) {
 	[$code, $content] = widget_request($privileges, $method, $body, $layout, false);
-	verify($code === $status && !str_contains($content, 'WANGW'), 'Unauthorized or unconfigured widget request');
+	verify($code === $status && !str_contains($content, $policy_link), 'Unauthorized or unconfigured widget request');
 }
 echo "ok - dashboard rendering and refresh enforce status privilege and native widget instance membership\n";
