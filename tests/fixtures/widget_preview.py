@@ -182,7 +182,7 @@ def verify_dashboard_layout(core, output, widget, fragment):
                 assert data["width"] == width and data["viewport"] == width and data["horizontalOverflow"] <= 1, data
                 assert data["rows"] == 4 and data["positiveTabindex"] == 0
                 assert data["states"] == ["Applied", "Rules pending", "Blocked", "Monitor only"], data
-                assert data["egress"] == ["GW_B", "?", "?", "?"] and data["timestamps"] == 0, data
+                assert data["egress"] == ["GW_B", "—", "—", "—"] and data["timestamps"] == 0, data
                 assert data["backups"] == ["Backup: GW_A"], data
                 assert len(set(data["statusBackgrounds"])) == 4, data
                 assert all(a != b for a, b in zip(data["statusBackgrounds"][:3], data["rowBackgrounds"][:3])), data

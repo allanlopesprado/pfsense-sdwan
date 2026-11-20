@@ -80,6 +80,8 @@ echo json_encode([http_response_code() ?: 200, $body, $sdwan_title_link,
 
     config = directory / "fixture.json"
     fixture = json.loads(config.read_text())
+    fixture["interfaces"]["opt1"]["if"] = "igb0"
+    fixture["interfaces"]["opt2"]["if"] = "igb1"
     settings = fixture["installedpackages/sdwan"]
     rules = settings["policies"]["item"]
     rules[0]["name"] = "Voice"
@@ -94,8 +96,8 @@ echo json_encode([http_response_code() ?: 200, $body, $sdwan_title_link,
     ]
     fixture["gateways/sdwan_bindings"] = {"item": bindings}
     fixture["fixture_pf_rules"] = [
-        'pass in quick on lan route-to (opt2 198.51.100.1) inet all label "descr=Voice" ridentifier 301',
-        'pass in quick on lan route-to (opt1 192.0.2.1) inet all ridentifier 302',
+        'pass in quick on lan route-to (igb1 198.51.100.1) inet all label "descr=Voice" ridentifier 301',
+        'pass in quick on lan route-to (igb0 192.0.2.1) inet all ridentifier 302',
         'block drop in quick on lan inet all ridentifier 303',
     ]
     config.write_text(json.dumps(fixture))
@@ -140,7 +142,7 @@ echo json_encode([http_response_code() ?: 200, $body, $sdwan_title_link,
     save()
     status, body, _, _ = render("ajax")
     assert status == 200 and "<script>" not in body
-    assert "Backup: GW_A" in row(body, "Voice") and "GW_B" in row(body, "Voice")
+    assert "Backup: GW_A" in row(body, "Voice") and "GW_B" in row(body, "Voice"), row(body, "Voice")
     assert "Applied" in row(body, "Voice") and "bg-success" in row(body, "Voice")
     assert "Rules pending" in row(body, "BranchVPN") and "GW_B" not in row(body, "BranchVPN")
     assert "Blocked" in row(body, "Backups") and "No eligible link" in row(body, "Backups")
@@ -182,7 +184,7 @@ echo json_encode([http_response_code() ?: 200, $body, $sdwan_title_link,
     assert "No SLA backup" not in row(render("ajax")[1], "Voice")
     save()
 
-    pool = 'pass in quick on lan route-to { (opt2 198.51.100.1), (opt1 192.0.2.1) } round-robin inet all ridentifier 301'
+    pool = 'pass in quick on lan route-to { (igb1 198.51.100.1), (igb0 192.0.2.1) } round-robin inet all ridentifier 301'
     fixture["fixture_pf_rules"][0] = pool
     config.write_text(json.dumps(fixture))
     multipath = dict(snapshot["steering"], LAN_SDWAN=dict(snapshot["steering"]["LAN_SDWAN"], pool=["GW_B", "GW_A"]))
@@ -195,7 +197,7 @@ echo json_encode([http_response_code() ?: 200, $body, $sdwan_title_link,
     second = dict(bindings[0], group="OPT_SDWAN", trackers={"item": ["305"]})
     bindings.append(second)
     fixture["fixture_pf_rules"].append(
-        'pass in quick on lan route-to (opt1 192.0.2.1) inet all ridentifier 305')
+        'pass in quick on lan route-to (igb0 192.0.2.1) inet all ridentifier 305')
     config.write_text(json.dumps(fixture))
     multipath["OPT_SDWAN"] = {"gateway": "GW_A", "revision": binding_revision("OPT_SDWAN")}
     save({"steering": multipath})

@@ -42,7 +42,7 @@ If installation defers WebGUI registration, wait for PHP-FPM to return and run `
 
 1. Confirm measurements in **Status → Gateways** and add the links under **Services → SD-WAN → Members**.
 2. Set RTT, loss and optional RTT standard deviation limits in **Performance SLAs**. To monitor application reachability, configure TCP, DNS or HTTPS checks in **Members** with dedicated native host routes. A TCP check such as tcp://192.0.2.20:587 verifies the connection. An HTTPS check also verifies the certificate and response.
-3. Select a strategy in **Policies** and review **Diagnostics**. Use **Forwarding** to inspect the gateway group, paired rules and active PF paths. Under **Status → Dashboard**, use **+ → SD-WAN** to add the widget.
+3. Select a strategy in **Policies** and review **Diagnostics**. Use **Forwarding** to inspect the gateway group, paired rules and active PF paths. Under **Status → Dashboard**, use **+ → SD-WAN** to see policy status, verified egress for new connections and SLA-eligible backup paths.
 
 For installations running **0.4.8** or later, open **SD-WAN → Updates**, click **Check GitHub**, and select **Upgrade to …** when a release is available. This action uses the native package installation privilege.
 

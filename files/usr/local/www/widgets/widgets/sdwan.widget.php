@@ -144,7 +144,7 @@ $sdwanRender = static function (): void {
 					<?php if (count($bindings) > 1): ?><small><?=$escape($group)?></small><?php endif; ?>
 				</th>
 				<td class="sdwan-widget-route">
-					<?=$egress ? $escape(implode(', ', $egress)) : '?'?>
+					<?=$egress ? $escape(implode(', ', $egress)) : '—'?>
 					<?php if ($backup !== ''): ?><small><?=$escape($backup)?></small><?php endif; ?>
 				</td>
 				<td class="sdwan-widget-status <?=$color?>">
