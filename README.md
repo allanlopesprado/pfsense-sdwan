@@ -1,6 +1,6 @@
 # SD-WAN for pfSense CE
 
-An experimental package for monitoring links, comparing gateways against SLAs, and viewing path recommendations in the **pfSense CE 2.9.1** WebGUI. This project is independent of Netgate.
+An experimental package for monitoring links, comparing gateways against SLAs, and viewing path recommendations in the **pfSense CE 2.9.1 and 2.9.2** WebGUI. This project is independent of Netgate.
 
 [Download the latest release](https://github.com/allanlopesprado/pfsense-sdwan/releases/latest) · [Installation](#install-from-diagnostics--command-prompt) · [Changelog](CHANGELOG.md) · [Lab results](docs/RESULTS.md)
 
@@ -19,14 +19,14 @@ An experimental package for monitoring links, comparing gateways against SLAs, a
 
 | Environment | Use |
 | --- | --- |
-| **Stock pfSense CE 2.9.1** | Gateway monitoring, SLA evaluation, and path recommendations. |
-| **pfSense CE 2.9.1 with the lab core** | Policy-based forwarding experiments with the [core adapter](core/README.md) and a dedicated native gateway group. |
+| **Stock pfSense CE 2.9.1 or 2.9.2** | Gateway monitoring, SLA evaluation, and path recommendations. |
+| **pfSense CE 2.9.1 or 2.9.2 with the matching lab core** | Policy-based forwarding experiments with the [core adapter](core/README.md) and a dedicated native gateway group. |
 
 <a id="como-instalar-pelo-diagnostics--command-prompt"></a>
 
 ## Install from Diagnostics → Command Prompt
 
-1. On a lab clone, open **Diagnostics → Command Prompt** with administrative access. Run `cat /etc/version && pkg config ABI` to confirm **CE 2.9.1** and **FreeBSD:16:amd64**.
+1. On a lab clone, open **Diagnostics → Command Prompt** with administrative access. Run `cat /etc/version && pkg config ABI` to confirm **CE 2.9.1 or 2.9.2** and **FreeBSD:16:amd64**.
 2. Run the line below. It downloads the package from a pinned revision to a temporary directory, verifies SHA-256, and installs it with `pkg`.
 
 <!-- install-command -->

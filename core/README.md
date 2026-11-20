@@ -1,6 +1,6 @@
 # pfSense rule generator integration
 
-ABI 2 adds weighted round-robin across eligible next hops for approved ingress rules. The package still supports a single active next hop on ABI 1. This release uses public source identified as `2.9.0-DEVELOPMENT` at revision `9363ac5b8651a1c7a333180425ce7719070f95f9`. Compatibility with a CE 2.9.1 appliance image requires separate verification. [Pinned rule generator source](https://github.com/pfsense/pfsense/blob/9363ac5b8651a1c7a333180425ce7719070f95f9/src/etc/inc/filter.inc)
+ABI 2 adds weighted round-robin across eligible next hops for approved ingress rules. The package still supports a single active next hop on ABI 1. This release uses public source identified as `2.9.0-DEVELOPMENT` at revision `9363ac5b8651a1c7a333180425ce7719070f95f9`. The preparation tool also accepts the audited rule generator from the signed CE 2.9.1 and 2.9.2 system packages. [Pinned rule generator source](https://github.com/pfsense/pfsense/blob/9363ac5b8651a1c7a333180425ce7719070f95f9/src/etc/inc/filter.inc)
 
 ## Prepare source on the build host
 
@@ -20,6 +20,10 @@ Restart the SD-WAN service after changing the native adapter so its long-running
 ### CE 2.9.1 lab copy
 
 To prepare a copy off the appliance, use `--ce-291-lab` on a tree containing the original `src/etc/inc/filter.inc`. This mode requires SHA-256 `6acd8621e4f88660759c5656488d81f580b49f4c9848b19048ae6a2570e177b4`. The hook runs after the native decision that may omit unavailable gateways. The lab checked patch application and PHP syntax on the exact copy. Two-path traffic, filter reloads, and rollback still require validation on a clone before using the image.
+
+### CE 2.9.2 lab copy
+
+Use `--ce-292-lab` with the original `src/etc/inc/filter.inc` from the signed `pfSense-system-2.9.2` package. Its SHA-256 is `70758089d12a271ff08ccf3e20a180d3f441f8d468e984be6b1476c366c66c30`. The preparation tool rejects files from other builds. A firmware upgrade can replace the patched generator. Generate the overlay from the signed package for the installed version, then check the active PF rules and restart SD-WAN after installing the matching overlay. [Netgate CE 2.9.2 release notes](https://docs.netgate.com/pfsense/en/latest/releases/26-07-2_2-9-2.html)
 
 ## Forwarding scope
 
