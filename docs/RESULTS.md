@@ -75,4 +75,6 @@ Suricata 8.0.8 on FreeBSD 15.1 intercepted a disposable epair through netmap hos
 
 On CE 2.9.1, upgrading from 0.4.2 to 0.4.3 ran the actual hooks. On-appliance checks verified package integrity, package and service registration, a current sample, and events in the native log reader. SD-WAN configuration and PF and NAT rules matched before and after. [Release 0.4.3](https://github.com/allanlopesprado/pfsense-sdwan/releases/tag/v0.4.3)
 
+The CE 2.9.1 two-WAN appliance passed the policy and service-health acceptance, including native installation, package upgrade, DHCP renewal, PF reconciliation, reboot and rollback. [Acceptance evidence](CE291-APPLIANCE.md)
+
 Appliance acceptance still includes a full cold boot with the WAN disconnected, restoration onto different NIC assignments, inline Suricata on VirtIO, and a single combined test of IKEv2 and symmetric return through two CE 2.9.1 nodes and a licensed FortiGate. Experimental forwarding selects a path for ingress rules. The firewall's own default route and catalog distribution have separate acceptance criteria. [Interoperability matrix](FORTIOS.md) · [Acceptance procedure](LAB.md)
