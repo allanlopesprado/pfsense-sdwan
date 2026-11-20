@@ -387,8 +387,8 @@ def same_target_probes(qemu):
     reference = route_and_nat(qemu)
     before_a, before_b = evidence_count("probe-a"), evidence_count("probe-b")
     assert int(command(qemu, "sysctl -n net.fibs")) >= 3
-    for fib, ((device, hop), source) in enumerate(zip(GATEWAYS.values(), (A, B)), 1):
-        command(qemu, f"route -n add -host {hop} -iface {source} -fib {fib}")
+    for fib, (device, hop) in enumerate(GATEWAYS.values(), 1):
+        command(qemu, f"route -n add -host {hop} -iface {device} -fib {fib}")
         command(qemu, f"route -n add -host 192.0.2.168 {hop} -fib {fib}")
         lookup = command(qemu, f"route -n get -host 192.0.2.168 -fib {fib}")
         assert f"gateway: {hop}" in lookup and f"interface: {device}" in lookup, lookup
@@ -415,6 +415,7 @@ def vti_no_sa(qemu):
     command(qemu, ping)
     control = evidence_count("vti-clear")
     assert control >= before + 2
+    command(qemu, """if ! ifconfig -C | tr ' ' '\\n' | grep -qx ipsec; then kldload -n ipsec; fi""")
     device = command(qemu, "ifconfig ipsec create").splitlines()[-1]
     assert re.fullmatch(r"ipsec[0-9]+", device), device
     command(qemu, f"ifconfig {device} inet tunnel {A} 198.51.100.2")
