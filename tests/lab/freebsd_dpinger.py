@@ -85,19 +85,25 @@ def run(firewall, peer, remote_a, remote_b, remote_c, restore):
             rules.write_text("\n".join(lines) + "\n")
             jexec(peer, "pfctl", "-f", str(rules))
 
-        def expect_snapshot(expected, choices):
+        def expect_snapshot(expected, choices, checks=None):
             expires = time.monotonic() + 15
             while time.monotonic() < expires:
                 if any(process.poll() is not None for process in processes):
                     raise RuntimeError("A real dpinger monitor exited prematurely")
-                php("php", "-d", "extension=filter", "-d", f"include_path={work}", str(work / "sdwand.php"), "--once")
+                args = ["-d", "extension=filter", "-d", f"include_path={work}", str(work / "sdwand.php"), "--once"]
+                if checks is None:
+                    php("php", *args)
+                else:
+                    jexec(firewall, "/usr/local/bin/php", "-n", *args)
                 snapshot = json.loads((work / "snapshot.json").read_text())
                 measured = [snapshot["members"][member]["loss_pct"] for member in "abc"]
                 selected = [snapshot["policies"][name]["selected"] for name in ("one", "two", "three")]
-                if measured == expected and selected == choices:
+                results = {name: snapshot["members"][name].get("checks", {}).get("probe_primary")
+                           for name in (checks or {})}
+                if measured == expected and selected == choices and results == (checks or {}):
                     return
                 time.sleep(0.25)
-            raise AssertionError(f"Expected loss {expected} and paths {choices}; received {snapshot}")
+            raise AssertionError(f"Expected loss {expected}, paths {choices} and service checks {checks}; received {snapshot}")
 
         # Visit every availability combination, change one link at a time,
         # and finish with all links recovered.
@@ -140,6 +146,56 @@ def run(firewall, peer, remote_a, remote_b, remote_c, restore):
         assert upstream_transaction(), "The upstream application failed to recover"
         print("ok - the upstream application and probe both recovered", flush=True)
 
+
+        # Keep every gateway responsive while the DNS application on WAN A fails.
+        config = json.loads(next_hop_config)
+        settings = config["installedpackages/sdwan"]
+        members = settings["members"]["item"]
+        members[0]["probe_primary"] = f"dns://health.sdwan.test {upstream}"
+        backup = "192.0.2.163"
+        members[1]["probe_primary"] = f"tcp://{backup}:7"
+        config["fixture_devices"] = {"opt1": remote_a[:-1] + "a", "opt2": remote_b[:-1] + "a"}
+        for address, peer_gateway in ((upstream, "198.51.100.2"), (backup, "203.0.113.2")):
+            jexec(firewall, "route", "-n", "add", "-host", address, peer_gateway)
+            cleanup.callback(jexec, firewall, "route", "-n", "delete", "-host", address)
+        config_path.write_text(json.dumps(config))
+        dns_status = work / "dns-status"
+        dns_status.write_text("available")
+        ready = work / "dns-ready"
+        server = subprocess.Popen(["jexec", peer, sys.executable, "-c", """
+import pathlib
+import socket
+import struct
+import sys
+
+with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as server:
+    server.bind((sys.argv[1], 53))
+    pathlib.Path(sys.argv[3]).touch()
+    while True:
+        query, source = server.recvfrom(512)
+        if len(query) <= 12:
+            continue
+        available = pathlib.Path(sys.argv[2]).read_text() == "available"
+        flags = 0x8180 if available else 0x8183
+        header = query[:2] + struct.pack("!HHHHH", flags, 1, int(available), 0, 0)
+        data = struct.pack("!HHHIHBBBB", 0xc00c, 1, 1, 30, 4, 192, 0, 2, 42) if available else b""
+        server.sendto(header + query[12:] + data, source)
+""", upstream, str(dns_status), str(ready)])
+        cleanup.callback(stop, server)
+        for _ in range(50):
+            if ready.exists() or server.poll() is not None:
+                break
+            time.sleep(.1)
+        assert ready.exists() and server.poll() is None, "The isolated DNS server did not start"
+
+        healthy = {"a": "Passed", "b": "Passed"}
+        expect_snapshot([0, 0, 0], ["a", "a", "a"], healthy)
+        dns_status.write_text("unavailable")
+        expect_snapshot([0, 0, 0], [None, "b", "b"], {"a": "DNS check failed", "b": "Passed"})
+        print("ok - a DNS application outage selected the TCP-verified backup while all WAN monitors stayed up", flush=True)
+        dns_status.write_text("available")
+        expect_snapshot([0, 0, 0], ["a", "a", "a"], healthy)
+        print("ok - DNS service recovery restored the primary path", flush=True)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
