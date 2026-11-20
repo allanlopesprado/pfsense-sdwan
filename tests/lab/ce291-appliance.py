@@ -158,13 +158,21 @@ def command(qemu, script, timeout=60):
     return result
 
 
+def expect_console(qemu, pattern, timeout):
+    deadline = time.monotonic() + timeout
+    while qemu.expect([pattern, r"\x1b\[6n"], timeout=max(0, deadline - time.monotonic())):
+        # resizewin asks a real terminal for its cursor position and uses it
+        # to determine the dimensions. The serial automation serves that query.
+        qemu.send("\x1b[24;80R")
+
+
 def console_shell(qemu, timeout=300):
-    qemu.expect("Enter an option:", timeout=timeout)
+    expect_console(qemu, "Enter an option:", timeout)
     qemu.sendline("8")
-    qemu.expect(r"(?:[#%] |/root(?:\x1b\[[0-9;]*m)*:(?:\x1b\[[0-9;]*m)* )", timeout=30)
+    expect_console(qemu, r"(?:[#%] |/root(?:\x1b\[[0-9;]*m)*:(?:\x1b\[[0-9;]*m)* )", 75)
     qemu.sendline("exec /bin/sh")
     qemu.sendline("echo __SDWAN_SHELL__")
-    qemu.expect(r"\r+\n__SDWAN_SHELL__\r+\n", timeout=15)
+    expect_console(qemu, r"\r+\n__SDWAN_SHELL__\r+\n", 15)
 
 
 def first_boot(qemu):
