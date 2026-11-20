@@ -40,7 +40,7 @@ After reboot, compare the boot version, the adapter ABI, installed package, nati
 
 ## Reproduce the two-policy test
 
-The [Actions workflow](../.github/workflows/ce291-policy.yml) verifies the signed-release system archive by its pinned digest, extracts the CE 2.9.1 source used for the generator and runs isolated FreeBSD VNETs. To repeat it on a disposable FreeBSD VM as root with Git, Python, PHP with the filter and mbstring extensions and dpinger installed, obtain the official `pfSense-system-2.9.1.pkg` and run the same commands.
+The [Actions workflow](../.github/workflows/ce291-policy.yml) verifies the signed-release system archive by its pinned digest, extracts the CE 2.9.1 source used for the generator and runs isolated FreeBSD VNETs. To repeat it on a disposable FreeBSD VM as root with Git, Python, PHP with ctype, filter and mbstring and dpinger installed, obtain the official `pfSense-system-2.9.1.pkg` and run the same commands.
 
 ```sh
 python3 tests/lab/ce291-source.py /path/to/pfSense-system-2.9.1.pkg lab-ce291
