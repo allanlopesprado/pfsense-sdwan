@@ -20,4 +20,8 @@ sdwan_invalidate()
 }
 
 load_rc_config "${name}"
+if [ "$1" = restart ]; then
+	SDWAN_KEEP_RELOAD_RECEIPT=1
+	export SDWAN_KEEP_RELOAD_RECEIPT
+fi
 run_rc_command "$1"

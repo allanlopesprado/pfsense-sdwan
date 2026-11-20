@@ -73,6 +73,31 @@ if ($action === 'topology') {
     exit;
 }
 
+if ($action === 'hold_renderer') {
+    $adapter = '/etc/inc/filter-sdwan.inc';
+    $original = file_get_contents($adapter);
+    $head = 'function filter_sdwan_rule_route(array $rule, array $routes): array|false|null {';
+    $test = 'if ((string)($rule["tracker"] ?? "") === "41001") { return null; }';
+    $modified = str_replace($head, "$head\n\t$test", $original, $count);
+    if ($count !== 1 || file_put_contents("$adapter.lab", $modified) !== strlen($modified) ||
+        !rename("$adapter.lab", $adapter)) {
+        throw new RuntimeException('Cannot arrange the disposable renderer failure');
+    }
+    exit;
+}
+if ($action === 'probe') {
+    $context = stream_context_create(['socket' => ['bindto' => $argv[2] . ':0']]);
+    $peer = stream_socket_client('tcp://192.0.2.168:7', $errno, $error, 4, STREAM_CLIENT_CONNECT, $context);
+    if ($peer === false) {
+        throw new RuntimeException($error);
+    }
+    stream_set_timeout($peer, 4);
+    fwrite($peer, "same-target\n");
+    echo fgets($peer);
+    fclose($peer);
+    exit;
+}
+
 require_once('config.inc');
 require_once('/usr/local/pkg/sdwan_steering.inc');
 if ($action === 'observations') {

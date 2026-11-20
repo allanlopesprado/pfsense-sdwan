@@ -13,7 +13,11 @@ if ($lock === false || !flock($lock, LOCK_EX)) {
 	exit(1);
 }
 $ok = true;
-foreach ([SDWAN_SNAPSHOT_PATH, SDWAN_SNAPSHOT_PATH . '.forwarded'] as $path) {
+$retire = [SDWAN_SNAPSHOT_PATH];
+if (getenv('SDWAN_KEEP_RELOAD_RECEIPT') !== '1') {
+	$retire[] = SDWAN_SNAPSHOT_PATH . '.forwarded';
+}
+foreach ($retire as $path) {
 	if (file_exists($path) && !unlink($path)) {
 		$ok = false;
 	}

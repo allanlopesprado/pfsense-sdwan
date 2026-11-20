@@ -2,6 +2,8 @@
 """Exercise an installed pfSense system on a disconnected QEMU topology."""
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack
+import hashlib
+import http.client
 import json
 import os
 from pathlib import Path
@@ -11,6 +13,7 @@ import shlex
 import signal
 import socket
 import socketserver
+import ssl
 import struct
 import threading
 import subprocess
@@ -83,10 +86,19 @@ def wire(cleanup):
         net_args += ["-netdev", f"tap,id=lan{n},ifname={tap},script=no,downscript=no",
                      "-device", f"virtio-net-pci,netdev=lan{n}"]
     run("ip", "-n", "sdwan-client", "route", "add", "default", "via", "192.0.2.1")
-    for n in range(162, 168):
+    for n in range(162, 170):
         run("ip", "-n", "sdwan-peer", "addr", "add", f"192.0.2.{n}/32", "dev", "lo")
     run(*in_ns("sdwan-peer", "nft", "-f", "-"), input=
-        "table inet test {\n chain input {\n  type filter hook input priority filter; policy accept;\n }\n}\n")
+        """table inet test {
+ chain input { type filter hook input priority filter; policy accept; }
+ chain evidence {
+  type filter hook input priority -10; policy accept;
+  iifname "sw-wire0" ip saddr 198.51.100.1 ip daddr 192.0.2.168 tcp dport 7 counter comment "probe-a"
+  iifname "sw-wire2" ip saddr 203.0.113.1 ip daddr 192.0.2.168 tcp dport 7 counter comment "probe-b"
+  ip daddr 192.0.2.169 icmp type echo-request counter comment "vti-clear"
+ }
+}
+""")
     server = subprocess.Popen(in_ns("sdwan-peer", sys.executable, SCRIPT, "serve"),
                               stdout=subprocess.PIPE, text=True)
     cleanup.callback(stop, server)
@@ -218,14 +230,18 @@ def first_boot(qemu):
     print(identity, flush=True)
 
 
+def observations(qemu):
+    raw = command(qemu, f"php {LAB}/ce291-guest.php observations")
+    return json.loads(next(line for line in reversed(raw.splitlines()) if line.startswith("{")))
+
+
 def wait_paths(qemu, label, expected, wait_ack=False):
     started = time.monotonic()
     deadline = started + 135
     seen = set()
     valid_sample = False
     while time.monotonic() < deadline:
-        raw = command(qemu, f"php {LAB}/ce291-guest.php observations")
-        parsed = json.loads(next(line for line in reversed(raw.splitlines()) if line.startswith("{")))
+        parsed = observations(qemu)
         snapshot, receipt = parsed["snapshot"] or {}, parsed["receipt"]
         valid_sample |= bool(snapshot)
         if not valid_sample and time.monotonic() - started >= 28:
@@ -244,7 +260,7 @@ def wait_paths(qemu, label, expected, wait_ack=False):
             return snapshot
         time.sleep(1)
     diagnostics(qemu)
-    raise RuntimeError(f"{label} did not converge: last observer response {raw}")
+    raise RuntimeError(f"{label} did not converge: last observer response {parsed}")
 
 
 def diagnostics(qemu):
@@ -302,15 +318,163 @@ def established(child, label, receive=3):
     return child.stdout.readline().strip() if select.select([child.stdout], [], [], receive)[0] else ""
 
 
+def evidence_count(name):
+    rules = run(*in_ns("sdwan-peer", "nft", "-j", "list", "chain", "inet", "test", "evidence"),
+                capture_output=True).stdout
+    counters = [item["counter"]["packets"] for obj in json.loads(rules)["nftables"]
+                for item in obj.get("rule", {}).get("expr", [])
+                if obj["rule"].get("comment") == name and "counter" in item]
+    assert len(counters) == 1, (name, counters)
+    return counters[0]
+
+
+def management(label, expected=None):
+    result = run(*in_ns("sdwan-client", sys.executable, SCRIPT, "management"), capture_output=True)
+    certificate = result.stdout.strip()
+    assert re.fullmatch(r"[0-9a-f]{64}", certificate), result
+    if expected is not None:
+        assert certificate == expected, (label, certificate, expected)
+    print(f"{label}: native LAN HTTPS replied with the original certificate", flush=True)
+    return certificate
+
+
+def management_request():
+    # The isolated appliance generates a self-signed certificate.
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    context.check_hostname = False
+    context.verify_mode = ssl.CERT_NONE
+    connection = http.client.HTTPSConnection("192.0.2.1", timeout=6, context=context)
+    try:
+        connection.connect()
+        certificate = hashlib.sha256(connection.sock.getpeercert(binary_form=True)).hexdigest()
+        connection.request("GET", "/")
+        response = connection.getresponse()
+        assert response.status == 200 and b"usernamefld" in response.read(), response.status
+        print(certificate)
+    finally:
+        connection.close()
+
+
+def same_target_probes(qemu):
+    reference = route_and_nat(qemu)
+    before_a, before_b = evidence_count("probe-a"), evidence_count("probe-b")
+    assert int(command(qemu, "sysctl -n net.fibs")) >= 3
+    for fib, ((device, hop), source) in enumerate(zip(GATEWAYS.values(), (A, B)), 1):
+        command(qemu, f"route -n add -host {hop} -iface {source} -fib {fib}")
+        command(qemu, f"route -n add -host 192.0.2.168 {hop} -fib {fib}")
+        lookup = command(qemu, f"route -n get -host 192.0.2.168 -fib {fib}")
+        assert f"gateway: {hop}" in lookup and f"interface: {device}" in lookup, lookup
+    try:
+        result = command(qemu, f"""setfib -F 1 php {LAB}/ce291-guest.php probe {A} >{LAB}/fib1.out &
+            left=$!
+            setfib -F 2 php {LAB}/ce291-guest.php probe {B} >{LAB}/fib2.out &
+            right=$!
+            wait "$left"; wait "$right"
+            cat {LAB}/fib1.out {LAB}/fib2.out""")
+        assert result.splitlines() == [f"{A} same-target", f"{B} same-target"], result
+        assert evidence_count("probe-a") > before_a and evidence_count("probe-b") > before_b
+        assert route_and_nat(qemu) == reference
+        print(f"SAME_IP_TWO_FIBS_OK: 192.0.2.168 returned via both physical WANs: {result!r}", flush=True)
+    finally:
+        for fib, (_, hop) in enumerate(GATEWAYS.values(), 1):
+            command(qemu, f"route -n delete -host 192.0.2.168 -fib {fib}; "
+                          f"route -n delete -host {hop} -fib {fib}")
+
+
+def vti_no_sa(qemu):
+    before = evidence_count("vti-clear")
+    ping = f"ping -n -c 2 -t 5 -S {A} 192.0.2.169"
+    command(qemu, ping)
+    control = evidence_count("vti-clear")
+    assert control >= before + 2
+    device = command(qemu, "ifconfig ipsec create").splitlines()[-1]
+    assert re.fullmatch(r"ipsec[0-9]+", device), device
+    command(qemu, f"ifconfig {device} inet tunnel {A} 198.51.100.2")
+    command(qemu, f"ifconfig {device} inet 198.18.0.1/30 198.18.0.2 up")
+    command(qemu, "route -n add -host 192.0.2.169 198.18.0.2")
+    try:
+        route = command(qemu, "route -n get 192.0.2.169")
+        assert f"interface: {device}" in route, route
+        stats = "netstat -s -p ipsec | awk '/outbound packets? with no SA available/ {print $1; exit}'"
+        no_sa = int(command(qemu, stats))
+        command(qemu, f"if {ping}; then exit 1; fi")
+        assert int(command(qemu, stats)) > no_sa
+        assert evidence_count("vti-clear") == control
+        print("VTI_WITHOUT_SA_BLOCKS_WITHOUT_CLEARTEXT", flush=True)
+    finally:
+        command(qemu, f"route -n delete -host 192.0.2.169; ifconfig {device} destroy")
+    command(qemu, ping)
+    assert evidence_count("vti-clear") >= control + 2
+
+
+def wait_receipt(qemu, condition, timeout):
+    deadline = time.monotonic() + timeout
+    state = {}
+    while time.monotonic() < deadline:
+        state = observations(qemu)
+        if condition(state["snapshot"] or {}, state["receipt"]):
+            return state["receipt"]
+        time.sleep(1)
+    diagnostics(qemu)
+    raise RuntimeError(f"Reload verification did not converge: {state}")
+
+
+def verify_unapplied_reload(qemu, primary, certificate):
+    adapter = "/etc/inc/filter-sdwan.inc"
+    backup = f"{LAB}/filter-sdwan.acceptance.inc"
+    command(qemu, f"cp -p {adapter} {backup}")
+    try:
+        command(qemu, f"php {LAB}/ce291-guest.php hold_renderer; php -l {adapter}")
+        fault(f'iifname "sw-wire0" ip saddr {A} ip daddr 192.0.2.164 tcp dport 7 drop')
+
+        def requested(sample, receipt):
+            return (sample.get("steering", {}).get("G", {}).get("gateway") == "GW_B"
+                    and sample.get("forwarding_check", {}).get("G") == "pending"
+                    and receipt.get("accepted"))
+
+        first = wait_receipt(qemu, requested, 35)
+        assert first["attempts"] == 1, first
+        assert_rules(loaded(qemu), primary)
+        management("accepted but divergent", certificate)
+        command(qemu, "/usr/local/etc/rc.d/sdwand.sh restart")
+        second = wait_receipt(qemu, requested, 20)
+        assert second == first, (first, second)
+        exhausted = wait_receipt(qemu, lambda s, r: requested(s, r) and r["attempts"] == 3, 80)
+        assert exhausted["decision"] == first["decision"]
+        command(qemu, """i=0
+            until grep -Fq 'persistent PF rule divergence after the reload retry limit' /var/log/system.log; do
+                i=$((i+1)); test "$i" -le 40; sleep 1
+            done""", timeout=48)
+        assert observations(qemu)["receipt"] == exhausted
+        assert_rules(loaded(qemu), primary)
+        print("NATIVE_RELOAD_ACCEPTED_BUT_DIVERGENT_RESTART_AND_RETRY_LIMIT_OK", flush=True)
+    finally:
+        command(qemu, f"mv {backup} {adapter}")
+        fault()
+    wait_paths(qemu, "restored after divergent reload", primary)
+    management("restored after divergence", certificate)
+
+
 def acceptance(qemu, cleanup):
     rv = command(qemu, f"pkg add {LAB}/pfSense-pkg-SDWAN-0.4.28.pkg", timeout=180)
     print(rv.splitlines()[-6:], flush=True)
     assert command(qemu, "pkg query '%v' pfSense-pkg-SDWAN") == "0.4.28"
     command(qemu, "pkg check -s pfSense-pkg-SDWAN; /usr/local/etc/rc.d/sdwand.sh status")
     assert "ABI=0" in command(qemu, f"php {LAB}/ce291-guest.php mode")
-    command(qemu, f"php {LAB}/ce291-guest.php settings")
     print("PACKAGE_INSTALLED_WITH_NATIVE_HOOKS; STOCK_MODE_OBSERVATION", flush=True)
 
+    command(qemu, f"pkg add -f {LAB}/pfSense-pkg-SDWAN-0.4.27.pkg", timeout=180)
+    assert command(qemu, "pkg query '%v' pfSense-pkg-SDWAN") == "0.4.27"
+    command(qemu, f"php {LAB}/ce291-guest.php settings")
+    config_hash = "php -r 'require \"config.inc\";echo hash(\"sha256\", serialize(config_get_path(\"installedpackages/sdwan\")));'"
+    saved = command(qemu, config_hash)
+    command(qemu, f"pkg add -f {LAB}/pfSense-pkg-SDWAN-0.4.28.pkg", timeout=180)
+    assert command(qemu, "pkg query '%v' pfSense-pkg-SDWAN") == "0.4.28"
+    assert command(qemu, config_hash) == saved
+    assert "ABI=0" in command(qemu, f"php {LAB}/ce291-guest.php mode")
+    command(qemu, "pkg check -s pfSense-pkg-SDWAN; /usr/local/etc/rc.d/sdwand.sh status")
+    print("NATIVE_UPGRADE_PRESERVES_POLICY_CONFIGURATION", flush=True)
+    certificate = management("baseline")
     native_rules = loaded(qemu)
     primary = {"G": "GW_A", "B": "GW_A"}
     assert_rules(native_rules, primary)
@@ -321,6 +485,9 @@ def acceptance(qemu, cleanup):
     command(qemu, f"php {LAB}/ce291-guest.php bind")
     wait_paths(qemu, "baseline", primary)
     tcp_pair("baseline", (A, A))
+    same_target_probes(qemu)
+    vti_no_sa(qemu)
+    verify_unapplied_reload(qemu, primary, certificate)
     old_erp, old_backup = held_connection(ERP, cleanup), held_connection(BACKUP, cleanup)
     assert established(old_erp, "established") == f"{A} established"
     assert established(old_backup, "established") == f"{A} established"
@@ -336,6 +503,7 @@ def acceptance(qemu, cleanup):
     assert decision["policies"]["ERP"]["services"]["a"] == "Failed"
     assert decision["policies"]["Backup"]["services"]["a"] == "Passed"
     tcp_pair("ERP outage", (B, A))
+    management("ERP outage", certificate)
     assert route_and_nat(qemu) == reference
     assert not established(old_erp, "held-during-erp-fault", .8)
     assert established(old_backup, "held-during-erp-fault") == f"{A} held-during-erp-fault"
@@ -354,6 +522,7 @@ def acceptance(qemu, cleanup):
     fault(f'iifname "sw-wire0" ip saddr {A} drop', f'iifname "sw-wire2" ip saddr {B} drop')
     wait_paths(qemu, "both WANs down", {"G": None, "B": None})
     tcp_pair("both WANs down", (None, None))
+    management("both WANs down", certificate)
     fault()
     wait_paths(qemu, "WANs recovered", primary)
     tcp_pair("WANs recovered", (A, A))
@@ -377,6 +546,7 @@ def acceptance(qemu, cleanup):
     assert loaded(qemu) == native_rules
     assert route_and_nat(qemu) == reference
     tcp_pair("native rollback", (A, A))
+    management("native rollback", certificate)
     command(qemu, f"pkg add -f {LAB}/pfSense-pkg-SDWAN-0.4.27.pkg", timeout=180)
     assert command(qemu, "pkg query '%v' pfSense-pkg-SDWAN") == "0.4.27"
     command(qemu, "pkg check -s pfSense-pkg-SDWAN; /usr/local/etc/rc.d/sdwand.sh status")
@@ -408,6 +578,8 @@ if __name__ == "__main__":
                 threading.Thread(target=dns.serve_forever, daemon=True).start()
                 print("ready", flush=True)
                 server.serve_forever()
+    elif sys.argv[1] == "management":
+        management_request()
     elif sys.argv[1] in ("flow", "held"):
         client(sys.argv[2], held=sys.argv[1] == "held")
     else:

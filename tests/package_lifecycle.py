@@ -138,18 +138,21 @@ def check_invalidation(tmp, php):
     (tmp / "filter.inc").write_text("""<?php
         if (getenv('PATCHED') === 'yes') { function filter_sdwan_binding_api() { return 1; } }
         function filter_configure() {
-            if (file_exists(SDWAN_SNAPSHOT_PATH) || file_exists(SDWAN_SNAPSHOT_PATH . '.forwarded')) {
+            $keep = getenv('SDWAN_KEEP_RELOAD_RECEIPT') === '1';
+            if (file_exists(SDWAN_SNAPSHOT_PATH) || file_exists(SDWAN_SNAPSHOT_PATH . '.forwarded') !== $keep) {
                 exit(65);
             }
             file_put_contents(__DIR__ . '/reload', 'queued');
         }
     """)
-    for active, patched in [(False, False), (False, True), (True, False), (True, True)]:
+    for active, patched, keep in [(False, False, False), (False, True, False),
+                                 (True, False, False), (True, True, False), (True, True, True)]:
         state.write_text("prior choice")
         receipt.write_text("prior reload")
-        env = dict(os.environ, ACTIVE="yes" if active else "", PATCHED="yes" if patched else "")
+        env = dict(os.environ, ACTIVE="yes" if active else "", PATCHED="yes" if patched else "",
+                   SDWAN_KEEP_RELOAD_RECEIPT="1" if keep else "")
         subprocess.run([php, "-d", f"include_path={tmp}", "-f", str(helper)], env=env, check=True)
-        if state.exists() or receipt.exists() or marker.exists() != (active and patched):
+        if state.exists() or receipt.exists() != keep or marker.exists() != (active and patched):
             raise AssertionError("Invalid cleanup or reload for the installed core and bindings")
         marker.unlink(missing_ok=True)
 
