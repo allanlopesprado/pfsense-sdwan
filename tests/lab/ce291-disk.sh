@@ -27,8 +27,8 @@ fingerprint: 30be9cc2e7b2b3ba1ff3b2be1795f3f0719ab9a65322695703dc7b8f004035a8
 KEY
 mirror=https://pkg01-atx.netgate.com/pfSense_v2_9_1_amd64
 cat > "$work/repos/pfsense.conf" <<REPO
-ce-core: { url: "$mirror-core", enabled: yes, signature_type: "fingerprints", fingerprints: "$work/keys" }
-ce-system: { url: "$mirror-pfSense_v2_9_1", enabled: yes, signature_type: "fingerprints", fingerprints: "$work/keys" }
+ce-core: { url: "$mirror-core", enabled: yes, signature_type: "fingerprints", fingerprints: "/root/netgate-keys" }
+ce-system: { url: "$mirror-pfSense_v2_9_1", enabled: yes, signature_type: "fingerprints", fingerprints: "/root/netgate-keys" }
 REPO
 truncate -s 4G "$image"
 device=$(mdconfig -a -t vnode -f "$image")
@@ -38,7 +38,8 @@ gpart add -a 1m -l sdwan291 -t freebsd-ufs "$device"
 newfs -U "/dev/${device}p2"
 mount "/dev/${device}p2" "$root"
 mounted=yes
-mkdir -p "$root/var/cache/pkg"
+mkdir -p "$root/var/cache/pkg" "$root/root"
+cp -R "$work/keys" "$root/root/netgate-keys"
 ce_pkg() {
     env ABI=FreeBSD:16:amd64 OSVERSION=1600018 REPOS_DIR="$work/repos" PKG_CACHEDIR="$root/var/cache/pkg" \
         /usr/local/sbin/pkg-static --rootdir "$root" "$@"
@@ -48,9 +49,10 @@ ce_pkg install -Iy -U pfSense-base pfSense-kernel-pfSense pkg
 # The official base package ships the native FreeBSD userland as a release set.
 tar -xpf "$root/usr/local/share/pfSense/base.txz" -C "$root"
 ce_pkg fetch -dy -U pfSense pfSense-default-config-serial
-cp -R "$work/keys" "$root/root/netgate-keys"
 mkdir -p "$root/root/sdwan-lab"
-sed "s|$work/keys|/root/netgate-keys|g" "$work/repos/pfsense.conf" > "$root/root/sdwan-lab/pfsense.conf"
+cp "$work/repos/pfsense.conf" "$root/root/sdwan-lab/pfsense.conf"
+cp "$out/tests/lab/ce291-guest.php" "$root/root/sdwan-lab/"
+cp "$out"/lab-overlay/src/etc/inc/filter*.inc "$root/root/sdwan-lab/"
 cp "$out"/dist/pfSense-pkg-SDWAN-0.4.2[78].pkg "$root/root/sdwan-lab/"
 test -s "$root/boot/gptboot"
 test -s "$root/boot/kernel/kernel"

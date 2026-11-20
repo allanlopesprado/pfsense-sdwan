@@ -18,6 +18,15 @@ jobs:
           persist-credentials: false
       - name: Configure Ubuntu package mirror
         run: bash .github/scripts/ubuntu-archive.sh
+      - name: Prepare the audited CE 2.9.1 adapter
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/pfSense-system-2.9.1.pkg"
+          curl --fail --silent --show-error --retry 2 --max-time 150 --proto '=https' \
+            --output "$archive" \
+            'https://pkg01-atx.netgate.com/pfSense_v2_9_1_amd64-pfSense_v2_9_1/All/pfSense-system-2.9.1.pkg'
+          python3 tests/lab/ce291-source.py "$archive" lab-ce291
+          python3 tools/prepare-core.py --ce-291-lab --source lab-ce291 --out lab-overlay
       - name: Create a disk from signed Netgate packages
         uses: vmactions/freebsd-vm@4441bea20b31bfa77329a5af583199362489567e # v1.4.9
         with:
@@ -29,7 +38,7 @@ jobs:
         run: sudo apt-get install -y --no-install-recommends qemu-system-x86 python3-pexpect
       - name: Verify the Netgate kernel and start the installed system
         run: |
-          set -eu
+          set -euo pipefail
           gunzip ce291.raw.gz
           sudo /usr/bin/python3 tests/lab/ce291-appliance.py ce291.raw | tee ce291-result.log
       - uses: actions/upload-artifact@v4
