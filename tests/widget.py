@@ -59,7 +59,7 @@ echo json_encode([http_response_code() ?: 200, $body, $sdwan_title_link,
 
     def render(mode, allowed="admin", key="sdwan-0"):
         return json.loads(php(binary, "-d", f"include_path={directory}",
-                              "-r", script, "--", mode, allowed, key))
+                              "-d", "arg_separator.output=&amp;", "-r", script, "--", mode, allowed, key))
 
     def package_value(expression):
         return php(binary, "-d", f"include_path={directory}", "-r",

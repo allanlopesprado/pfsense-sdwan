@@ -91,7 +91,7 @@ $sdwanRender = static function (): void {
 				$backup = '';
 				$detail = '';
 				if ($binding !== null) {
-					$url = '/sdwan/forwarding.php?' . http_build_query(['policy' => $name, 'group' => $group]);
+					$url = '/sdwan/forwarding.php?' . http_build_query(['policy' => $name, 'group' => $group], '', '&', PHP_QUERY_RFC3986);
 					$state = $snapshot['steering'][$group] ?? [];
 					$verified = sdwan_steering_pf_status($binding, is_array($state) ? $state : [], $inventory, $pf_rules);
 					[$color, $status] = match (true) {
