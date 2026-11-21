@@ -522,6 +522,12 @@ EOF
     load_rules
 fi
 
+if [ -n "${SDWAN_RENDERED_RULES:-}" ]; then
+    python3 -B "$repo/tests/lab/freebsd_supervised_recovery.py" "$work" "$SDWAN_RENDERED_RULES" \
+        "$client" "$firewall" "$lan" "$wan_a" "$wan_b"
+    steer a
+fi
+
 if [ "${SDWAN_REAL_DPINGER:-0}" = 1 ]; then
     python3 -B "$repo/tests/lab/freebsd_dpinger.py" "$firewall" "$remote" \
         "$remote_a" "${wan_b%?}b" "$remote_c" "$work/remote.pf"
