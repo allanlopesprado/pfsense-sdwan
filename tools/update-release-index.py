@@ -83,6 +83,6 @@ if __name__ == "__main__":
         print("ok - GitHub release index, artifact and checksum agree")
     else:
         readme = readme_with_installer(json.loads(expected), args.artifact_commit) if args.artifact_commit else None
-        index.write_text(expected, encoding="utf-8")
+        index.write_text(expected, encoding="utf-8", newline="\n")
         if readme is not None:
-            (ROOT / "README.md").write_text(readme, encoding="utf-8")
+            (ROOT / "README.md").write_text(readme, encoding="utf-8", newline="\n")
