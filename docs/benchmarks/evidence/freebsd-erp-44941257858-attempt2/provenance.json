@@ -1,0 +1,9 @@
+{
+    "run_id":  44941257858,
+    "run_attempt":  2,
+    "job_id":  136996383367,
+    "artifact_id":  14726697915,
+    "artifact_zip_sha256":  "8aedda76729bd39c3bce2112715bc01e55a9b364935941259242157d7593ef81",
+    "created_at_utc":  "2026-11-21T21:57:18Z",
+    "source_commit":  "32435462fa3e19089da87bffa4409a6b607e804c"
+}

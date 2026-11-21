@@ -1,0 +1,25 @@
+{
+  "scenario": "erp_wan1",
+  "host": "FreeBSD-15.1-RELEASE-amd64-64bit-ELF",
+  "baseline_seconds": 5,
+  "fault_seconds": 12,
+  "recovery_seconds": 38,
+  "client_interval_ms": 250,
+  "client_timeout_ms": 200,
+  "observer_interval_ms": 1000,
+  "pair_count": 3,
+  "sources": {
+    "WAN1": "198.51.100.1",
+    "WAN2": "203.0.113.1"
+  },
+  "next_hops": {
+    "GW_A": "198.51.100.2",
+    "GW_B": "203.0.113.2"
+  },
+  "method": {
+    "native": "Pinned pfSense rule compiler without a binding. Both gateways remain healthy.",
+    "sdwan": "Real package observer --once, polled by the lab. A new decision loads the compiled rule in FreeBSD PF.",
+    "client": "Independent TCP, persistent TCP, backup TCP and DNS probes use the same destinations and cadence in both modes.",
+    "fault": "Peer PF drops the ERP TCP service and its standby probe on WAN1 only."
+  }
+}

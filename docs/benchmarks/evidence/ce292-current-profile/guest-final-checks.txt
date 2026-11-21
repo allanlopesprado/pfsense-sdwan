@@ -1,0 +1,15 @@
+0
+1d1d235777deba17ce6edc72517600dd6e8af71c76d49f92226cedfb67303548
+308e829c087d4d3470e2f004c5b96634ae1d8db20b3c2a8c58dc91412c01778b
+Nov 21 22:06:42 sdwan-ce292-lab check_reload_status[496]: Reloading filter
+Nov 21 22:06:46 sdwan-ce292-lab php[9005]: NOTICE LAB_WAN2 is available now, adding to routing group LAB_DEFAULT; 198.18.20.2|198.18.20.10|LAB_WAN2|9.265ms|9.377ms|0.0%|online|none
+Nov 21 22:06:48 sdwan-ce292-lab sdwan[9106]: SD-WAN Policy lab_policy: recommended member lab_b (previously lab_a), alternatives available again.
+Nov 21 22:06:48 sdwan-ce292-lab php[9005]: ERROR No default gateway found
+Nov 21 22:06:50 sdwan-ce292-lab php[29058]: NOTICE [Gateway Monitoring] killed policy routing states for tier 2 in LAB_SD
+Nov 21 22:06:50 sdwan-ce292-lab php[29058]: NOTICE [Gateway Monitoring] killed policy routing states for tier 2 in LAB_DEFAULT
+Nov 21 22:07:20 sdwan-ce292-lab sdwan[9106]: SD-WAN Native filter reload requested. Waiting for PF confirmation.
+Nov 21 22:07:20 sdwan-ce292-lab sdwan[9106]: SD-WAN Group LAB_SD: forwarding target LAB_WAN2 for the native filter to evaluate (previously LAB_WAN1).
+Nov 21 22:07:20 sdwan-ce292-lab check_reload_status[496]: Reloading filter
+Nov 21 22:07:25 sdwan-ce292-lab php[21561]: NOTICE [Gateway Monitoring] killed policy routing states for tier 2 in LAB_SD
+Nov 21 22:07:25 sdwan-ce292-lab php[21561]: NOTICE [Gateway Monitoring] killed policy routing states for tier 2 in LAB_DEFAULT
+Nov 21 22:07:31 sdwan-ce292-lab sdwan[9106]: SD-WAN Active PF rules confirmed the current forwarding decision.

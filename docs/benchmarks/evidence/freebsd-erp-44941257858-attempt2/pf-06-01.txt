@@ -1,0 +1,11 @@
+block drop all
+block drop quick from <snort2c> to any label "ids-block-from"
+block drop quick from any to <snort2c> label "ids-block-to"
+pass in quick on epair2a reply-to (epair2a 203.0.113.2) inet proto tcp from any to 192.0.2.11 port = echo flags S/SA keep state (if-bound) label "port-forward-b"
+pass in quick on epair3a reply-to (epair3a 192.0.2.130) inet proto tcp from any to 192.0.2.11 port = echo flags S/SA keep state (if-bound) label "port-forward-c"
+pass out on epair0b inet proto tcp from any to 192.0.2.11 port = echo flags S/SA keep state (if-bound)
+pass in quick on epair0b inet proto udp from 192.0.2.11 to 192.0.2.162 port = domain keep state (if-bound)
+pass in quick on epair0b route-to (epair1a 198.51.100.2) inet proto tcp from 192.0.2.11 to 192.0.2.162 port = echo flags S/SA keep state (if-bound) label "id=41001" label "gw=1:G" label "tags=user_rule" label "descr=erp-policy" ridentifier 41001
+block drop in quick on epair0b inet proto tcp from 192.0.2.11 to 192.0.2.162 port = echo flags S/SA label "id=41002" label "tags=user_rule" label "descr=native-guard" ridentifier 41002
+pass in quick on epair0b inet proto tcp from 192.0.2.11 to 192.0.2.128/25 port = echo flags S/SA keep state (if-bound) label "baseline"
+pass out inet all flags S/SA keep state (if-bound)

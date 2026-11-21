@@ -91,6 +91,32 @@ $unstable['GW_B']['stddev'] = '0.5ms';
 check('RTT variation excludes an unstable path and accepts its exact limit', selected($variation, $unstable) === 'b');
 $variation['slas'][0]['rttsd_ms'] = '-1';
 check('negative RTT variation thresholds are rejected', sdwan_validate_config($variation, $inventory) !== []);
+
+$twoWanProfile = $config;
+$twoWanProfile['members'][0]['cost'] = '2';
+$twoWanProfile['members'][1]['cost'] = '1';
+$twoWanProfile['slas'][0] = ['name' => 'voice', 'latency_ms' => '40', 'rttsd_ms' => '30', 'loss_pct' => '5'];
+$wan1 = array_replace($sample, ['delay' => '12ms']);
+$wan2 = array_replace($sample, ['delay' => '24ms']);
+$twoWanCases = [
+    'both healthy' => [[], [], 'b', 2],
+    'WAN2 at 40 ms RTT, 30 ms deviation and 5% loss' => [[], ['delay' => '40ms', 'stddev' => '30ms', 'loss' => '5%'], 'b', 2],
+    'WAN2 at 40.001 ms RTT' => [[], ['delay' => '40.001ms'], 'a', 1],
+    'WAN2 at 30.001 ms deviation' => [[], ['stddev' => '30.001ms'], 'a', 1],
+    'WAN2 at 5.01% loss' => [[], ['loss' => '5.01%'], 'a', 1],
+    'WAN2 offline' => [[], ['status' => 'down'], 'a', 1],
+    'WAN2 without a valid measurement' => [[], ['stddev' => 'N/A'], 'a', 1],
+    'WAN1 offline' => [['status' => 'down'], [], 'b', 1],
+    'both offline' => [['status' => 'down'], ['status' => 'down'], null, 0],
+    'WAN1 above the deviation limit and WAN2 above the loss limit' => [['stddev' => '30.001ms'], ['loss' => '5.01%'], null, 0],
+];
+foreach ($twoWanCases as $scenario => [$first, $second, $expected, $eligible]) {
+    $policy = sdwan_evaluate($twoWanProfile, [
+        'GW_A' => array_replace($wan1, $first), 'GW_B' => array_replace($wan2, $second),
+    ], 1700000000)['policies']['calls'];
+    check("40/30/5 cost profile: $scenario", $policy['selected'] === $expected && $policy['eligible_count'] === $eligible);
+}
+
 $invalid = $gateways;
 unset($invalid['GW_A']['delay']);
 check('missing RTT does not become zero', selected($config, $invalid) === 'b');

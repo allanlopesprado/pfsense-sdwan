@@ -1,10 +1,12 @@
 # SD-WAN lab results
 
+[A/B benchmarks with counts, timings and raw data](benchmarks/README.md)
+
 ## Read this evidence by environment
 
 The current release notes link to the exact GitHub Actions run. PHP and native filter compilation tests verify decisions, rule generation and UI diagnostics. The FreeBSD VM loads the generated rules into PF and checks new flows, return traffic, NAT, existing states and supported failure cases. Separate labs cover VPN and inspection implementations. A passing CI run does not certify every combination of packages on a specific pfSense appliance.
 
-On a CE 2.9.2 appliance with the matching experimental core and two working WANs, SD-WAN 0.4.27 selected WAN2 for new LAN connections while the default route remained on WAN1. PF showed the rule tracker, next hop and both directions of real TCP and UDP flows. The NAT state translated them to WAN2's address. External HTTPS management and the two port forwards answered on both WANs. A controlled physical outage, a complete reboot and restore, and combined HA and IPsec interoperability still require an isolated appliance test.
+On a CE 2.9.2 appliance with the matching experimental core and two working WANs, SD-WAN 0.4.27 selected WAN2 for new LAN connections while the default route remained on WAN1. PF showed the rule tracker, next hop and both directions of real TCP and UDP flows. The NAT state translated them to WAN2's address. External HTTPS management and the two port forwards answered on both WANs. The isolated CE 2.9.2 lab observed reboot and restore separately. Physical circuit interruption and combined HA and IPsec interoperability require their own evidence. [Isolated CE 2.9.2 acceptance](benchmarks/ce292-interface-original.md)
 
 [Current release evidence](https://github.com/allanlopesprado/pfsense-sdwan/releases/latest) ? [Compatibility matrix](PACKAGE-COMPATIBILITY.md) ? [Acceptance procedure](LAB.md)
 

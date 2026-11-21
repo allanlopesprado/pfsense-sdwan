@@ -1,0 +1,730 @@
+wan1_rtt_ms,wan1_rttsd_ms,wan1_loss_pct,wan2_rtt_ms,wan2_rttsd_ms,wan2_loss_pct,wan1_eligible,wan2_eligible,expected,actual,wan1_reason,wan2_reason
+39.999,29.999,4,39.999,29.999,4,1,1,WAN2,WAN2,Eligible,Eligible
+39.999,29.999,4,39.999,29.999,5,1,1,WAN2,WAN2,Eligible,Eligible
+39.999,29.999,4,39.999,29.999,6,1,0,WAN1,WAN1,Eligible,"Loss exceeds the SLA"
+39.999,29.999,4,39.999,30,4,1,1,WAN2,WAN2,Eligible,Eligible
+39.999,29.999,4,39.999,30,5,1,1,WAN2,WAN2,Eligible,Eligible
+39.999,29.999,4,39.999,30,6,1,0,WAN1,WAN1,Eligible,"Loss exceeds the SLA"
+39.999,29.999,4,39.999,30.001,4,1,0,WAN1,WAN1,Eligible,"RTT standard deviation exceeds the SLA or is unavailable"
+39.999,29.999,4,39.999,30.001,5,1,0,WAN1,WAN1,Eligible,"RTT standard deviation exceeds the SLA or is unavailable"
+39.999,29.999,4,39.999,30.001,6,1,0,WAN1,WAN1,Eligible,"RTT standard deviation exceeds the SLA or is unavailable"
+39.999,29.999,4,40,29.999,4,1,1,WAN2,WAN2,Eligible,Eligible
+39.999,29.999,4,40,29.999,5,1,1,WAN2,WAN2,Eligible,Eligible
+39.999,29.999,4,40,29.999,6,1,0,WAN1,WAN1,Eligible,"Loss exceeds the SLA"
+39.999,29.999,4,40,30,4,1,1,WAN2,WAN2,Eligible,Eligible
+39.999,29.999,4,40,30,5,1,1,WAN2,WAN2,Eligible,Eligible
+39.999,29.999,4,40,30,6,1,0,WAN1,WAN1,Eligible,"Loss exceeds the SLA"
+39.999,29.999,4,40,30.001,4,1,0,WAN1,WAN1,Eligible,"RTT standard deviation exceeds the SLA or is unavailable"
+39.999,29.999,4,40,30.001,5,1,0,WAN1,WAN1,Eligible,"RTT standard deviation exceeds the SLA or is unavailable"
+39.999,29.999,4,40,30.001,6,1,0,WAN1,WAN1,Eligible,"RTT standard deviation exceeds the SLA or is unavailable"
+39.999,29.999,4,40.001,29.999,4,1,0,WAN1,WAN1,Eligible,"RTT exceeds the SLA"
+39.999,29.999,4,40.001,29.999,5,1,0,WAN1,WAN1,Eligible,"RTT exceeds the SLA"
+39.999,29.999,4,40.001,29.999,6,1,0,WAN1,WAN1,Eligible,"RTT exceeds the SLA"
+39.999,29.999,4,40.001,30,4,1,0,WAN1,WAN1,Eligible,"RTT exceeds the SLA"
+39.999,29.999,4,40.001,30,5,1,0,WAN1,WAN1,Eligible,"RTT exceeds the SLA"
+39.999,29.999,4,40.001,30,6,1,0,WAN1,WAN1,Eligible,"RTT exceeds the SLA"
+39.999,29.999,4,40.001,30.001,4,1,0,WAN1,WAN1,Eligible,"RTT exceeds the SLA"
+39.999,29.999,4,40.001,30.001,5,1,0,WAN1,WAN1,Eligible,"RTT exceeds the SLA"
+39.999,29.999,4,40.001,30.001,6,1,0,WAN1,WAN1,Eligible,"RTT exceeds the SLA"
+39.999,29.999,5,39.999,29.999,4,1,1,WAN2,WAN2,Eligible,Eligible
+39.999,29.999,5,39.999,29.999,5,1,1,WAN2,WAN2,Eligible,Eligible
+39.999,29.999,5,39.999,29.999,6,1,0,WAN1,WAN1,Eligible,"Loss exceeds the SLA"
+39.999,29.999,5,39.999,30,4,1,1,WAN2,WAN2,Eligible,Eligible
+39.999,29.999,5,39.999,30,5,1,1,WAN2,WAN2,Eligible,Eligible
+39.999,29.999,5,39.999,30,6,1,0,WAN1,WAN1,Eligible,"Loss exceeds the SLA"
+39.999,29.999,5,39.999,30.001,4,1,0,WAN1,WAN1,Eligible,"RTT standard deviation exceeds the SLA or is unavailable"
+39.999,29.999,5,39.999,30.001,5,1,0,WAN1,WAN1,Eligible,"RTT standard deviation exceeds the SLA or is unavailable"
+39.999,29.999,5,39.999,30.001,6,1,0,WAN1,WAN1,Eligible,"RTT standard deviation exceeds the SLA or is unavailable"
+39.999,29.999,5,40,29.999,4,1,1,WAN2,WAN2,Eligible,Eligible
+39.999,29.999,5,40,29.999,5,1,1,WAN2,WAN2,Eligible,Eligible
+39.999,29.999,5,40,29.999,6,1,0,WAN1,WAN1,Eligible,"Loss exceeds the SLA"
+39.999,29.999,5,40,30,4,1,1,WAN2,WAN2,Eligible,Eligible
+39.999,29.999,5,40,30,5,1,1,WAN2,WAN2,Eligible,Eligible
+39.999,29.999,5,40,30,6,1,0,WAN1,WAN1,Eligible,"Loss exceeds the SLA"
+39.999,29.999,5,40,30.001,4,1,0,WAN1,WAN1,Eligible,"RTT standard deviation exceeds the SLA or is unavailable"
+39.999,29.999,5,40,30.001,5,1,0,WAN1,WAN1,Eligible,"RTT standard deviation exceeds the SLA or is unavailable"
+39.999,29.999,5,40,30.001,6,1,0,WAN1,WAN1,Eligible,"RTT standard deviation exceeds the SLA or is unavailable"
+39.999,29.999,5,40.001,29.999,4,1,0,WAN1,WAN1,Eligible,"RTT exceeds the SLA"
+39.999,29.999,5,40.001,29.999,5,1,0,WAN1,WAN1,Eligible,"RTT exceeds the SLA"
+39.999,29.999,5,40.001,29.999,6,1,0,WAN1,WAN1,Eligible,"RTT exceeds the SLA"
+39.999,29.999,5,40.001,30,4,1,0,WAN1,WAN1,Eligible,"RTT exceeds the SLA"
+39.999,29.999,5,40.001,30,5,1,0,WAN1,WAN1,Eligible,"RTT exceeds the SLA"
+39.999,29.999,5,40.001,30,6,1,0,WAN1,WAN1,Eligible,"RTT exceeds the SLA"
+39.999,29.999,5,40.001,30.001,4,1,0,WAN1,WAN1,Eligible,"RTT exceeds the SLA"
+39.999,29.999,5,40.001,30.001,5,1,0,WAN1,WAN1,Eligible,"RTT exceeds the SLA"
+39.999,29.999,5,40.001,30.001,6,1,0,WAN1,WAN1,Eligible,"RTT exceeds the SLA"
+39.999,29.999,6,39.999,29.999,4,0,1,WAN2,WAN2,"Loss exceeds the SLA",Eligible
+39.999,29.999,6,39.999,29.999,5,0,1,WAN2,WAN2,"Loss exceeds the SLA",Eligible
+39.999,29.999,6,39.999,29.999,6,0,0,no_candidate,no_candidate,"Loss exceeds the SLA","Loss exceeds the SLA"
+39.999,29.999,6,39.999,30,4,0,1,WAN2,WAN2,"Loss exceeds the SLA",Eligible
+39.999,29.999,6,39.999,30,5,0,1,WAN2,WAN2,"Loss exceeds the SLA",Eligible
+39.999,29.999,6,39.999,30,6,0,0,no_candidate,no_candidate,"Loss exceeds the SLA","Loss exceeds the SLA"
+39.999,29.999,6,39.999,30.001,4,0,0,no_candidate,no_candidate,"Loss exceeds the SLA","RTT standard deviation exceeds the SLA or is unavailable"
+39.999,29.999,6,39.999,30.001,5,0,0,no_candidate,no_candidate,"Loss exceeds the SLA","RTT standard deviation exceeds the SLA or is unavailable"
+39.999,29.999,6,39.999,30.001,6,0,0,no_candidate,no_candidate,"Loss exceeds the SLA","RTT standard deviation exceeds the SLA or is unavailable"
+39.999,29.999,6,40,29.999,4,0,1,WAN2,WAN2,"Loss exceeds the SLA",Eligible
+39.999,29.999,6,40,29.999,5,0,1,WAN2,WAN2,"Loss exceeds the SLA",Eligible
+39.999,29.999,6,40,29.999,6,0,0,no_candidate,no_candidate,"Loss exceeds the SLA","Loss exceeds the SLA"
+39.999,29.999,6,40,30,4,0,1,WAN2,WAN2,"Loss exceeds the SLA",Eligible
+39.999,29.999,6,40,30,5,0,1,WAN2,WAN2,"Loss exceeds the SLA",Eligible
+39.999,29.999,6,40,30,6,0,0,no_candidate,no_candidate,"Loss exceeds the SLA","Loss exceeds the SLA"
+39.999,29.999,6,40,30.001,4,0,0,no_candidate,no_candidate,"Loss exceeds the SLA","RTT standard deviation exceeds the SLA or is unavailable"
+39.999,29.999,6,40,30.001,5,0,0,no_candidate,no_candidate,"Loss exceeds the SLA","RTT standard deviation exceeds the SLA or is unavailable"
+39.999,29.999,6,40,30.001,6,0,0,no_candidate,no_candidate,"Loss exceeds the SLA","RTT standard deviation exceeds the SLA or is unavailable"
+39.999,29.999,6,40.001,29.999,4,0,0,no_candidate,no_candidate,"Loss exceeds the SLA","RTT exceeds the SLA"
+39.999,29.999,6,40.001,29.999,5,0,0,no_candidate,no_candidate,"Loss exceeds the SLA","RTT exceeds the SLA"
+39.999,29.999,6,40.001,29.999,6,0,0,no_candidate,no_candidate,"Loss exceeds the SLA","RTT exceeds the SLA"
+39.999,29.999,6,40.001,30,4,0,0,no_candidate,no_candidate,"Loss exceeds the SLA","RTT exceeds the SLA"
+39.999,29.999,6,40.001,30,5,0,0,no_candidate,no_candidate,"Loss exceeds the SLA","RTT exceeds the SLA"
+39.999,29.999,6,40.001,30,6,0,0,no_candidate,no_candidate,"Loss exceeds the SLA","RTT exceeds the SLA"
+39.999,29.999,6,40.001,30.001,4,0,0,no_candidate,no_candidate,"Loss exceeds the SLA","RTT exceeds the SLA"
+39.999,29.999,6,40.001,30.001,5,0,0,no_candidate,no_candidate,"Loss exceeds the SLA","RTT exceeds the SLA"
+39.999,29.999,6,40.001,30.001,6,0,0,no_candidate,no_candidate,"Loss exceeds the SLA","RTT exceeds the SLA"
+39.999,30,4,39.999,29.999,4,1,1,WAN2,WAN2,Eligible,Eligible
+39.999,30,4,39.999,29.999,5,1,1,WAN2,WAN2,Eligible,Eligible
+39.999,30,4,39.999,29.999,6,1,0,WAN1,WAN1,Eligible,"Loss exceeds the SLA"
+39.999,30,4,39.999,30,4,1,1,WAN2,WAN2,Eligible,Eligible
+39.999,30,4,39.999,30,5,1,1,WAN2,WAN2,Eligible,Eligible
+39.999,30,4,39.999,30,6,1,0,WAN1,WAN1,Eligible,"Loss exceeds the SLA"
+39.999,30,4,39.999,30.001,4,1,0,WAN1,WAN1,Eligible,"RTT standard deviation exceeds the SLA or is unavailable"
+39.999,30,4,39.999,30.001,5,1,0,WAN1,WAN1,Eligible,"RTT standard deviation exceeds the SLA or is unavailable"
+39.999,30,4,39.999,30.001,6,1,0,WAN1,WAN1,Eligible,"RTT standard deviation exceeds the SLA or is unavailable"
+39.999,30,4,40,29.999,4,1,1,WAN2,WAN2,Eligible,Eligible
+39.999,30,4,40,29.999,5,1,1,WAN2,WAN2,Eligible,Eligible
+39.999,30,4,40,29.999,6,1,0,WAN1,WAN1,Eligible,"Loss exceeds the SLA"
+39.999,30,4,40,30,4,1,1,WAN2,WAN2,Eligible,Eligible
+39.999,30,4,40,30,5,1,1,WAN2,WAN2,Eligible,Eligible
+39.999,30,4,40,30,6,1,0,WAN1,WAN1,Eligible,"Loss exceeds the SLA"
+39.999,30,4,40,30.001,4,1,0,WAN1,WAN1,Eligible,"RTT standard deviation exceeds the SLA or is unavailable"
+39.999,30,4,40,30.001,5,1,0,WAN1,WAN1,Eligible,"RTT standard deviation exceeds the SLA or is unavailable"
+39.999,30,4,40,30.001,6,1,0,WAN1,WAN1,Eligible,"RTT standard deviation exceeds the SLA or is unavailable"
+39.999,30,4,40.001,29.999,4,1,0,WAN1,WAN1,Eligible,"RTT exceeds the SLA"
+39.999,30,4,40.001,29.999,5,1,0,WAN1,WAN1,Eligible,"RTT exceeds the SLA"
+39.999,30,4,40.001,29.999,6,1,0,WAN1,WAN1,Eligible,"RTT exceeds the SLA"
+39.999,30,4,40.001,30,4,1,0,WAN1,WAN1,Eligible,"RTT exceeds the SLA"
+39.999,30,4,40.001,30,5,1,0,WAN1,WAN1,Eligible,"RTT exceeds the SLA"
+39.999,30,4,40.001,30,6,1,0,WAN1,WAN1,Eligible,"RTT exceeds the SLA"
+39.999,30,4,40.001,30.001,4,1,0,WAN1,WAN1,Eligible,"RTT exceeds the SLA"
+39.999,30,4,40.001,30.001,5,1,0,WAN1,WAN1,Eligible,"RTT exceeds the SLA"
+39.999,30,4,40.001,30.001,6,1,0,WAN1,WAN1,Eligible,"RTT exceeds the SLA"
+39.999,30,5,39.999,29.999,4,1,1,WAN2,WAN2,Eligible,Eligible
+39.999,30,5,39.999,29.999,5,1,1,WAN2,WAN2,Eligible,Eligible
+39.999,30,5,39.999,29.999,6,1,0,WAN1,WAN1,Eligible,"Loss exceeds the SLA"
+39.999,30,5,39.999,30,4,1,1,WAN2,WAN2,Eligible,Eligible
+39.999,30,5,39.999,30,5,1,1,WAN2,WAN2,Eligible,Eligible
+39.999,30,5,39.999,30,6,1,0,WAN1,WAN1,Eligible,"Loss exceeds the SLA"
+39.999,30,5,39.999,30.001,4,1,0,WAN1,WAN1,Eligible,"RTT standard deviation exceeds the SLA or is unavailable"
+39.999,30,5,39.999,30.001,5,1,0,WAN1,WAN1,Eligible,"RTT standard deviation exceeds the SLA or is unavailable"
+39.999,30,5,39.999,30.001,6,1,0,WAN1,WAN1,Eligible,"RTT standard deviation exceeds the SLA or is unavailable"
+39.999,30,5,40,29.999,4,1,1,WAN2,WAN2,Eligible,Eligible
+39.999,30,5,40,29.999,5,1,1,WAN2,WAN2,Eligible,Eligible
+39.999,30,5,40,29.999,6,1,0,WAN1,WAN1,Eligible,"Loss exceeds the SLA"
+39.999,30,5,40,30,4,1,1,WAN2,WAN2,Eligible,Eligible
+39.999,30,5,40,30,5,1,1,WAN2,WAN2,Eligible,Eligible
+39.999,30,5,40,30,6,1,0,WAN1,WAN1,Eligible,"Loss exceeds the SLA"
+39.999,30,5,40,30.001,4,1,0,WAN1,WAN1,Eligible,"RTT standard deviation exceeds the SLA or is unavailable"
+39.999,30,5,40,30.001,5,1,0,WAN1,WAN1,Eligible,"RTT standard deviation exceeds the SLA or is unavailable"
+39.999,30,5,40,30.001,6,1,0,WAN1,WAN1,Eligible,"RTT standard deviation exceeds the SLA or is unavailable"
+39.999,30,5,40.001,29.999,4,1,0,WAN1,WAN1,Eligible,"RTT exceeds the SLA"
+39.999,30,5,40.001,29.999,5,1,0,WAN1,WAN1,Eligible,"RTT exceeds the SLA"
+39.999,30,5,40.001,29.999,6,1,0,WAN1,WAN1,Eligible,"RTT exceeds the SLA"
+39.999,30,5,40.001,30,4,1,0,WAN1,WAN1,Eligible,"RTT exceeds the SLA"
+39.999,30,5,40.001,30,5,1,0,WAN1,WAN1,Eligible,"RTT exceeds the SLA"
+39.999,30,5,40.001,30,6,1,0,WAN1,WAN1,Eligible,"RTT exceeds the SLA"
+39.999,30,5,40.001,30.001,4,1,0,WAN1,WAN1,Eligible,"RTT exceeds the SLA"
+39.999,30,5,40.001,30.001,5,1,0,WAN1,WAN1,Eligible,"RTT exceeds the SLA"
+39.999,30,5,40.001,30.001,6,1,0,WAN1,WAN1,Eligible,"RTT exceeds the SLA"
+39.999,30,6,39.999,29.999,4,0,1,WAN2,WAN2,"Loss exceeds the SLA",Eligible
+39.999,30,6,39.999,29.999,5,0,1,WAN2,WAN2,"Loss exceeds the SLA",Eligible
+39.999,30,6,39.999,29.999,6,0,0,no_candidate,no_candidate,"Loss exceeds the SLA","Loss exceeds the SLA"
+39.999,30,6,39.999,30,4,0,1,WAN2,WAN2,"Loss exceeds the SLA",Eligible
+39.999,30,6,39.999,30,5,0,1,WAN2,WAN2,"Loss exceeds the SLA",Eligible
+39.999,30,6,39.999,30,6,0,0,no_candidate,no_candidate,"Loss exceeds the SLA","Loss exceeds the SLA"
+39.999,30,6,39.999,30.001,4,0,0,no_candidate,no_candidate,"Loss exceeds the SLA","RTT standard deviation exceeds the SLA or is unavailable"
+39.999,30,6,39.999,30.001,5,0,0,no_candidate,no_candidate,"Loss exceeds the SLA","RTT standard deviation exceeds the SLA or is unavailable"
+39.999,30,6,39.999,30.001,6,0,0,no_candidate,no_candidate,"Loss exceeds the SLA","RTT standard deviation exceeds the SLA or is unavailable"
+39.999,30,6,40,29.999,4,0,1,WAN2,WAN2,"Loss exceeds the SLA",Eligible
+39.999,30,6,40,29.999,5,0,1,WAN2,WAN2,"Loss exceeds the SLA",Eligible
+39.999,30,6,40,29.999,6,0,0,no_candidate,no_candidate,"Loss exceeds the SLA","Loss exceeds the SLA"
+39.999,30,6,40,30,4,0,1,WAN2,WAN2,"Loss exceeds the SLA",Eligible
+39.999,30,6,40,30,5,0,1,WAN2,WAN2,"Loss exceeds the SLA",Eligible
+39.999,30,6,40,30,6,0,0,no_candidate,no_candidate,"Loss exceeds the SLA","Loss exceeds the SLA"
+39.999,30,6,40,30.001,4,0,0,no_candidate,no_candidate,"Loss exceeds the SLA","RTT standard deviation exceeds the SLA or is unavailable"
+39.999,30,6,40,30.001,5,0,0,no_candidate,no_candidate,"Loss exceeds the SLA","RTT standard deviation exceeds the SLA or is unavailable"
+39.999,30,6,40,30.001,6,0,0,no_candidate,no_candidate,"Loss exceeds the SLA","RTT standard deviation exceeds the SLA or is unavailable"
+39.999,30,6,40.001,29.999,4,0,0,no_candidate,no_candidate,"Loss exceeds the SLA","RTT exceeds the SLA"
+39.999,30,6,40.001,29.999,5,0,0,no_candidate,no_candidate,"Loss exceeds the SLA","RTT exceeds the SLA"
+39.999,30,6,40.001,29.999,6,0,0,no_candidate,no_candidate,"Loss exceeds the SLA","RTT exceeds the SLA"
+39.999,30,6,40.001,30,4,0,0,no_candidate,no_candidate,"Loss exceeds the SLA","RTT exceeds the SLA"
+39.999,30,6,40.001,30,5,0,0,no_candidate,no_candidate,"Loss exceeds the SLA","RTT exceeds the SLA"
+39.999,30,6,40.001,30,6,0,0,no_candidate,no_candidate,"Loss exceeds the SLA","RTT exceeds the SLA"
+39.999,30,6,40.001,30.001,4,0,0,no_candidate,no_candidate,"Loss exceeds the SLA","RTT exceeds the SLA"
+39.999,30,6,40.001,30.001,5,0,0,no_candidate,no_candidate,"Loss exceeds the SLA","RTT exceeds the SLA"
+39.999,30,6,40.001,30.001,6,0,0,no_candidate,no_candidate,"Loss exceeds the SLA","RTT exceeds the SLA"
+39.999,30.001,4,39.999,29.999,4,0,1,WAN2,WAN2,"RTT standard deviation exceeds the SLA or is unavailable",Eligible
+39.999,30.001,4,39.999,29.999,5,0,1,WAN2,WAN2,"RTT standard deviation exceeds the SLA or is unavailable",Eligible
+39.999,30.001,4,39.999,29.999,6,0,0,no_candidate,no_candidate,"RTT standard deviation exceeds the SLA or is unavailable","Loss exceeds the SLA"
+39.999,30.001,4,39.999,30,4,0,1,WAN2,WAN2,"RTT standard deviation exceeds the SLA or is unavailable",Eligible
+39.999,30.001,4,39.999,30,5,0,1,WAN2,WAN2,"RTT standard deviation exceeds the SLA or is unavailable",Eligible
+39.999,30.001,4,39.999,30,6,0,0,no_candidate,no_candidate,"RTT standard deviation exceeds the SLA or is unavailable","Loss exceeds the SLA"
+39.999,30.001,4,39.999,30.001,4,0,0,no_candidate,no_candidate,"RTT standard deviation exceeds the SLA or is unavailable","RTT standard deviation exceeds the SLA or is unavailable"
+39.999,30.001,4,39.999,30.001,5,0,0,no_candidate,no_candidate,"RTT standard deviation exceeds the SLA or is unavailable","RTT standard deviation exceeds the SLA or is unavailable"
+39.999,30.001,4,39.999,30.001,6,0,0,no_candidate,no_candidate,"RTT standard deviation exceeds the SLA or is unavailable","RTT standard deviation exceeds the SLA or is unavailable"
+39.999,30.001,4,40,29.999,4,0,1,WAN2,WAN2,"RTT standard deviation exceeds the SLA or is unavailable",Eligible
+39.999,30.001,4,40,29.999,5,0,1,WAN2,WAN2,"RTT standard deviation exceeds the SLA or is unavailable",Eligible
+39.999,30.001,4,40,29.999,6,0,0,no_candidate,no_candidate,"RTT standard deviation exceeds the SLA or is unavailable","Loss exceeds the SLA"
+39.999,30.001,4,40,30,4,0,1,WAN2,WAN2,"RTT standard deviation exceeds the SLA or is unavailable",Eligible
+39.999,30.001,4,40,30,5,0,1,WAN2,WAN2,"RTT standard deviation exceeds the SLA or is unavailable",Eligible
+39.999,30.001,4,40,30,6,0,0,no_candidate,no_candidate,"RTT standard deviation exceeds the SLA or is unavailable","Loss exceeds the SLA"
+39.999,30.001,4,40,30.001,4,0,0,no_candidate,no_candidate,"RTT standard deviation exceeds the SLA or is unavailable","RTT standard deviation exceeds the SLA or is unavailable"
+39.999,30.001,4,40,30.001,5,0,0,no_candidate,no_candidate,"RTT standard deviation exceeds the SLA or is unavailable","RTT standard deviation exceeds the SLA or is unavailable"
+39.999,30.001,4,40,30.001,6,0,0,no_candidate,no_candidate,"RTT standard deviation exceeds the SLA or is unavailable","RTT standard deviation exceeds the SLA or is unavailable"
+39.999,30.001,4,40.001,29.999,4,0,0,no_candidate,no_candidate,"RTT standard deviation exceeds the SLA or is unavailable","RTT exceeds the SLA"
+39.999,30.001,4,40.001,29.999,5,0,0,no_candidate,no_candidate,"RTT standard deviation exceeds the SLA or is unavailable","RTT exceeds the SLA"
+39.999,30.001,4,40.001,29.999,6,0,0,no_candidate,no_candidate,"RTT standard deviation exceeds the SLA or is unavailable","RTT exceeds the SLA"
+39.999,30.001,4,40.001,30,4,0,0,no_candidate,no_candidate,"RTT standard deviation exceeds the SLA or is unavailable","RTT exceeds the SLA"
+39.999,30.001,4,40.001,30,5,0,0,no_candidate,no_candidate,"RTT standard deviation exceeds the SLA or is unavailable","RTT exceeds the SLA"
+39.999,30.001,4,40.001,30,6,0,0,no_candidate,no_candidate,"RTT standard deviation exceeds the SLA or is unavailable","RTT exceeds the SLA"
+39.999,30.001,4,40.001,30.001,4,0,0,no_candidate,no_candidate,"RTT standard deviation exceeds the SLA or is unavailable","RTT exceeds the SLA"
+39.999,30.001,4,40.001,30.001,5,0,0,no_candidate,no_candidate,"RTT standard deviation exceeds the SLA or is unavailable","RTT exceeds the SLA"
+39.999,30.001,4,40.001,30.001,6,0,0,no_candidate,no_candidate,"RTT standard deviation exceeds the SLA or is unavailable","RTT exceeds the SLA"
+39.999,30.001,5,39.999,29.999,4,0,1,WAN2,WAN2,"RTT standard deviation exceeds the SLA or is unavailable",Eligible
+39.999,30.001,5,39.999,29.999,5,0,1,WAN2,WAN2,"RTT standard deviation exceeds the SLA or is unavailable",Eligible
+39.999,30.001,5,39.999,29.999,6,0,0,no_candidate,no_candidate,"RTT standard deviation exceeds the SLA or is unavailable","Loss exceeds the SLA"
+39.999,30.001,5,39.999,30,4,0,1,WAN2,WAN2,"RTT standard deviation exceeds the SLA or is unavailable",Eligible
+39.999,30.001,5,39.999,30,5,0,1,WAN2,WAN2,"RTT standard deviation exceeds the SLA or is unavailable",Eligible
+39.999,30.001,5,39.999,30,6,0,0,no_candidate,no_candidate,"RTT standard deviation exceeds the SLA or is unavailable","Loss exceeds the SLA"
+39.999,30.001,5,39.999,30.001,4,0,0,no_candidate,no_candidate,"RTT standard deviation exceeds the SLA or is unavailable","RTT standard deviation exceeds the SLA or is unavailable"
+39.999,30.001,5,39.999,30.001,5,0,0,no_candidate,no_candidate,"RTT standard deviation exceeds the SLA or is unavailable","RTT standard deviation exceeds the SLA or is unavailable"
+39.999,30.001,5,39.999,30.001,6,0,0,no_candidate,no_candidate,"RTT standard deviation exceeds the SLA or is unavailable","RTT standard deviation exceeds the SLA or is unavailable"
+39.999,30.001,5,40,29.999,4,0,1,WAN2,WAN2,"RTT standard deviation exceeds the SLA or is unavailable",Eligible
+39.999,30.001,5,40,29.999,5,0,1,WAN2,WAN2,"RTT standard deviation exceeds the SLA or is unavailable",Eligible
+39.999,30.001,5,40,29.999,6,0,0,no_candidate,no_candidate,"RTT standard deviation exceeds the SLA or is unavailable","Loss exceeds the SLA"
+39.999,30.001,5,40,30,4,0,1,WAN2,WAN2,"RTT standard deviation exceeds the SLA or is unavailable",Eligible
+39.999,30.001,5,40,30,5,0,1,WAN2,WAN2,"RTT standard deviation exceeds the SLA or is unavailable",Eligible
+39.999,30.001,5,40,30,6,0,0,no_candidate,no_candidate,"RTT standard deviation exceeds the SLA or is unavailable","Loss exceeds the SLA"
+39.999,30.001,5,40,30.001,4,0,0,no_candidate,no_candidate,"RTT standard deviation exceeds the SLA or is unavailable","RTT standard deviation exceeds the SLA or is unavailable"
+39.999,30.001,5,40,30.001,5,0,0,no_candidate,no_candidate,"RTT standard deviation exceeds the SLA or is unavailable","RTT standard deviation exceeds the SLA or is unavailable"
+39.999,30.001,5,40,30.001,6,0,0,no_candidate,no_candidate,"RTT standard deviation exceeds the SLA or is unavailable","RTT standard deviation exceeds the SLA or is unavailable"
+39.999,30.001,5,40.001,29.999,4,0,0,no_candidate,no_candidate,"RTT standard deviation exceeds the SLA or is unavailable","RTT exceeds the SLA"
+39.999,30.001,5,40.001,29.999,5,0,0,no_candidate,no_candidate,"RTT standard deviation exceeds the SLA or is unavailable","RTT exceeds the SLA"
+39.999,30.001,5,40.001,29.999,6,0,0,no_candidate,no_candidate,"RTT standard deviation exceeds the SLA or is unavailable","RTT exceeds the SLA"
+39.999,30.001,5,40.001,30,4,0,0,no_candidate,no_candidate,"RTT standard deviation exceeds the SLA or is unavailable","RTT exceeds the SLA"
+39.999,30.001,5,40.001,30,5,0,0,no_candidate,no_candidate,"RTT standard deviation exceeds the SLA or is unavailable","RTT exceeds the SLA"
+39.999,30.001,5,40.001,30,6,0,0,no_candidate,no_candidate,"RTT standard deviation exceeds the SLA or is unavailable","RTT exceeds the SLA"
+39.999,30.001,5,40.001,30.001,4,0,0,no_candidate,no_candidate,"RTT standard deviation exceeds the SLA or is unavailable","RTT exceeds the SLA"
+39.999,30.001,5,40.001,30.001,5,0,0,no_candidate,no_candidate,"RTT standard deviation exceeds the SLA or is unavailable","RTT exceeds the SLA"
+39.999,30.001,5,40.001,30.001,6,0,0,no_candidate,no_candidate,"RTT standard deviation exceeds the SLA or is unavailable","RTT exceeds the SLA"
+39.999,30.001,6,39.999,29.999,4,0,1,WAN2,WAN2,"RTT standard deviation exceeds the SLA or is unavailable",Eligible
+39.999,30.001,6,39.999,29.999,5,0,1,WAN2,WAN2,"RTT standard deviation exceeds the SLA or is unavailable",Eligible
+39.999,30.001,6,39.999,29.999,6,0,0,no_candidate,no_candidate,"RTT standard deviation exceeds the SLA or is unavailable","Loss exceeds the SLA"
+39.999,30.001,6,39.999,30,4,0,1,WAN2,WAN2,"RTT standard deviation exceeds the SLA or is unavailable",Eligible
+39.999,30.001,6,39.999,30,5,0,1,WAN2,WAN2,"RTT standard deviation exceeds the SLA or is unavailable",Eligible
+39.999,30.001,6,39.999,30,6,0,0,no_candidate,no_candidate,"RTT standard deviation exceeds the SLA or is unavailable","Loss exceeds the SLA"
+39.999,30.001,6,39.999,30.001,4,0,0,no_candidate,no_candidate,"RTT standard deviation exceeds the SLA or is unavailable","RTT standard deviation exceeds the SLA or is unavailable"
+39.999,30.001,6,39.999,30.001,5,0,0,no_candidate,no_candidate,"RTT standard deviation exceeds the SLA or is unavailable","RTT standard deviation exceeds the SLA or is unavailable"
+39.999,30.001,6,39.999,30.001,6,0,0,no_candidate,no_candidate,"RTT standard deviation exceeds the SLA or is unavailable","RTT standard deviation exceeds the SLA or is unavailable"
+39.999,30.001,6,40,29.999,4,0,1,WAN2,WAN2,"RTT standard deviation exceeds the SLA or is unavailable",Eligible
+39.999,30.001,6,40,29.999,5,0,1,WAN2,WAN2,"RTT standard deviation exceeds the SLA or is unavailable",Eligible
+39.999,30.001,6,40,29.999,6,0,0,no_candidate,no_candidate,"RTT standard deviation exceeds the SLA or is unavailable","Loss exceeds the SLA"
+39.999,30.001,6,40,30,4,0,1,WAN2,WAN2,"RTT standard deviation exceeds the SLA or is unavailable",Eligible
+39.999,30.001,6,40,30,5,0,1,WAN2,WAN2,"RTT standard deviation exceeds the SLA or is unavailable",Eligible
+39.999,30.001,6,40,30,6,0,0,no_candidate,no_candidate,"RTT standard deviation exceeds the SLA or is unavailable","Loss exceeds the SLA"
+39.999,30.001,6,40,30.001,4,0,0,no_candidate,no_candidate,"RTT standard deviation exceeds the SLA or is unavailable","RTT standard deviation exceeds the SLA or is unavailable"
+39.999,30.001,6,40,30.001,5,0,0,no_candidate,no_candidate,"RTT standard deviation exceeds the SLA or is unavailable","RTT standard deviation exceeds the SLA or is unavailable"
+39.999,30.001,6,40,30.001,6,0,0,no_candidate,no_candidate,"RTT standard deviation exceeds the SLA or is unavailable","RTT standard deviation exceeds the SLA or is unavailable"
+39.999,30.001,6,40.001,29.999,4,0,0,no_candidate,no_candidate,"RTT standard deviation exceeds the SLA or is unavailable","RTT exceeds the SLA"
+39.999,30.001,6,40.001,29.999,5,0,0,no_candidate,no_candidate,"RTT standard deviation exceeds the SLA or is unavailable","RTT exceeds the SLA"
+39.999,30.001,6,40.001,29.999,6,0,0,no_candidate,no_candidate,"RTT standard deviation exceeds the SLA or is unavailable","RTT exceeds the SLA"
+39.999,30.001,6,40.001,30,4,0,0,no_candidate,no_candidate,"RTT standard deviation exceeds the SLA or is unavailable","RTT exceeds the SLA"
+39.999,30.001,6,40.001,30,5,0,0,no_candidate,no_candidate,"RTT standard deviation exceeds the SLA or is unavailable","RTT exceeds the SLA"
+39.999,30.001,6,40.001,30,6,0,0,no_candidate,no_candidate,"RTT standard deviation exceeds the SLA or is unavailable","RTT exceeds the SLA"
+39.999,30.001,6,40.001,30.001,4,0,0,no_candidate,no_candidate,"RTT standard deviation exceeds the SLA or is unavailable","RTT exceeds the SLA"
+39.999,30.001,6,40.001,30.001,5,0,0,no_candidate,no_candidate,"RTT standard deviation exceeds the SLA or is unavailable","RTT exceeds the SLA"
+39.999,30.001,6,40.001,30.001,6,0,0,no_candidate,no_candidate,"RTT standard deviation exceeds the SLA or is unavailable","RTT exceeds the SLA"
+40,29.999,4,39.999,29.999,4,1,1,WAN2,WAN2,Eligible,Eligible
+40,29.999,4,39.999,29.999,5,1,1,WAN2,WAN2,Eligible,Eligible
+40,29.999,4,39.999,29.999,6,1,0,WAN1,WAN1,Eligible,"Loss exceeds the SLA"
+40,29.999,4,39.999,30,4,1,1,WAN2,WAN2,Eligible,Eligible
+40,29.999,4,39.999,30,5,1,1,WAN2,WAN2,Eligible,Eligible
+40,29.999,4,39.999,30,6,1,0,WAN1,WAN1,Eligible,"Loss exceeds the SLA"
+40,29.999,4,39.999,30.001,4,1,0,WAN1,WAN1,Eligible,"RTT standard deviation exceeds the SLA or is unavailable"
+40,29.999,4,39.999,30.001,5,1,0,WAN1,WAN1,Eligible,"RTT standard deviation exceeds the SLA or is unavailable"
+40,29.999,4,39.999,30.001,6,1,0,WAN1,WAN1,Eligible,"RTT standard deviation exceeds the SLA or is unavailable"
+40,29.999,4,40,29.999,4,1,1,WAN2,WAN2,Eligible,Eligible
+40,29.999,4,40,29.999,5,1,1,WAN2,WAN2,Eligible,Eligible
+40,29.999,4,40,29.999,6,1,0,WAN1,WAN1,Eligible,"Loss exceeds the SLA"
+40,29.999,4,40,30,4,1,1,WAN2,WAN2,Eligible,Eligible
+40,29.999,4,40,30,5,1,1,WAN2,WAN2,Eligible,Eligible
+40,29.999,4,40,30,6,1,0,WAN1,WAN1,Eligible,"Loss exceeds the SLA"
+40,29.999,4,40,30.001,4,1,0,WAN1,WAN1,Eligible,"RTT standard deviation exceeds the SLA or is unavailable"
+40,29.999,4,40,30.001,5,1,0,WAN1,WAN1,Eligible,"RTT standard deviation exceeds the SLA or is unavailable"
+40,29.999,4,40,30.001,6,1,0,WAN1,WAN1,Eligible,"RTT standard deviation exceeds the SLA or is unavailable"
+40,29.999,4,40.001,29.999,4,1,0,WAN1,WAN1,Eligible,"RTT exceeds the SLA"
+40,29.999,4,40.001,29.999,5,1,0,WAN1,WAN1,Eligible,"RTT exceeds the SLA"
+40,29.999,4,40.001,29.999,6,1,0,WAN1,WAN1,Eligible,"RTT exceeds the SLA"
+40,29.999,4,40.001,30,4,1,0,WAN1,WAN1,Eligible,"RTT exceeds the SLA"
+40,29.999,4,40.001,30,5,1,0,WAN1,WAN1,Eligible,"RTT exceeds the SLA"
+40,29.999,4,40.001,30,6,1,0,WAN1,WAN1,Eligible,"RTT exceeds the SLA"
+40,29.999,4,40.001,30.001,4,1,0,WAN1,WAN1,Eligible,"RTT exceeds the SLA"
+40,29.999,4,40.001,30.001,5,1,0,WAN1,WAN1,Eligible,"RTT exceeds the SLA"
+40,29.999,4,40.001,30.001,6,1,0,WAN1,WAN1,Eligible,"RTT exceeds the SLA"
+40,29.999,5,39.999,29.999,4,1,1,WAN2,WAN2,Eligible,Eligible
+40,29.999,5,39.999,29.999,5,1,1,WAN2,WAN2,Eligible,Eligible
+40,29.999,5,39.999,29.999,6,1,0,WAN1,WAN1,Eligible,"Loss exceeds the SLA"
+40,29.999,5,39.999,30,4,1,1,WAN2,WAN2,Eligible,Eligible
+40,29.999,5,39.999,30,5,1,1,WAN2,WAN2,Eligible,Eligible
+40,29.999,5,39.999,30,6,1,0,WAN1,WAN1,Eligible,"Loss exceeds the SLA"
+40,29.999,5,39.999,30.001,4,1,0,WAN1,WAN1,Eligible,"RTT standard deviation exceeds the SLA or is unavailable"
+40,29.999,5,39.999,30.001,5,1,0,WAN1,WAN1,Eligible,"RTT standard deviation exceeds the SLA or is unavailable"
+40,29.999,5,39.999,30.001,6,1,0,WAN1,WAN1,Eligible,"RTT standard deviation exceeds the SLA or is unavailable"
+40,29.999,5,40,29.999,4,1,1,WAN2,WAN2,Eligible,Eligible
+40,29.999,5,40,29.999,5,1,1,WAN2,WAN2,Eligible,Eligible
+40,29.999,5,40,29.999,6,1,0,WAN1,WAN1,Eligible,"Loss exceeds the SLA"
+40,29.999,5,40,30,4,1,1,WAN2,WAN2,Eligible,Eligible
+40,29.999,5,40,30,5,1,1,WAN2,WAN2,Eligible,Eligible
+40,29.999,5,40,30,6,1,0,WAN1,WAN1,Eligible,"Loss exceeds the SLA"
+40,29.999,5,40,30.001,4,1,0,WAN1,WAN1,Eligible,"RTT standard deviation exceeds the SLA or is unavailable"
+40,29.999,5,40,30.001,5,1,0,WAN1,WAN1,Eligible,"RTT standard deviation exceeds the SLA or is unavailable"
+40,29.999,5,40,30.001,6,1,0,WAN1,WAN1,Eligible,"RTT standard deviation exceeds the SLA or is unavailable"
+40,29.999,5,40.001,29.999,4,1,0,WAN1,WAN1,Eligible,"RTT exceeds the SLA"
+40,29.999,5,40.001,29.999,5,1,0,WAN1,WAN1,Eligible,"RTT exceeds the SLA"
+40,29.999,5,40.001,29.999,6,1,0,WAN1,WAN1,Eligible,"RTT exceeds the SLA"
+40,29.999,5,40.001,30,4,1,0,WAN1,WAN1,Eligible,"RTT exceeds the SLA"
+40,29.999,5,40.001,30,5,1,0,WAN1,WAN1,Eligible,"RTT exceeds the SLA"
+40,29.999,5,40.001,30,6,1,0,WAN1,WAN1,Eligible,"RTT exceeds the SLA"
+40,29.999,5,40.001,30.001,4,1,0,WAN1,WAN1,Eligible,"RTT exceeds the SLA"
+40,29.999,5,40.001,30.001,5,1,0,WAN1,WAN1,Eligible,"RTT exceeds the SLA"
+40,29.999,5,40.001,30.001,6,1,0,WAN1,WAN1,Eligible,"RTT exceeds the SLA"
+40,29.999,6,39.999,29.999,4,0,1,WAN2,WAN2,"Loss exceeds the SLA",Eligible
+40,29.999,6,39.999,29.999,5,0,1,WAN2,WAN2,"Loss exceeds the SLA",Eligible
+40,29.999,6,39.999,29.999,6,0,0,no_candidate,no_candidate,"Loss exceeds the SLA","Loss exceeds the SLA"
+40,29.999,6,39.999,30,4,0,1,WAN2,WAN2,"Loss exceeds the SLA",Eligible
+40,29.999,6,39.999,30,5,0,1,WAN2,WAN2,"Loss exceeds the SLA",Eligible
+40,29.999,6,39.999,30,6,0,0,no_candidate,no_candidate,"Loss exceeds the SLA","Loss exceeds the SLA"
+40,29.999,6,39.999,30.001,4,0,0,no_candidate,no_candidate,"Loss exceeds the SLA","RTT standard deviation exceeds the SLA or is unavailable"
+40,29.999,6,39.999,30.001,5,0,0,no_candidate,no_candidate,"Loss exceeds the SLA","RTT standard deviation exceeds the SLA or is unavailable"
+40,29.999,6,39.999,30.001,6,0,0,no_candidate,no_candidate,"Loss exceeds the SLA","RTT standard deviation exceeds the SLA or is unavailable"
+40,29.999,6,40,29.999,4,0,1,WAN2,WAN2,"Loss exceeds the SLA",Eligible
+40,29.999,6,40,29.999,5,0,1,WAN2,WAN2,"Loss exceeds the SLA",Eligible
+40,29.999,6,40,29.999,6,0,0,no_candidate,no_candidate,"Loss exceeds the SLA","Loss exceeds the SLA"
+40,29.999,6,40,30,4,0,1,WAN2,WAN2,"Loss exceeds the SLA",Eligible
+40,29.999,6,40,30,5,0,1,WAN2,WAN2,"Loss exceeds the SLA",Eligible
+40,29.999,6,40,30,6,0,0,no_candidate,no_candidate,"Loss exceeds the SLA","Loss exceeds the SLA"
+40,29.999,6,40,30.001,4,0,0,no_candidate,no_candidate,"Loss exceeds the SLA","RTT standard deviation exceeds the SLA or is unavailable"
+40,29.999,6,40,30.001,5,0,0,no_candidate,no_candidate,"Loss exceeds the SLA","RTT standard deviation exceeds the SLA or is unavailable"
+40,29.999,6,40,30.001,6,0,0,no_candidate,no_candidate,"Loss exceeds the SLA","RTT standard deviation exceeds the SLA or is unavailable"
+40,29.999,6,40.001,29.999,4,0,0,no_candidate,no_candidate,"Loss exceeds the SLA","RTT exceeds the SLA"
+40,29.999,6,40.001,29.999,5,0,0,no_candidate,no_candidate,"Loss exceeds the SLA","RTT exceeds the SLA"
+40,29.999,6,40.001,29.999,6,0,0,no_candidate,no_candidate,"Loss exceeds the SLA","RTT exceeds the SLA"
+40,29.999,6,40.001,30,4,0,0,no_candidate,no_candidate,"Loss exceeds the SLA","RTT exceeds the SLA"
+40,29.999,6,40.001,30,5,0,0,no_candidate,no_candidate,"Loss exceeds the SLA","RTT exceeds the SLA"
+40,29.999,6,40.001,30,6,0,0,no_candidate,no_candidate,"Loss exceeds the SLA","RTT exceeds the SLA"
+40,29.999,6,40.001,30.001,4,0,0,no_candidate,no_candidate,"Loss exceeds the SLA","RTT exceeds the SLA"
+40,29.999,6,40.001,30.001,5,0,0,no_candidate,no_candidate,"Loss exceeds the SLA","RTT exceeds the SLA"
+40,29.999,6,40.001,30.001,6,0,0,no_candidate,no_candidate,"Loss exceeds the SLA","RTT exceeds the SLA"
+40,30,4,39.999,29.999,4,1,1,WAN2,WAN2,Eligible,Eligible
+40,30,4,39.999,29.999,5,1,1,WAN2,WAN2,Eligible,Eligible
+40,30,4,39.999,29.999,6,1,0,WAN1,WAN1,Eligible,"Loss exceeds the SLA"
+40,30,4,39.999,30,4,1,1,WAN2,WAN2,Eligible,Eligible
+40,30,4,39.999,30,5,1,1,WAN2,WAN2,Eligible,Eligible
+40,30,4,39.999,30,6,1,0,WAN1,WAN1,Eligible,"Loss exceeds the SLA"
+40,30,4,39.999,30.001,4,1,0,WAN1,WAN1,Eligible,"RTT standard deviation exceeds the SLA or is unavailable"
+40,30,4,39.999,30.001,5,1,0,WAN1,WAN1,Eligible,"RTT standard deviation exceeds the SLA or is unavailable"
+40,30,4,39.999,30.001,6,1,0,WAN1,WAN1,Eligible,"RTT standard deviation exceeds the SLA or is unavailable"
+40,30,4,40,29.999,4,1,1,WAN2,WAN2,Eligible,Eligible
+40,30,4,40,29.999,5,1,1,WAN2,WAN2,Eligible,Eligible
+40,30,4,40,29.999,6,1,0,WAN1,WAN1,Eligible,"Loss exceeds the SLA"
+40,30,4,40,30,4,1,1,WAN2,WAN2,Eligible,Eligible
+40,30,4,40,30,5,1,1,WAN2,WAN2,Eligible,Eligible
+40,30,4,40,30,6,1,0,WAN1,WAN1,Eligible,"Loss exceeds the SLA"
+40,30,4,40,30.001,4,1,0,WAN1,WAN1,Eligible,"RTT standard deviation exceeds the SLA or is unavailable"
+40,30,4,40,30.001,5,1,0,WAN1,WAN1,Eligible,"RTT standard deviation exceeds the SLA or is unavailable"
+40,30,4,40,30.001,6,1,0,WAN1,WAN1,Eligible,"RTT standard deviation exceeds the SLA or is unavailable"
+40,30,4,40.001,29.999,4,1,0,WAN1,WAN1,Eligible,"RTT exceeds the SLA"
+40,30,4,40.001,29.999,5,1,0,WAN1,WAN1,Eligible,"RTT exceeds the SLA"
+40,30,4,40.001,29.999,6,1,0,WAN1,WAN1,Eligible,"RTT exceeds the SLA"
+40,30,4,40.001,30,4,1,0,WAN1,WAN1,Eligible,"RTT exceeds the SLA"
+40,30,4,40.001,30,5,1,0,WAN1,WAN1,Eligible,"RTT exceeds the SLA"
+40,30,4,40.001,30,6,1,0,WAN1,WAN1,Eligible,"RTT exceeds the SLA"
+40,30,4,40.001,30.001,4,1,0,WAN1,WAN1,Eligible,"RTT exceeds the SLA"
+40,30,4,40.001,30.001,5,1,0,WAN1,WAN1,Eligible,"RTT exceeds the SLA"
+40,30,4,40.001,30.001,6,1,0,WAN1,WAN1,Eligible,"RTT exceeds the SLA"
+40,30,5,39.999,29.999,4,1,1,WAN2,WAN2,Eligible,Eligible
+40,30,5,39.999,29.999,5,1,1,WAN2,WAN2,Eligible,Eligible
+40,30,5,39.999,29.999,6,1,0,WAN1,WAN1,Eligible,"Loss exceeds the SLA"
+40,30,5,39.999,30,4,1,1,WAN2,WAN2,Eligible,Eligible
+40,30,5,39.999,30,5,1,1,WAN2,WAN2,Eligible,Eligible
+40,30,5,39.999,30,6,1,0,WAN1,WAN1,Eligible,"Loss exceeds the SLA"
+40,30,5,39.999,30.001,4,1,0,WAN1,WAN1,Eligible,"RTT standard deviation exceeds the SLA or is unavailable"
+40,30,5,39.999,30.001,5,1,0,WAN1,WAN1,Eligible,"RTT standard deviation exceeds the SLA or is unavailable"
+40,30,5,39.999,30.001,6,1,0,WAN1,WAN1,Eligible,"RTT standard deviation exceeds the SLA or is unavailable"
+40,30,5,40,29.999,4,1,1,WAN2,WAN2,Eligible,Eligible
+40,30,5,40,29.999,5,1,1,WAN2,WAN2,Eligible,Eligible
+40,30,5,40,29.999,6,1,0,WAN1,WAN1,Eligible,"Loss exceeds the SLA"
+40,30,5,40,30,4,1,1,WAN2,WAN2,Eligible,Eligible
+40,30,5,40,30,5,1,1,WAN2,WAN2,Eligible,Eligible
+40,30,5,40,30,6,1,0,WAN1,WAN1,Eligible,"Loss exceeds the SLA"
+40,30,5,40,30.001,4,1,0,WAN1,WAN1,Eligible,"RTT standard deviation exceeds the SLA or is unavailable"
+40,30,5,40,30.001,5,1,0,WAN1,WAN1,Eligible,"RTT standard deviation exceeds the SLA or is unavailable"
+40,30,5,40,30.001,6,1,0,WAN1,WAN1,Eligible,"RTT standard deviation exceeds the SLA or is unavailable"
+40,30,5,40.001,29.999,4,1,0,WAN1,WAN1,Eligible,"RTT exceeds the SLA"
+40,30,5,40.001,29.999,5,1,0,WAN1,WAN1,Eligible,"RTT exceeds the SLA"
+40,30,5,40.001,29.999,6,1,0,WAN1,WAN1,Eligible,"RTT exceeds the SLA"
+40,30,5,40.001,30,4,1,0,WAN1,WAN1,Eligible,"RTT exceeds the SLA"
+40,30,5,40.001,30,5,1,0,WAN1,WAN1,Eligible,"RTT exceeds the SLA"
+40,30,5,40.001,30,6,1,0,WAN1,WAN1,Eligible,"RTT exceeds the SLA"
+40,30,5,40.001,30.001,4,1,0,WAN1,WAN1,Eligible,"RTT exceeds the SLA"
+40,30,5,40.001,30.001,5,1,0,WAN1,WAN1,Eligible,"RTT exceeds the SLA"
+40,30,5,40.001,30.001,6,1,0,WAN1,WAN1,Eligible,"RTT exceeds the SLA"
+40,30,6,39.999,29.999,4,0,1,WAN2,WAN2,"Loss exceeds the SLA",Eligible
+40,30,6,39.999,29.999,5,0,1,WAN2,WAN2,"Loss exceeds the SLA",Eligible
+40,30,6,39.999,29.999,6,0,0,no_candidate,no_candidate,"Loss exceeds the SLA","Loss exceeds the SLA"
+40,30,6,39.999,30,4,0,1,WAN2,WAN2,"Loss exceeds the SLA",Eligible
+40,30,6,39.999,30,5,0,1,WAN2,WAN2,"Loss exceeds the SLA",Eligible
+40,30,6,39.999,30,6,0,0,no_candidate,no_candidate,"Loss exceeds the SLA","Loss exceeds the SLA"
+40,30,6,39.999,30.001,4,0,0,no_candidate,no_candidate,"Loss exceeds the SLA","RTT standard deviation exceeds the SLA or is unavailable"
+40,30,6,39.999,30.001,5,0,0,no_candidate,no_candidate,"Loss exceeds the SLA","RTT standard deviation exceeds the SLA or is unavailable"
+40,30,6,39.999,30.001,6,0,0,no_candidate,no_candidate,"Loss exceeds the SLA","RTT standard deviation exceeds the SLA or is unavailable"
+40,30,6,40,29.999,4,0,1,WAN2,WAN2,"Loss exceeds the SLA",Eligible
+40,30,6,40,29.999,5,0,1,WAN2,WAN2,"Loss exceeds the SLA",Eligible
+40,30,6,40,29.999,6,0,0,no_candidate,no_candidate,"Loss exceeds the SLA","Loss exceeds the SLA"
+40,30,6,40,30,4,0,1,WAN2,WAN2,"Loss exceeds the SLA",Eligible
+40,30,6,40,30,5,0,1,WAN2,WAN2,"Loss exceeds the SLA",Eligible
+40,30,6,40,30,6,0,0,no_candidate,no_candidate,"Loss exceeds the SLA","Loss exceeds the SLA"
+40,30,6,40,30.001,4,0,0,no_candidate,no_candidate,"Loss exceeds the SLA","RTT standard deviation exceeds the SLA or is unavailable"
+40,30,6,40,30.001,5,0,0,no_candidate,no_candidate,"Loss exceeds the SLA","RTT standard deviation exceeds the SLA or is unavailable"
+40,30,6,40,30.001,6,0,0,no_candidate,no_candidate,"Loss exceeds the SLA","RTT standard deviation exceeds the SLA or is unavailable"
+40,30,6,40.001,29.999,4,0,0,no_candidate,no_candidate,"Loss exceeds the SLA","RTT exceeds the SLA"
+40,30,6,40.001,29.999,5,0,0,no_candidate,no_candidate,"Loss exceeds the SLA","RTT exceeds the SLA"
+40,30,6,40.001,29.999,6,0,0,no_candidate,no_candidate,"Loss exceeds the SLA","RTT exceeds the SLA"
+40,30,6,40.001,30,4,0,0,no_candidate,no_candidate,"Loss exceeds the SLA","RTT exceeds the SLA"
+40,30,6,40.001,30,5,0,0,no_candidate,no_candidate,"Loss exceeds the SLA","RTT exceeds the SLA"
+40,30,6,40.001,30,6,0,0,no_candidate,no_candidate,"Loss exceeds the SLA","RTT exceeds the SLA"
+40,30,6,40.001,30.001,4,0,0,no_candidate,no_candidate,"Loss exceeds the SLA","RTT exceeds the SLA"
+40,30,6,40.001,30.001,5,0,0,no_candidate,no_candidate,"Loss exceeds the SLA","RTT exceeds the SLA"
+40,30,6,40.001,30.001,6,0,0,no_candidate,no_candidate,"Loss exceeds the SLA","RTT exceeds the SLA"
+40,30.001,4,39.999,29.999,4,0,1,WAN2,WAN2,"RTT standard deviation exceeds the SLA or is unavailable",Eligible
+40,30.001,4,39.999,29.999,5,0,1,WAN2,WAN2,"RTT standard deviation exceeds the SLA or is unavailable",Eligible
+40,30.001,4,39.999,29.999,6,0,0,no_candidate,no_candidate,"RTT standard deviation exceeds the SLA or is unavailable","Loss exceeds the SLA"
+40,30.001,4,39.999,30,4,0,1,WAN2,WAN2,"RTT standard deviation exceeds the SLA or is unavailable",Eligible
+40,30.001,4,39.999,30,5,0,1,WAN2,WAN2,"RTT standard deviation exceeds the SLA or is unavailable",Eligible
+40,30.001,4,39.999,30,6,0,0,no_candidate,no_candidate,"RTT standard deviation exceeds the SLA or is unavailable","Loss exceeds the SLA"
+40,30.001,4,39.999,30.001,4,0,0,no_candidate,no_candidate,"RTT standard deviation exceeds the SLA or is unavailable","RTT standard deviation exceeds the SLA or is unavailable"
+40,30.001,4,39.999,30.001,5,0,0,no_candidate,no_candidate,"RTT standard deviation exceeds the SLA or is unavailable","RTT standard deviation exceeds the SLA or is unavailable"
+40,30.001,4,39.999,30.001,6,0,0,no_candidate,no_candidate,"RTT standard deviation exceeds the SLA or is unavailable","RTT standard deviation exceeds the SLA or is unavailable"
+40,30.001,4,40,29.999,4,0,1,WAN2,WAN2,"RTT standard deviation exceeds the SLA or is unavailable",Eligible
+40,30.001,4,40,29.999,5,0,1,WAN2,WAN2,"RTT standard deviation exceeds the SLA or is unavailable",Eligible
+40,30.001,4,40,29.999,6,0,0,no_candidate,no_candidate,"RTT standard deviation exceeds the SLA or is unavailable","Loss exceeds the SLA"
+40,30.001,4,40,30,4,0,1,WAN2,WAN2,"RTT standard deviation exceeds the SLA or is unavailable",Eligible
+40,30.001,4,40,30,5,0,1,WAN2,WAN2,"RTT standard deviation exceeds the SLA or is unavailable",Eligible
+40,30.001,4,40,30,6,0,0,no_candidate,no_candidate,"RTT standard deviation exceeds the SLA or is unavailable","Loss exceeds the SLA"
+40,30.001,4,40,30.001,4,0,0,no_candidate,no_candidate,"RTT standard deviation exceeds the SLA or is unavailable","RTT standard deviation exceeds the SLA or is unavailable"
+40,30.001,4,40,30.001,5,0,0,no_candidate,no_candidate,"RTT standard deviation exceeds the SLA or is unavailable","RTT standard deviation exceeds the SLA or is unavailable"
+40,30.001,4,40,30.001,6,0,0,no_candidate,no_candidate,"RTT standard deviation exceeds the SLA or is unavailable","RTT standard deviation exceeds the SLA or is unavailable"
+40,30.001,4,40.001,29.999,4,0,0,no_candidate,no_candidate,"RTT standard deviation exceeds the SLA or is unavailable","RTT exceeds the SLA"
+40,30.001,4,40.001,29.999,5,0,0,no_candidate,no_candidate,"RTT standard deviation exceeds the SLA or is unavailable","RTT exceeds the SLA"
+40,30.001,4,40.001,29.999,6,0,0,no_candidate,no_candidate,"RTT standard deviation exceeds the SLA or is unavailable","RTT exceeds the SLA"
+40,30.001,4,40.001,30,4,0,0,no_candidate,no_candidate,"RTT standard deviation exceeds the SLA or is unavailable","RTT exceeds the SLA"
+40,30.001,4,40.001,30,5,0,0,no_candidate,no_candidate,"RTT standard deviation exceeds the SLA or is unavailable","RTT exceeds the SLA"
+40,30.001,4,40.001,30,6,0,0,no_candidate,no_candidate,"RTT standard deviation exceeds the SLA or is unavailable","RTT exceeds the SLA"
+40,30.001,4,40.001,30.001,4,0,0,no_candidate,no_candidate,"RTT standard deviation exceeds the SLA or is unavailable","RTT exceeds the SLA"
+40,30.001,4,40.001,30.001,5,0,0,no_candidate,no_candidate,"RTT standard deviation exceeds the SLA or is unavailable","RTT exceeds the SLA"
+40,30.001,4,40.001,30.001,6,0,0,no_candidate,no_candidate,"RTT standard deviation exceeds the SLA or is unavailable","RTT exceeds the SLA"
+40,30.001,5,39.999,29.999,4,0,1,WAN2,WAN2,"RTT standard deviation exceeds the SLA or is unavailable",Eligible
+40,30.001,5,39.999,29.999,5,0,1,WAN2,WAN2,"RTT standard deviation exceeds the SLA or is unavailable",Eligible
+40,30.001,5,39.999,29.999,6,0,0,no_candidate,no_candidate,"RTT standard deviation exceeds the SLA or is unavailable","Loss exceeds the SLA"
+40,30.001,5,39.999,30,4,0,1,WAN2,WAN2,"RTT standard deviation exceeds the SLA or is unavailable",Eligible
+40,30.001,5,39.999,30,5,0,1,WAN2,WAN2,"RTT standard deviation exceeds the SLA or is unavailable",Eligible
+40,30.001,5,39.999,30,6,0,0,no_candidate,no_candidate,"RTT standard deviation exceeds the SLA or is unavailable","Loss exceeds the SLA"
+40,30.001,5,39.999,30.001,4,0,0,no_candidate,no_candidate,"RTT standard deviation exceeds the SLA or is unavailable","RTT standard deviation exceeds the SLA or is unavailable"
+40,30.001,5,39.999,30.001,5,0,0,no_candidate,no_candidate,"RTT standard deviation exceeds the SLA or is unavailable","RTT standard deviation exceeds the SLA or is unavailable"
+40,30.001,5,39.999,30.001,6,0,0,no_candidate,no_candidate,"RTT standard deviation exceeds the SLA or is unavailable","RTT standard deviation exceeds the SLA or is unavailable"
+40,30.001,5,40,29.999,4,0,1,WAN2,WAN2,"RTT standard deviation exceeds the SLA or is unavailable",Eligible
+40,30.001,5,40,29.999,5,0,1,WAN2,WAN2,"RTT standard deviation exceeds the SLA or is unavailable",Eligible
+40,30.001,5,40,29.999,6,0,0,no_candidate,no_candidate,"RTT standard deviation exceeds the SLA or is unavailable","Loss exceeds the SLA"
+40,30.001,5,40,30,4,0,1,WAN2,WAN2,"RTT standard deviation exceeds the SLA or is unavailable",Eligible
+40,30.001,5,40,30,5,0,1,WAN2,WAN2,"RTT standard deviation exceeds the SLA or is unavailable",Eligible
+40,30.001,5,40,30,6,0,0,no_candidate,no_candidate,"RTT standard deviation exceeds the SLA or is unavailable","Loss exceeds the SLA"
+40,30.001,5,40,30.001,4,0,0,no_candidate,no_candidate,"RTT standard deviation exceeds the SLA or is unavailable","RTT standard deviation exceeds the SLA or is unavailable"
+40,30.001,5,40,30.001,5,0,0,no_candidate,no_candidate,"RTT standard deviation exceeds the SLA or is unavailable","RTT standard deviation exceeds the SLA or is unavailable"
+40,30.001,5,40,30.001,6,0,0,no_candidate,no_candidate,"RTT standard deviation exceeds the SLA or is unavailable","RTT standard deviation exceeds the SLA or is unavailable"
+40,30.001,5,40.001,29.999,4,0,0,no_candidate,no_candidate,"RTT standard deviation exceeds the SLA or is unavailable","RTT exceeds the SLA"
+40,30.001,5,40.001,29.999,5,0,0,no_candidate,no_candidate,"RTT standard deviation exceeds the SLA or is unavailable","RTT exceeds the SLA"
+40,30.001,5,40.001,29.999,6,0,0,no_candidate,no_candidate,"RTT standard deviation exceeds the SLA or is unavailable","RTT exceeds the SLA"
+40,30.001,5,40.001,30,4,0,0,no_candidate,no_candidate,"RTT standard deviation exceeds the SLA or is unavailable","RTT exceeds the SLA"
+40,30.001,5,40.001,30,5,0,0,no_candidate,no_candidate,"RTT standard deviation exceeds the SLA or is unavailable","RTT exceeds the SLA"
+40,30.001,5,40.001,30,6,0,0,no_candidate,no_candidate,"RTT standard deviation exceeds the SLA or is unavailable","RTT exceeds the SLA"
+40,30.001,5,40.001,30.001,4,0,0,no_candidate,no_candidate,"RTT standard deviation exceeds the SLA or is unavailable","RTT exceeds the SLA"
+40,30.001,5,40.001,30.001,5,0,0,no_candidate,no_candidate,"RTT standard deviation exceeds the SLA or is unavailable","RTT exceeds the SLA"
+40,30.001,5,40.001,30.001,6,0,0,no_candidate,no_candidate,"RTT standard deviation exceeds the SLA or is unavailable","RTT exceeds the SLA"
+40,30.001,6,39.999,29.999,4,0,1,WAN2,WAN2,"RTT standard deviation exceeds the SLA or is unavailable",Eligible
+40,30.001,6,39.999,29.999,5,0,1,WAN2,WAN2,"RTT standard deviation exceeds the SLA or is unavailable",Eligible
+40,30.001,6,39.999,29.999,6,0,0,no_candidate,no_candidate,"RTT standard deviation exceeds the SLA or is unavailable","Loss exceeds the SLA"
+40,30.001,6,39.999,30,4,0,1,WAN2,WAN2,"RTT standard deviation exceeds the SLA or is unavailable",Eligible
+40,30.001,6,39.999,30,5,0,1,WAN2,WAN2,"RTT standard deviation exceeds the SLA or is unavailable",Eligible
+40,30.001,6,39.999,30,6,0,0,no_candidate,no_candidate,"RTT standard deviation exceeds the SLA or is unavailable","Loss exceeds the SLA"
+40,30.001,6,39.999,30.001,4,0,0,no_candidate,no_candidate,"RTT standard deviation exceeds the SLA or is unavailable","RTT standard deviation exceeds the SLA or is unavailable"
+40,30.001,6,39.999,30.001,5,0,0,no_candidate,no_candidate,"RTT standard deviation exceeds the SLA or is unavailable","RTT standard deviation exceeds the SLA or is unavailable"
+40,30.001,6,39.999,30.001,6,0,0,no_candidate,no_candidate,"RTT standard deviation exceeds the SLA or is unavailable","RTT standard deviation exceeds the SLA or is unavailable"
+40,30.001,6,40,29.999,4,0,1,WAN2,WAN2,"RTT standard deviation exceeds the SLA or is unavailable",Eligible
+40,30.001,6,40,29.999,5,0,1,WAN2,WAN2,"RTT standard deviation exceeds the SLA or is unavailable",Eligible
+40,30.001,6,40,29.999,6,0,0,no_candidate,no_candidate,"RTT standard deviation exceeds the SLA or is unavailable","Loss exceeds the SLA"
+40,30.001,6,40,30,4,0,1,WAN2,WAN2,"RTT standard deviation exceeds the SLA or is unavailable",Eligible
+40,30.001,6,40,30,5,0,1,WAN2,WAN2,"RTT standard deviation exceeds the SLA or is unavailable",Eligible
+40,30.001,6,40,30,6,0,0,no_candidate,no_candidate,"RTT standard deviation exceeds the SLA or is unavailable","Loss exceeds the SLA"
+40,30.001,6,40,30.001,4,0,0,no_candidate,no_candidate,"RTT standard deviation exceeds the SLA or is unavailable","RTT standard deviation exceeds the SLA or is unavailable"
+40,30.001,6,40,30.001,5,0,0,no_candidate,no_candidate,"RTT standard deviation exceeds the SLA or is unavailable","RTT standard deviation exceeds the SLA or is unavailable"
+40,30.001,6,40,30.001,6,0,0,no_candidate,no_candidate,"RTT standard deviation exceeds the SLA or is unavailable","RTT standard deviation exceeds the SLA or is unavailable"
+40,30.001,6,40.001,29.999,4,0,0,no_candidate,no_candidate,"RTT standard deviation exceeds the SLA or is unavailable","RTT exceeds the SLA"
+40,30.001,6,40.001,29.999,5,0,0,no_candidate,no_candidate,"RTT standard deviation exceeds the SLA or is unavailable","RTT exceeds the SLA"
+40,30.001,6,40.001,29.999,6,0,0,no_candidate,no_candidate,"RTT standard deviation exceeds the SLA or is unavailable","RTT exceeds the SLA"
+40,30.001,6,40.001,30,4,0,0,no_candidate,no_candidate,"RTT standard deviation exceeds the SLA or is unavailable","RTT exceeds the SLA"
+40,30.001,6,40.001,30,5,0,0,no_candidate,no_candidate,"RTT standard deviation exceeds the SLA or is unavailable","RTT exceeds the SLA"
+40,30.001,6,40.001,30,6,0,0,no_candidate,no_candidate,"RTT standard deviation exceeds the SLA or is unavailable","RTT exceeds the SLA"
+40,30.001,6,40.001,30.001,4,0,0,no_candidate,no_candidate,"RTT standard deviation exceeds the SLA or is unavailable","RTT exceeds the SLA"
+40,30.001,6,40.001,30.001,5,0,0,no_candidate,no_candidate,"RTT standard deviation exceeds the SLA or is unavailable","RTT exceeds the SLA"
+40,30.001,6,40.001,30.001,6,0,0,no_candidate,no_candidate,"RTT standard deviation exceeds the SLA or is unavailable","RTT exceeds the SLA"
+40.001,29.999,4,39.999,29.999,4,0,1,WAN2,WAN2,"RTT exceeds the SLA",Eligible
+40.001,29.999,4,39.999,29.999,5,0,1,WAN2,WAN2,"RTT exceeds the SLA",Eligible
+40.001,29.999,4,39.999,29.999,6,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","Loss exceeds the SLA"
+40.001,29.999,4,39.999,30,4,0,1,WAN2,WAN2,"RTT exceeds the SLA",Eligible
+40.001,29.999,4,39.999,30,5,0,1,WAN2,WAN2,"RTT exceeds the SLA",Eligible
+40.001,29.999,4,39.999,30,6,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","Loss exceeds the SLA"
+40.001,29.999,4,39.999,30.001,4,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT standard deviation exceeds the SLA or is unavailable"
+40.001,29.999,4,39.999,30.001,5,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT standard deviation exceeds the SLA or is unavailable"
+40.001,29.999,4,39.999,30.001,6,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT standard deviation exceeds the SLA or is unavailable"
+40.001,29.999,4,40,29.999,4,0,1,WAN2,WAN2,"RTT exceeds the SLA",Eligible
+40.001,29.999,4,40,29.999,5,0,1,WAN2,WAN2,"RTT exceeds the SLA",Eligible
+40.001,29.999,4,40,29.999,6,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","Loss exceeds the SLA"
+40.001,29.999,4,40,30,4,0,1,WAN2,WAN2,"RTT exceeds the SLA",Eligible
+40.001,29.999,4,40,30,5,0,1,WAN2,WAN2,"RTT exceeds the SLA",Eligible
+40.001,29.999,4,40,30,6,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","Loss exceeds the SLA"
+40.001,29.999,4,40,30.001,4,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT standard deviation exceeds the SLA or is unavailable"
+40.001,29.999,4,40,30.001,5,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT standard deviation exceeds the SLA or is unavailable"
+40.001,29.999,4,40,30.001,6,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT standard deviation exceeds the SLA or is unavailable"
+40.001,29.999,4,40.001,29.999,4,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT exceeds the SLA"
+40.001,29.999,4,40.001,29.999,5,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT exceeds the SLA"
+40.001,29.999,4,40.001,29.999,6,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT exceeds the SLA"
+40.001,29.999,4,40.001,30,4,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT exceeds the SLA"
+40.001,29.999,4,40.001,30,5,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT exceeds the SLA"
+40.001,29.999,4,40.001,30,6,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT exceeds the SLA"
+40.001,29.999,4,40.001,30.001,4,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT exceeds the SLA"
+40.001,29.999,4,40.001,30.001,5,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT exceeds the SLA"
+40.001,29.999,4,40.001,30.001,6,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT exceeds the SLA"
+40.001,29.999,5,39.999,29.999,4,0,1,WAN2,WAN2,"RTT exceeds the SLA",Eligible
+40.001,29.999,5,39.999,29.999,5,0,1,WAN2,WAN2,"RTT exceeds the SLA",Eligible
+40.001,29.999,5,39.999,29.999,6,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","Loss exceeds the SLA"
+40.001,29.999,5,39.999,30,4,0,1,WAN2,WAN2,"RTT exceeds the SLA",Eligible
+40.001,29.999,5,39.999,30,5,0,1,WAN2,WAN2,"RTT exceeds the SLA",Eligible
+40.001,29.999,5,39.999,30,6,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","Loss exceeds the SLA"
+40.001,29.999,5,39.999,30.001,4,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT standard deviation exceeds the SLA or is unavailable"
+40.001,29.999,5,39.999,30.001,5,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT standard deviation exceeds the SLA or is unavailable"
+40.001,29.999,5,39.999,30.001,6,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT standard deviation exceeds the SLA or is unavailable"
+40.001,29.999,5,40,29.999,4,0,1,WAN2,WAN2,"RTT exceeds the SLA",Eligible
+40.001,29.999,5,40,29.999,5,0,1,WAN2,WAN2,"RTT exceeds the SLA",Eligible
+40.001,29.999,5,40,29.999,6,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","Loss exceeds the SLA"
+40.001,29.999,5,40,30,4,0,1,WAN2,WAN2,"RTT exceeds the SLA",Eligible
+40.001,29.999,5,40,30,5,0,1,WAN2,WAN2,"RTT exceeds the SLA",Eligible
+40.001,29.999,5,40,30,6,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","Loss exceeds the SLA"
+40.001,29.999,5,40,30.001,4,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT standard deviation exceeds the SLA or is unavailable"
+40.001,29.999,5,40,30.001,5,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT standard deviation exceeds the SLA or is unavailable"
+40.001,29.999,5,40,30.001,6,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT standard deviation exceeds the SLA or is unavailable"
+40.001,29.999,5,40.001,29.999,4,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT exceeds the SLA"
+40.001,29.999,5,40.001,29.999,5,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT exceeds the SLA"
+40.001,29.999,5,40.001,29.999,6,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT exceeds the SLA"
+40.001,29.999,5,40.001,30,4,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT exceeds the SLA"
+40.001,29.999,5,40.001,30,5,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT exceeds the SLA"
+40.001,29.999,5,40.001,30,6,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT exceeds the SLA"
+40.001,29.999,5,40.001,30.001,4,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT exceeds the SLA"
+40.001,29.999,5,40.001,30.001,5,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT exceeds the SLA"
+40.001,29.999,5,40.001,30.001,6,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT exceeds the SLA"
+40.001,29.999,6,39.999,29.999,4,0,1,WAN2,WAN2,"RTT exceeds the SLA",Eligible
+40.001,29.999,6,39.999,29.999,5,0,1,WAN2,WAN2,"RTT exceeds the SLA",Eligible
+40.001,29.999,6,39.999,29.999,6,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","Loss exceeds the SLA"
+40.001,29.999,6,39.999,30,4,0,1,WAN2,WAN2,"RTT exceeds the SLA",Eligible
+40.001,29.999,6,39.999,30,5,0,1,WAN2,WAN2,"RTT exceeds the SLA",Eligible
+40.001,29.999,6,39.999,30,6,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","Loss exceeds the SLA"
+40.001,29.999,6,39.999,30.001,4,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT standard deviation exceeds the SLA or is unavailable"
+40.001,29.999,6,39.999,30.001,5,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT standard deviation exceeds the SLA or is unavailable"
+40.001,29.999,6,39.999,30.001,6,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT standard deviation exceeds the SLA or is unavailable"
+40.001,29.999,6,40,29.999,4,0,1,WAN2,WAN2,"RTT exceeds the SLA",Eligible
+40.001,29.999,6,40,29.999,5,0,1,WAN2,WAN2,"RTT exceeds the SLA",Eligible
+40.001,29.999,6,40,29.999,6,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","Loss exceeds the SLA"
+40.001,29.999,6,40,30,4,0,1,WAN2,WAN2,"RTT exceeds the SLA",Eligible
+40.001,29.999,6,40,30,5,0,1,WAN2,WAN2,"RTT exceeds the SLA",Eligible
+40.001,29.999,6,40,30,6,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","Loss exceeds the SLA"
+40.001,29.999,6,40,30.001,4,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT standard deviation exceeds the SLA or is unavailable"
+40.001,29.999,6,40,30.001,5,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT standard deviation exceeds the SLA or is unavailable"
+40.001,29.999,6,40,30.001,6,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT standard deviation exceeds the SLA or is unavailable"
+40.001,29.999,6,40.001,29.999,4,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT exceeds the SLA"
+40.001,29.999,6,40.001,29.999,5,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT exceeds the SLA"
+40.001,29.999,6,40.001,29.999,6,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT exceeds the SLA"
+40.001,29.999,6,40.001,30,4,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT exceeds the SLA"
+40.001,29.999,6,40.001,30,5,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT exceeds the SLA"
+40.001,29.999,6,40.001,30,6,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT exceeds the SLA"
+40.001,29.999,6,40.001,30.001,4,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT exceeds the SLA"
+40.001,29.999,6,40.001,30.001,5,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT exceeds the SLA"
+40.001,29.999,6,40.001,30.001,6,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT exceeds the SLA"
+40.001,30,4,39.999,29.999,4,0,1,WAN2,WAN2,"RTT exceeds the SLA",Eligible
+40.001,30,4,39.999,29.999,5,0,1,WAN2,WAN2,"RTT exceeds the SLA",Eligible
+40.001,30,4,39.999,29.999,6,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","Loss exceeds the SLA"
+40.001,30,4,39.999,30,4,0,1,WAN2,WAN2,"RTT exceeds the SLA",Eligible
+40.001,30,4,39.999,30,5,0,1,WAN2,WAN2,"RTT exceeds the SLA",Eligible
+40.001,30,4,39.999,30,6,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","Loss exceeds the SLA"
+40.001,30,4,39.999,30.001,4,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT standard deviation exceeds the SLA or is unavailable"
+40.001,30,4,39.999,30.001,5,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT standard deviation exceeds the SLA or is unavailable"
+40.001,30,4,39.999,30.001,6,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT standard deviation exceeds the SLA or is unavailable"
+40.001,30,4,40,29.999,4,0,1,WAN2,WAN2,"RTT exceeds the SLA",Eligible
+40.001,30,4,40,29.999,5,0,1,WAN2,WAN2,"RTT exceeds the SLA",Eligible
+40.001,30,4,40,29.999,6,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","Loss exceeds the SLA"
+40.001,30,4,40,30,4,0,1,WAN2,WAN2,"RTT exceeds the SLA",Eligible
+40.001,30,4,40,30,5,0,1,WAN2,WAN2,"RTT exceeds the SLA",Eligible
+40.001,30,4,40,30,6,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","Loss exceeds the SLA"
+40.001,30,4,40,30.001,4,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT standard deviation exceeds the SLA or is unavailable"
+40.001,30,4,40,30.001,5,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT standard deviation exceeds the SLA or is unavailable"
+40.001,30,4,40,30.001,6,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT standard deviation exceeds the SLA or is unavailable"
+40.001,30,4,40.001,29.999,4,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT exceeds the SLA"
+40.001,30,4,40.001,29.999,5,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT exceeds the SLA"
+40.001,30,4,40.001,29.999,6,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT exceeds the SLA"
+40.001,30,4,40.001,30,4,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT exceeds the SLA"
+40.001,30,4,40.001,30,5,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT exceeds the SLA"
+40.001,30,4,40.001,30,6,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT exceeds the SLA"
+40.001,30,4,40.001,30.001,4,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT exceeds the SLA"
+40.001,30,4,40.001,30.001,5,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT exceeds the SLA"
+40.001,30,4,40.001,30.001,6,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT exceeds the SLA"
+40.001,30,5,39.999,29.999,4,0,1,WAN2,WAN2,"RTT exceeds the SLA",Eligible
+40.001,30,5,39.999,29.999,5,0,1,WAN2,WAN2,"RTT exceeds the SLA",Eligible
+40.001,30,5,39.999,29.999,6,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","Loss exceeds the SLA"
+40.001,30,5,39.999,30,4,0,1,WAN2,WAN2,"RTT exceeds the SLA",Eligible
+40.001,30,5,39.999,30,5,0,1,WAN2,WAN2,"RTT exceeds the SLA",Eligible
+40.001,30,5,39.999,30,6,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","Loss exceeds the SLA"
+40.001,30,5,39.999,30.001,4,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT standard deviation exceeds the SLA or is unavailable"
+40.001,30,5,39.999,30.001,5,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT standard deviation exceeds the SLA or is unavailable"
+40.001,30,5,39.999,30.001,6,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT standard deviation exceeds the SLA or is unavailable"
+40.001,30,5,40,29.999,4,0,1,WAN2,WAN2,"RTT exceeds the SLA",Eligible
+40.001,30,5,40,29.999,5,0,1,WAN2,WAN2,"RTT exceeds the SLA",Eligible
+40.001,30,5,40,29.999,6,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","Loss exceeds the SLA"
+40.001,30,5,40,30,4,0,1,WAN2,WAN2,"RTT exceeds the SLA",Eligible
+40.001,30,5,40,30,5,0,1,WAN2,WAN2,"RTT exceeds the SLA",Eligible
+40.001,30,5,40,30,6,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","Loss exceeds the SLA"
+40.001,30,5,40,30.001,4,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT standard deviation exceeds the SLA or is unavailable"
+40.001,30,5,40,30.001,5,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT standard deviation exceeds the SLA or is unavailable"
+40.001,30,5,40,30.001,6,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT standard deviation exceeds the SLA or is unavailable"
+40.001,30,5,40.001,29.999,4,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT exceeds the SLA"
+40.001,30,5,40.001,29.999,5,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT exceeds the SLA"
+40.001,30,5,40.001,29.999,6,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT exceeds the SLA"
+40.001,30,5,40.001,30,4,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT exceeds the SLA"
+40.001,30,5,40.001,30,5,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT exceeds the SLA"
+40.001,30,5,40.001,30,6,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT exceeds the SLA"
+40.001,30,5,40.001,30.001,4,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT exceeds the SLA"
+40.001,30,5,40.001,30.001,5,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT exceeds the SLA"
+40.001,30,5,40.001,30.001,6,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT exceeds the SLA"
+40.001,30,6,39.999,29.999,4,0,1,WAN2,WAN2,"RTT exceeds the SLA",Eligible
+40.001,30,6,39.999,29.999,5,0,1,WAN2,WAN2,"RTT exceeds the SLA",Eligible
+40.001,30,6,39.999,29.999,6,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","Loss exceeds the SLA"
+40.001,30,6,39.999,30,4,0,1,WAN2,WAN2,"RTT exceeds the SLA",Eligible
+40.001,30,6,39.999,30,5,0,1,WAN2,WAN2,"RTT exceeds the SLA",Eligible
+40.001,30,6,39.999,30,6,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","Loss exceeds the SLA"
+40.001,30,6,39.999,30.001,4,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT standard deviation exceeds the SLA or is unavailable"
+40.001,30,6,39.999,30.001,5,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT standard deviation exceeds the SLA or is unavailable"
+40.001,30,6,39.999,30.001,6,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT standard deviation exceeds the SLA or is unavailable"
+40.001,30,6,40,29.999,4,0,1,WAN2,WAN2,"RTT exceeds the SLA",Eligible
+40.001,30,6,40,29.999,5,0,1,WAN2,WAN2,"RTT exceeds the SLA",Eligible
+40.001,30,6,40,29.999,6,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","Loss exceeds the SLA"
+40.001,30,6,40,30,4,0,1,WAN2,WAN2,"RTT exceeds the SLA",Eligible
+40.001,30,6,40,30,5,0,1,WAN2,WAN2,"RTT exceeds the SLA",Eligible
+40.001,30,6,40,30,6,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","Loss exceeds the SLA"
+40.001,30,6,40,30.001,4,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT standard deviation exceeds the SLA or is unavailable"
+40.001,30,6,40,30.001,5,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT standard deviation exceeds the SLA or is unavailable"
+40.001,30,6,40,30.001,6,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT standard deviation exceeds the SLA or is unavailable"
+40.001,30,6,40.001,29.999,4,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT exceeds the SLA"
+40.001,30,6,40.001,29.999,5,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT exceeds the SLA"
+40.001,30,6,40.001,29.999,6,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT exceeds the SLA"
+40.001,30,6,40.001,30,4,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT exceeds the SLA"
+40.001,30,6,40.001,30,5,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT exceeds the SLA"
+40.001,30,6,40.001,30,6,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT exceeds the SLA"
+40.001,30,6,40.001,30.001,4,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT exceeds the SLA"
+40.001,30,6,40.001,30.001,5,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT exceeds the SLA"
+40.001,30,6,40.001,30.001,6,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT exceeds the SLA"
+40.001,30.001,4,39.999,29.999,4,0,1,WAN2,WAN2,"RTT exceeds the SLA",Eligible
+40.001,30.001,4,39.999,29.999,5,0,1,WAN2,WAN2,"RTT exceeds the SLA",Eligible
+40.001,30.001,4,39.999,29.999,6,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","Loss exceeds the SLA"
+40.001,30.001,4,39.999,30,4,0,1,WAN2,WAN2,"RTT exceeds the SLA",Eligible
+40.001,30.001,4,39.999,30,5,0,1,WAN2,WAN2,"RTT exceeds the SLA",Eligible
+40.001,30.001,4,39.999,30,6,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","Loss exceeds the SLA"
+40.001,30.001,4,39.999,30.001,4,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT standard deviation exceeds the SLA or is unavailable"
+40.001,30.001,4,39.999,30.001,5,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT standard deviation exceeds the SLA or is unavailable"
+40.001,30.001,4,39.999,30.001,6,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT standard deviation exceeds the SLA or is unavailable"
+40.001,30.001,4,40,29.999,4,0,1,WAN2,WAN2,"RTT exceeds the SLA",Eligible
+40.001,30.001,4,40,29.999,5,0,1,WAN2,WAN2,"RTT exceeds the SLA",Eligible
+40.001,30.001,4,40,29.999,6,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","Loss exceeds the SLA"
+40.001,30.001,4,40,30,4,0,1,WAN2,WAN2,"RTT exceeds the SLA",Eligible
+40.001,30.001,4,40,30,5,0,1,WAN2,WAN2,"RTT exceeds the SLA",Eligible
+40.001,30.001,4,40,30,6,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","Loss exceeds the SLA"
+40.001,30.001,4,40,30.001,4,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT standard deviation exceeds the SLA or is unavailable"
+40.001,30.001,4,40,30.001,5,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT standard deviation exceeds the SLA or is unavailable"
+40.001,30.001,4,40,30.001,6,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT standard deviation exceeds the SLA or is unavailable"
+40.001,30.001,4,40.001,29.999,4,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT exceeds the SLA"
+40.001,30.001,4,40.001,29.999,5,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT exceeds the SLA"
+40.001,30.001,4,40.001,29.999,6,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT exceeds the SLA"
+40.001,30.001,4,40.001,30,4,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT exceeds the SLA"
+40.001,30.001,4,40.001,30,5,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT exceeds the SLA"
+40.001,30.001,4,40.001,30,6,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT exceeds the SLA"
+40.001,30.001,4,40.001,30.001,4,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT exceeds the SLA"
+40.001,30.001,4,40.001,30.001,5,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT exceeds the SLA"
+40.001,30.001,4,40.001,30.001,6,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT exceeds the SLA"
+40.001,30.001,5,39.999,29.999,4,0,1,WAN2,WAN2,"RTT exceeds the SLA",Eligible
+40.001,30.001,5,39.999,29.999,5,0,1,WAN2,WAN2,"RTT exceeds the SLA",Eligible
+40.001,30.001,5,39.999,29.999,6,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","Loss exceeds the SLA"
+40.001,30.001,5,39.999,30,4,0,1,WAN2,WAN2,"RTT exceeds the SLA",Eligible
+40.001,30.001,5,39.999,30,5,0,1,WAN2,WAN2,"RTT exceeds the SLA",Eligible
+40.001,30.001,5,39.999,30,6,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","Loss exceeds the SLA"
+40.001,30.001,5,39.999,30.001,4,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT standard deviation exceeds the SLA or is unavailable"
+40.001,30.001,5,39.999,30.001,5,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT standard deviation exceeds the SLA or is unavailable"
+40.001,30.001,5,39.999,30.001,6,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT standard deviation exceeds the SLA or is unavailable"
+40.001,30.001,5,40,29.999,4,0,1,WAN2,WAN2,"RTT exceeds the SLA",Eligible
+40.001,30.001,5,40,29.999,5,0,1,WAN2,WAN2,"RTT exceeds the SLA",Eligible
+40.001,30.001,5,40,29.999,6,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","Loss exceeds the SLA"
+40.001,30.001,5,40,30,4,0,1,WAN2,WAN2,"RTT exceeds the SLA",Eligible
+40.001,30.001,5,40,30,5,0,1,WAN2,WAN2,"RTT exceeds the SLA",Eligible
+40.001,30.001,5,40,30,6,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","Loss exceeds the SLA"
+40.001,30.001,5,40,30.001,4,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT standard deviation exceeds the SLA or is unavailable"
+40.001,30.001,5,40,30.001,5,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT standard deviation exceeds the SLA or is unavailable"
+40.001,30.001,5,40,30.001,6,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT standard deviation exceeds the SLA or is unavailable"
+40.001,30.001,5,40.001,29.999,4,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT exceeds the SLA"
+40.001,30.001,5,40.001,29.999,5,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT exceeds the SLA"
+40.001,30.001,5,40.001,29.999,6,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT exceeds the SLA"
+40.001,30.001,5,40.001,30,4,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT exceeds the SLA"
+40.001,30.001,5,40.001,30,5,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT exceeds the SLA"
+40.001,30.001,5,40.001,30,6,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT exceeds the SLA"
+40.001,30.001,5,40.001,30.001,4,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT exceeds the SLA"
+40.001,30.001,5,40.001,30.001,5,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT exceeds the SLA"
+40.001,30.001,5,40.001,30.001,6,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT exceeds the SLA"
+40.001,30.001,6,39.999,29.999,4,0,1,WAN2,WAN2,"RTT exceeds the SLA",Eligible
+40.001,30.001,6,39.999,29.999,5,0,1,WAN2,WAN2,"RTT exceeds the SLA",Eligible
+40.001,30.001,6,39.999,29.999,6,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","Loss exceeds the SLA"
+40.001,30.001,6,39.999,30,4,0,1,WAN2,WAN2,"RTT exceeds the SLA",Eligible
+40.001,30.001,6,39.999,30,5,0,1,WAN2,WAN2,"RTT exceeds the SLA",Eligible
+40.001,30.001,6,39.999,30,6,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","Loss exceeds the SLA"
+40.001,30.001,6,39.999,30.001,4,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT standard deviation exceeds the SLA or is unavailable"
+40.001,30.001,6,39.999,30.001,5,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT standard deviation exceeds the SLA or is unavailable"
+40.001,30.001,6,39.999,30.001,6,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT standard deviation exceeds the SLA or is unavailable"
+40.001,30.001,6,40,29.999,4,0,1,WAN2,WAN2,"RTT exceeds the SLA",Eligible
+40.001,30.001,6,40,29.999,5,0,1,WAN2,WAN2,"RTT exceeds the SLA",Eligible
+40.001,30.001,6,40,29.999,6,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","Loss exceeds the SLA"
+40.001,30.001,6,40,30,4,0,1,WAN2,WAN2,"RTT exceeds the SLA",Eligible
+40.001,30.001,6,40,30,5,0,1,WAN2,WAN2,"RTT exceeds the SLA",Eligible
+40.001,30.001,6,40,30,6,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","Loss exceeds the SLA"
+40.001,30.001,6,40,30.001,4,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT standard deviation exceeds the SLA or is unavailable"
+40.001,30.001,6,40,30.001,5,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT standard deviation exceeds the SLA or is unavailable"
+40.001,30.001,6,40,30.001,6,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT standard deviation exceeds the SLA or is unavailable"
+40.001,30.001,6,40.001,29.999,4,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT exceeds the SLA"
+40.001,30.001,6,40.001,29.999,5,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT exceeds the SLA"
+40.001,30.001,6,40.001,29.999,6,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT exceeds the SLA"
+40.001,30.001,6,40.001,30,4,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT exceeds the SLA"
+40.001,30.001,6,40.001,30,5,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT exceeds the SLA"
+40.001,30.001,6,40.001,30,6,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT exceeds the SLA"
+40.001,30.001,6,40.001,30.001,4,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT exceeds the SLA"
+40.001,30.001,6,40.001,30.001,5,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT exceeds the SLA"
+40.001,30.001,6,40.001,30.001,6,0,0,no_candidate,no_candidate,"RTT exceeds the SLA","RTT exceeds the SLA"
