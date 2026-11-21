@@ -63,6 +63,7 @@ wan_a=${base}a
 remote_a=${base}b
 pair "$firewall" 203.0.113.1/30 "$remote" 203.0.113.2/30
 wan_b=${base}a
+remote_b=${base}b
 pair "$firewall" 192.0.2.129/30 "$remote" 192.0.2.130/30
 wan_c=${base}a
 remote_c=${base}b
@@ -434,7 +435,6 @@ EOF
         jexec "$node" sysctl net.inet6.ip6.dad_count=0
     done
     lan_client=${lan%?}a
-    remote_b=${wan_b%?}b
     add6() {
         jexec "$1" ifconfig "$2" inet6 -ifdisabled
         jexec "$1" ifconfig "$2" inet6 "$3" alias
