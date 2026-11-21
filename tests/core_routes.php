@@ -29,11 +29,13 @@ foreach ([
 echo "ok - concrete next hops, IP family, gateway action, interface and IPv6 scope validated\n";
 $a = filter_sdwan_gateway_route($gateway, '192.0.2.1');
 $b = filter_sdwan_gateway_route(array_replace($gateway, ['interface' => 'igb1', 'weight' => 2]), '192.0.2.2');
-$pool = filter_sdwan_pool_route([$a, $b]);
-if ($pool !== ' route-to { ' . str_repeat('(igb0.431 192.0.2.1) ', 2) .
-    str_repeat('(igb1 192.0.2.2) ', 4) . '} round-robin ' ||
+$pool = ' route-to { ' . str_repeat('(igb0.431 192.0.2.1) ', 2) .
+    str_repeat('(igb1 192.0.2.2) ', 4) . '} round-robin ';
+if (filter_sdwan_pool_route([$a, $b]) !== $pool ||
+    filter_sdwan_pool_route([$a, $b], true) !== $pool . 'sticky-address ' ||
     filter_sdwan_pool_route([$b]) !== ' route-to (igb1 192.0.2.2) ' ||
+    filter_sdwan_pool_route([$b], true) !== ' route-to (igb1 192.0.2.2) ' ||
     filter_sdwan_pool_route([]) !== null) {
-	throw new RuntimeException('Unexpected weighted, single-gateway or empty route pool');
+	throw new RuntimeException('Unexpected weighted, sticky, single-gateway or empty route pool');
 }
-echo "ok - weighted pool preserves the configured ratio, emits a single hop during degradation and denies an empty pool\n";
+echo "ok - weighted pool preserves the configured ratio and sticky option; one hop or no hop is unchanged\n";

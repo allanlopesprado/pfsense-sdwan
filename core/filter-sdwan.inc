@@ -36,7 +36,7 @@ function filter_sdwan_gateway_route(array $gateway, mixed $address): ?array {
 	    'hop' => "({$interface} {$next})", 'weight' => max(1, min(30, (int)($gateway['weight'] ?? 1)))];
 }
 
-function filter_sdwan_pool_route(array $paths): ?string {
+function filter_sdwan_pool_route(array $paths, bool $sticky = false): ?string {
 	if (count($paths) === 1) {
 		return reset($paths)['route'];
 	}
@@ -52,7 +52,7 @@ function filter_sdwan_pool_route(array $paths): ?string {
 	foreach ($paths as $path) {
 		$hops[] = str_repeat($path['hop'] . ' ', $path['weight'] * $multiplier);
 	}
-	return ' route-to { ' . implode('', $hops) . '} round-robin ';
+	return ' route-to { ' . implode('', $hops) . '} round-robin ' . ($sticky ? 'sticky-address ' : '');
 }
 
 /* An index belongs to a single native generation. Conflicting tracker entries
@@ -152,7 +152,7 @@ function filter_sdwan_rule_route(array $rule, array $routes): array|false|null {
 			$tier = $tiers[$gateway];
 			$paths[$gateway] = $routes[$gateway];
 		}
-		$route = filter_sdwan_pool_route($paths);
+		$route = filter_sdwan_pool_route($paths, config_path_enabled('system', 'lb_use_sticky'));
 		return $route === null ? false : ['route' => $route, 'tier' => $tier];
 	} catch (Throwable $e) {
 		error_log('SD-WAN: bound rule ' . $tracker . ' blocked during filter generation: ' . $e->getMessage());

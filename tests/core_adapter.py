@@ -237,14 +237,19 @@ def run(php, core, output, replay, family, links, vti=False):
                 assert state["pool"] == expected, state
                 if len(expected) > 1:
                     assert line.count(next_hop("GW_A")) == 2 and line.count(next_hop("GW_B")) == 4, line
-                    assert "round-robin" in line, line
+                    assert "round-robin" in line and "sticky-address" not in line, line
                 elif expected:
                     assert "round-robin" not in line and f"route-to ({next_hop(expected[0])})" in line, line
                 else:
                     assert line.startswith("block") and "route-to" not in line, line
                 rules[label] = line
+            config.setdefault("system", {})["lb_use_sticky"] = ""
+            sticky_pool = observe([0, 0], "weighted-sticky-pool")
+            assert "round-robin sticky-address" in sticky_pool, sticky_pool
+            sticky_backup = observe([100, 0], "weighted-sticky-backup")
+            assert "sticky-address" not in sticky_backup and f'route-to ({next_hop("GW_B")})' in sticky_backup, sticky_backup
             config = legacy
-            print("ok - weighted members, one eligible next hop, and an empty SLA set reached the native filter compiler")
+            print("ok - weighted members, sticky option, one eligible next hop, and an empty SLA set reached the native filter compiler")
 
         def denied(reason):
             line = " ".join(compile_rule().split())
