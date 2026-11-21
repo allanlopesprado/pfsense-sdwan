@@ -121,7 +121,7 @@ jobs:
           usesh: true
           prepare: |
             env ASSUME_ALWAYS_YES=yes pkg bootstrap
-            pkg install -y php84 php84-filter php84-mbstring python3 dpinger git
+            pkg install -y php84 php84-filter php84-mbstring php84-ctype python3 dpinger git
             php -n -v
           run: |
             set -eu

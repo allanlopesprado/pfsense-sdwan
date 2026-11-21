@@ -19,6 +19,12 @@ A CE 2.9.2 appliance running SD-WAN 0.4.28 used two active interfaces. Each inte
 
 The saved configuration and the loaded NAT rules matched their pre-test copies. The timings describe administrative interface loss and the polling interval on this appliance. Modem power loss, upstream service loss, and interruption of both links belong in an isolated trial with a dedicated client and console. [Netgate Multi-WAN verification](https://docs.netgate.com/pfsense/en/latest/multiwan/test.html)
 
+## Supervised observer recovery
+
+On the same CE 2.9.2 appliance, an abrupt stop of the worker left its supervisor in place. The replacement worker retired the previous decision. The active PF rule was observed blocking new connections before forwarding was confirmed again, nine seconds after the worker stopped. The saved configuration and NAT matched the pre-test copies.
+
+In the FreeBSD VNET lab, a deliberate worker failure exercised the supervisor and actual PF. The old TCP session and the control flow continued over WAN1 while the scoped guard blocked a new connection. After recovery, a new session completed over WAN2. [FreeBSD recovery job](https://github.com/allanlopesprado/pfsense-sdwan/actions/runs/44920325087/job/136895159788)
+
 ## Early laboratory acceptance
 
 Package 0.3.0 includes the WebGUI, widget, measurement daemon, and selection module. The filter adapter ships separately for a lab image. The `pfSense-pkg-SDWAN-0.3.0.pkg` archive is 25,004 bytes with SHA-256 `6552b2fcbc97de2be53a5c926c7f1539d06514902a42b1eb87f9b0a2aa595476`. [Pinned binary](https://github.com/allanlopesprado/pfsense-sdwan/blob/fe20885be522fb680e2c607bb4c298fbfdb76490/dist/pfSense-pkg-SDWAN-0.3.0.pkg)

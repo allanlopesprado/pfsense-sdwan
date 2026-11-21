@@ -65,6 +65,7 @@ def verify_erp(work, core, rules_dir, client, lan, firewall, peer, remote_a, rem
 
     def render(operation):
         return php("/usr/local/bin/php", "-d", "extension=filter", "-d", "extension=mbstring",
+                   "-d", "extension=ctype",
                    str(Path(__file__).resolve().parents[1] / "fixtures/native_filter.php"),
                    str(work), str(core), operation)
 
