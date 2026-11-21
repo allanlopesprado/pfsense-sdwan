@@ -24,32 +24,6 @@ function sdwan_preflight_monitor_key(array $gateway): ?string {
 	return inet_ntop($packed) . ($scope === null ? '' : '%' . $scope);
 }
 
-/* Resolve the Phase 1 transport from configuration, including a VIP or an IP
- * alias on CARP. An unresolved group, duplicate VIP or dependency cycle cannot
- * certify a single transport. */
-function sdwan_preflight_vti_transports(array $native): array {
-	$parents = [];
-	foreach ($native['vips'] as $vip) {
-		if (isset($vip['uniqid'], $vip['interface']) &&
-		    in_array($vip['mode'] ?? '', ['carp', 'ipalias'], true)) {
-			$key = '_vip' . $vip['uniqid'];
-			$parents[$key] = array_key_exists($key, $parents) ? '' : $vip['interface'];
-		}
-	}
-	$phases = $native['phase1'];
-	foreach ($phases as &$phase) {
-		$interface = $phase['interface'] ?? 'wan';
-		$visited = [];
-		while (is_string($interface) && isset($parents[$interface]) && !isset($visited[$interface])) {
-			$visited[$interface] = true;
-			$interface = $parents[$interface];
-		}
-		$phase['interface'] = is_string($interface) ? $interface : '';
-	}
-	unset($phase);
-	return sdwan_vti_transports($native['interfaces'], $phases, $native['phase2']);
-}
-
 /* An ipsecX VTI uses a Phase 2 reqid for X. For merged IKEv2 children,
  * pfSense uses the first child's reqid. Pin the identifiers and traffic paths,
  * allowing a normal rekey or a cosmetic configuration edit. */
@@ -356,7 +330,7 @@ function sdwan_steering_preflight(array $config, string $policy, string $group, 
 	$family = null;
 	$kind = null;
 	$transports = [];
-	$vti = sdwan_preflight_vti_transports($native);
+	$vti = sdwan_vti_transports($native['interfaces'], $native['phase1'], $native['phase2'], $native['vips']);
 	$uplinks = [];
 	$monitor_usage = [];
 	foreach ($native['gateways'] as $gateway) {

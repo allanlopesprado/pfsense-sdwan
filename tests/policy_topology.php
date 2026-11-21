@@ -58,6 +58,26 @@ function outcome(array $settings, array $observations, array $gateways): array {
 $result = outcome($config, $measurements, $inventory);
 verify(sdwan_validate_config($config, $inventory) === [] && $result['path_status'] === 'alternatives' &&
     $result['eligible_count'] === 2 && $result['shared_underlay'] && !$result['shared_interface'], 'two working tunnels over one WAN remain valid alternatives with a shared transport');
+$current['interfaces']['opt4'] = ['if' => 'igb1', 'enable' => ''];
+$current['virtualip/vip'] = [
+	['uniqid' => '101', 'mode' => 'carp', 'interface' => 'wan'],
+	['uniqid' => '102', 'mode' => 'ipalias', 'interface' => '_vip101'],
+	['uniqid' => '103', 'mode' => 'carp', 'interface' => 'opt4'],
+];
+$current['ipsec/phase1'][0]['interface'] = '_vip101';
+$current['ipsec/phase1'][1]['interface'] = '_vip102';
+$before_vips = $current;
+$vip_inventory = sdwan_gateways();
+verify($vip_inventory['A']['transport'] === 'wan' && $vip_inventory['B']['transport'] === 'wan' &&
+    outcome($config, $measurements, $vip_inventory)['shared_underlay'] && $current === $before_vips,
+    'CARP and stacked IP alias on the same WAN share a VTI transport without writing configuration');
+$current['ipsec/phase1'][1]['interface'] = '_vip103';
+$vip_inventory = sdwan_gateways();
+verify($vip_inventory['B']['transport'] === 'opt4' && !outcome($config, $measurements, $vip_inventory)['shared_underlay'],
+    'VTIs on CARP VIPs with distinct parent WANs remain independent');
+$current['virtualip/vip'][0]['interface'] = '_vip102';
+verify(sdwan_gateways()['A']['transport'] === '', 'a loop in VIP parent references leaves the VTI transport unresolved');
+$current = $before;
 $on_same = $inventory;
 $on_same['B']['interface'] = 'opt1';
 verify(sdwan_validate_config($config, $on_same) === [] && outcome($config, $measurements, $on_same)['shared_interface'], 'distinct gateways on one logical interface are allowed and signaled');

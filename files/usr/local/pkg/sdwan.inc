@@ -92,13 +92,26 @@ function sdwan_can_edit_forwarding(): bool {
 	    isAllowedPage('/system_gateway_groups_edit.php');
 }
 
-/* Only report a VTI transport when its Phase 1 names an assigned interface.
- * A gateway group, VIP or unrecognized tunnel has no known single transport. */
-function sdwan_vti_transports(array $interfaces, array $phases1, array $phases2): array {
+/* A direct Phase 1 interface or a VIP chain can identify the assigned transport.
+ * A gateway group or unresolved VIP has no known single transport. */
+function sdwan_vti_transports(array $interfaces, array $phases1, array $phases2, array $vips = []): array {
+	$vip_parents = [];
+	foreach ($vips as $vip) {
+		if (isset($vip['uniqid'], $vip['interface']) &&
+		    in_array($vip['mode'] ?? '', ['carp', 'ipalias'], true)) {
+			$key = '_vip' . $vip['uniqid'];
+			$vip_parents[$key] = array_key_exists($key, $vip_parents) ? '' : $vip['interface'];
+		}
+	}
 	$parents = [];
 	foreach ($phases1 as $phase) {
 		$interface = $phase['interface'] ?? 'wan';
-		if (isset($phase['ikeid'], $interfaces[$interface]['enable']) &&
+		$visited = [];
+		while (is_string($interface) && isset($vip_parents[$interface]) && !isset($visited[$interface])) {
+			$visited[$interface] = true;
+			$interface = $vip_parents[$interface];
+		}
+		if (is_string($interface) && isset($phase['ikeid'], $interfaces[$interface]['enable']) &&
 		    !isset($phase['disabled']) && !isset($phase['mobile'])) {
 			$parents[$phase['ikeid']] = [
 				'interface' => $interface,
@@ -130,7 +143,7 @@ function sdwan_gateways(): array {
 	require_once('config.inc');
 	$interfaces = config_get_path('interfaces', []);
 	$transports = sdwan_vti_transports($interfaces, config_get_path('ipsec/phase1', []),
-	    config_get_path('ipsec/phase2', []));
+	    config_get_path('ipsec/phase2', []), config_get_path('virtualip/vip', []));
 	$inventory = [];
 	foreach (config_get_path('gateways/gateway_item', []) as $gateway) {
 		$name = $gateway['name'] ?? '';
