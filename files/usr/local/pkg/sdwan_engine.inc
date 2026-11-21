@@ -125,7 +125,7 @@ function sdwan_member_sample(array $gateway): array {
 	return ['status' => $status, 'rtt_ms' => $rtt, 'rttsd_ms' => $variation, 'loss_pct' => $loss];
 }
 
-function sdwan_candidate_reason(?array $member, ?array $sample, ?array $sla): string {
+function sdwan_candidate_reason(?array $member, ?array $sample, ?array $sla, string $service_check_mode = 'any'): string {
 	if ($member === null || $sample === null) {
 		return 'Member is not configured';
 	}
@@ -148,10 +148,26 @@ function sdwan_candidate_reason(?array $member, ?array $sample, ?array $sla): st
 	if ($sample['loss_pct'] > (float)$sla['loss_pct']) {
 		return 'Loss exceeds the SLA';
 	}
-	if (($sample['checks'] ?? []) && !in_array('Passed', $sample['checks'], true)) {
-		return 'No configured service check passed';
+	$checks = $sample['checks'] ?? [];
+	if ($service_check_mode === 'none') {
+		return 'Eligible';
 	}
-	return 'Eligible';
+	if ($service_check_mode === 'any') {
+		return $checks && !in_array('Passed', $checks, true) ?
+		    'No configured service check passed' : 'Eligible';
+	}
+	if (!in_array($service_check_mode, ['primary', 'secondary'], true)) {
+		return 'Invalid service check mode';
+	}
+	$slot = 'probe_' . $service_check_mode;
+	if (!isset($member[$slot])) {
+		return "Required {$service_check_mode} service check is not configured";
+	}
+	return match ($checks[$slot] ?? 'Unavailable') {
+		'Passed' => 'Eligible',
+		'Unavailable', 'No matching host route or source' => "Required {$service_check_mode} service check is unavailable",
+		default => "Required {$service_check_mode} service check failed",
+	};
 }
 
 function sdwan_path_status(int $configured, int $eligible): string {
@@ -180,6 +196,7 @@ function sdwan_evaluate(array $config, array $gateways, int $now, array $invento
 	$policies = [];
 	foreach ($config['policies'] ?? [] as $policy) {
 		$sla = $slas[$policy['sla']] ?? null;
+		$service_check_mode = $policy['service_check_mode'] ?? 'any';
 		$selected = null;
 		$best = INF;
 		$candidates = [];
@@ -205,7 +222,7 @@ function sdwan_evaluate(array $config, array $gateways, int $now, array $invento
 			$member = $members[$name] ?? null;
 			$sample = $samples[$name] ?? null;
 			$reason = $mixed ? 'Members now use different IP address families' :
-			    sdwan_candidate_reason($member, $sample, $sla);
+			    sdwan_candidate_reason($member, $sample, $sla, $service_check_mode);
 			$candidates[$name] = $reason;
 			if ($reason !== 'Eligible') {
 				continue;

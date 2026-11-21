@@ -191,7 +191,8 @@ def run(php, classes, screenshot_dir=None):
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
         shutil.copytree(SOURCE / "www/sdwan", root / "sdwan")
-        for module in ("sdwan.inc", "sdwan_engine.inc", "sdwan_preflight.inc", "sdwan_steering.inc", "sdwan_release.inc", "sdwan_log.inc"):
+        for module in ("sdwan.inc", "sdwan_engine.inc", "sdwan_preflight.inc", "sdwan_steering.inc",
+                       "sdwan_release.inc", "sdwan_log.inc", "sdwan_probe.inc"):
             shutil.copyfile(SOURCE / "pkg" / module, root / module)
         for ui in (root / "sdwan/ui.inc.php", root / "sdwan/forwarding.php", root / "sdwan/updates.php"):
             ui.write_text(ui.read_text().replace("'/usr/local/pkg/", "__DIR__ . '/../"))
@@ -252,6 +253,9 @@ def run(php, classes, screenshot_dir=None):
         assert len(rendered.tokens) == rendered.posts == 1 and 'value="delete"' not in html, html
         assert fields["members[]"] == [(":backup", True), (":01", True), (":1", False)], fields
         assert [v for v, enabled in fields["sla"] if enabled] == [":01"]
+        assert fields["service_check_mode"] == [
+            ("any", True), ("none", False), ("primary", False), ("secondary", False),
+        ]
         posted = {"name": "VOICE", "original": "VOICE", "action": "save", "sla": ":01", "strategy": "cost",
                   "members": [v for v, enabled in fields["members[]"] if enabled]}
         result = request("policies", post=posted)
@@ -266,6 +270,20 @@ def run(php, classes, screenshot_dir=None):
         stale = request("policies", post={**posted, "revision": "previous-revision"})
         assert "Configuration changed" in stale and json.loads(stale.split("SAVED=")[1]) == [0, config]
         print("ok - native policy form round-trip preserves restored tie order and distinct numeric names")
+
+        explicit = request("policies", post={**posted, "service_check_mode": "none"})
+        writes, configured = json.loads(explicit.split("SAVED=")[1])
+        assert writes == 1 and configured["policies"] == [{**config["policies"][0], "service_check_mode": "none"}]
+        restored_mode = Choices(request("policies", config=configured, get={"edit": "VOICE"})).fields["service_check_mode"]
+        assert [value for value, selected in restored_mode if selected] == ["none"]
+        for supplied in ({"service_check_mode": "invalid"}, {"service_check_mode": ["any"]}):
+            invalid = request("policies", config=configured, post={**posted, **supplied})
+            assert "Select a valid service check mode." in invalid
+            assert json.loads(invalid.split("SAVED=")[1]) == [0, configured]
+        omitted = request("policies", config=configured, post=posted)
+        assert json.loads(omitted.split("SAVED=")[1]) == [0, configured]
+        default_mode = request("policies", config=configured, post={**posted, "service_check_mode": "any"})
+        assert json.loads(default_mode.split("SAVED=")[1]) == [1, config]
 
         form = Choices(request("members", get={"add": "1"}))
         assert form.fields["gateway"] == [("", True), (":FREE", False)], form.fields
@@ -303,6 +321,27 @@ def run(php, classes, screenshot_dir=None):
         fresh_snapshot_wrong_gateway = request("status", snapshot=retargeted)
         assert "Waiting for current gateway measurements" in fresh_snapshot_wrong_gateway and "2 of 2" not in fresh_snapshot_wrong_gateway
         assert 'aria-label="Member evaluation"' not in request("diagnostics", snapshot=retargeted)
+        targets = [
+            {**member, "probe_primary": f"tcp://192.0.2.{offset}:443",
+             "probe_secondary": f"tcp://198.51.100.{offset}:443"}
+            for offset, member in enumerate(config["members"], 1)
+        ]
+        checked = {**config, "members": targets,
+                   "policies": [{**config["policies"][0], "service_check_mode": "primary"}]}
+        readings = {name: {**value, "checks": {
+            "probe_primary": "TCP check failed" if name == "backup" else "Passed",
+            "probe_secondary": "Passed",
+        }} for name, value in snapshot["members"].items()}
+        required = {**policy, "selected": "01", "eligible_count": 1, "path_status": "degraded",
+                    "candidates": {"backup": "Required primary service check failed", "01": "Eligible"}}
+        diagnostic = request("diagnostics", config=checked, snapshot={
+            "members": readings, "policies": {"VOICE": required},
+        })
+        assert "Require primary check" in diagnostic and "Primary · TCP check failed" in diagnostic
+        assert "Required primary service check failed" in diagnostic and "Secondary · Passed" in diagnostic
+        gateway_only = {**checked, "policies": configured["policies"]}
+        diagnostic = request("diagnostics", config=gateway_only, snapshot={**snapshot, "members": readings})
+        assert "Gateway SLA only" in diagnostic and "Primary · TCP check failed" not in diagnostic
         print("ok - native CSRF verifies posts; Status and Diagnostics suppress outdated observations")
         assert "Multiple eligible paths" in fresh and 'class="bg-success"' in fresh
         assert 'id="restartservice-sdwan"' in fresh and 'id="stopservice-sdwan"' in fresh and 'id="startservice-sdwan"' not in fresh

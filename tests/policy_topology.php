@@ -58,6 +58,50 @@ function outcome(array $settings, array $observations, array $gateways): array {
 $result = outcome($config, $measurements, $inventory);
 verify(sdwan_validate_config($config, $inventory) === [] && $result['path_status'] === 'alternatives' &&
     $result['eligible_count'] === 2 && $result['shared_underlay'] && !$result['shared_interface'], 'two working tunnels over one WAN remain valid alternatives with a shared transport');
+
+$service_modes = $config;
+$service_modes['members'][0] += [
+	'probe_primary' => 'tcp://[2001:db8:10::10]:443',
+	'probe_secondary' => 'dns://control.test 2001:db8:10::11',
+];
+$service_modes['members'][1] += [
+	'probe_primary' => 'tcp://[2001:db8:20::10]:443',
+	'probe_secondary' => 'dns://control.test 2001:db8:20::11',
+];
+foreach (['none', 'primary', 'secondary'] as $mode) {
+	$service_modes['policies'][] = array_replace($config['policies'][0],
+	    ['name' => $mode, 'service_check_mode' => $mode]);
+}
+verify(sdwan_validate_config($service_modes, $inventory) === [] &&
+    sdwan_decode_config(sdwan_encode_config($service_modes)) === $service_modes,
+    'service requirements round-trip with unchanged legacy rows');
+$checks = [
+	'one' => ['probe_primary' => 'Timed out', 'probe_secondary' => 'Passed'],
+	'two' => ['probe_primary' => 'Passed', 'probe_secondary' => 'Passed'],
+];
+$decisions = sdwan_evaluate($service_modes, $measurements, 1, $inventory, $checks)['policies'];
+verify($decisions['p']['selected'] === 'one' && $decisions['primary']['selected'] === 'two' &&
+    $decisions['secondary']['selected'] === 'one',
+    'a passing DNS check preserves the legacy policy without masking a required application failure');
+$checks['one']['probe_secondary'] = 'DNS check failed';
+$decisions = sdwan_evaluate($service_modes, $measurements, 1, $inventory, $checks)['policies'];
+verify($decisions['p']['selected'] === 'two' && $decisions['none']['selected'] === 'one',
+    'a link-only policy uses the preferred WAN when the probes used by another policy fail');
+$decisions = sdwan_evaluate($service_modes, [], 1, $inventory, $checks)['policies'];
+verify($decisions['none']['selected'] === null, 'a link-only policy still requires gateway measurements');
+$checks['two']['probe_primary'] = 'No matching host route or source';
+$decisions = sdwan_evaluate($service_modes, $measurements, 1, $inventory, $checks)['policies'];
+verify($decisions['primary']['selected'] === null && $decisions['none']['selected'] === 'one' &&
+    $decisions['primary']['candidates']['one'] !== $decisions['primary']['candidates']['two'],
+    'required probe target failure and unverifiable path are distinct and both prevent selection');
+$invalid = $service_modes;
+unset($invalid['members'][1]['probe_secondary']);
+verify(sdwan_validate_config($invalid, $inventory, $service_modes) !== [],
+    'a probe required by a policy cannot be removed from a referenced member');
+$invalid = $service_modes;
+$invalid['policies'][0]['service_check_mode'] = 'invalid';
+verify(sdwan_validate_config($invalid, $inventory) !== [], 'unknown service check mode is rejected');
+
 $current['interfaces']['opt4'] = ['if' => 'igb1', 'enable' => ''];
 $current['virtualip/vip'] = [
 	['uniqid' => '101', 'mode' => 'carp', 'interface' => 'wan'],

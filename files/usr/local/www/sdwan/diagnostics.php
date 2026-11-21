@@ -33,7 +33,20 @@ if ($policy !== null):
 	$use_pool = $policy['strategy'] === 'balance';
 	$selected = $use_pool ? null : ($result['selected'] ?? null);
 	$use_cost = $policy['strategy'] === 'cost';
-	$show_checks = (bool)array_column(array_intersect_key($members, array_fill_keys($policy['members'], true)), 'probe_primary');
+	$service_check_mode = $policy['service_check_mode'] ?? 'any';
+	$required_check = match ($service_check_mode) {
+		'primary' => 'probe_primary',
+		'secondary' => 'probe_secondary',
+		default => null,
+	};
+	$show_checks = $service_check_mode !== 'none' && ($required_check !== null ||
+	    (bool)array_column(array_intersect_key($members, array_fill_keys($policy['members'], true)), 'probe_primary'));
+	$service_check_label = match ($service_check_mode) {
+		'none' => gettext('Gateway SLA only'),
+		'primary' => gettext('Require primary check'),
+		'secondary' => gettext('Require secondary check'),
+		default => gettext('Any configured check'),
+	};
 	$metrics = [
 		'rtt_ms' => [' ms', (float)$sla['latency_ms']],
 		'rttsd_ms' => [' ms', isset($sla['rttsd_ms']) ? (float)$sla['rttsd_ms'] : null],
@@ -59,7 +72,8 @@ if ($policy !== null):
 			<div class="col-sm-5">
 				<p><strong><?=gettext('Performance SLA')?></strong><br>
 				<?=sdwan_ui_escape($sla['name'])?><br>
-				<small><?=sdwan_ui_escape(sprintf(gettext('Maximum RTT: %1$s ms · Maximum loss: %2$s%%'), $sla['latency_ms'], $sla['loss_pct']))?><?php if (isset($sla['rttsd_ms'])): ?><br><?=sdwan_ui_escape(sprintf(gettext('Maximum RTTsd: %s ms'), $sla['rttsd_ms']))?><?php endif; ?></small></p>
+				<small><?=sdwan_ui_escape(sprintf(gettext('Maximum RTT: %1$s ms · Maximum loss: %2$s%%'), $sla['latency_ms'], $sla['loss_pct']))?><?php if (isset($sla['rttsd_ms'])): ?><br><?=sdwan_ui_escape(sprintf(gettext('Maximum RTTsd: %s ms'), $sla['rttsd_ms']))?><?php endif; ?>
+				<?php if ($service_check_mode !== 'any' || $show_checks): ?><br><?=sdwan_ui_escape($service_check_label)?><?php endif; ?></small></p>
 			</div>
 			<?php if ($result !== null): ?>
 			<div class="col-sm-2">
@@ -130,8 +144,9 @@ if ($policy !== null):
 					<?php endforeach; ?>
 					<?php if ($show_checks): ?>
 					<td><?php foreach (['probe_primary' => gettext('Primary'), 'probe_secondary' => gettext('Secondary')] as $field => $label): ?>
-						<?php if (isset($members[$member][$field])): ?>
-						<div><?=sdwan_ui_escape($label)?> · <?=sdwan_ui_escape(gettext($reading['checks'][$field] ?? 'Unavailable'))?></div>
+						<?php if (isset($members[$member][$field]) || $field === $required_check): ?>
+						<?php $check = isset($members[$member][$field]) ? ($reading['checks'][$field] ?? 'Unavailable') : 'Not configured'; ?>
+						<div><?=sdwan_ui_escape($label)?> · <?=sdwan_ui_escape(gettext($check))?></div>
 						<?php endif; ?>
 					<?php endforeach; ?></td>
 					<?php endif; ?>

@@ -13,10 +13,17 @@ $columns = [
 	'members' => ['name' => gettext('Name'), 'gateway' => gettext('Gateway'), 'cost' => gettext('Cost'),
 	    'probe_primary' => gettext('Primary service check'), 'probe_secondary' => gettext('Secondary service check')],
 	'slas' => ['name' => gettext('Name'), 'latency_ms' => gettext('Maximum RTT (ms)'), 'rttsd_ms' => gettext('Maximum RTTsd (ms)'), 'loss_pct' => gettext('Maximum loss (%)')],
-	'policies' => ['name' => gettext('Name'), 'sla' => gettext('Performance SLA'), 'members' => gettext('Members'), 'strategy' => gettext('Selection strategy')],
+	'policies' => ['name' => gettext('Name'), 'sla' => gettext('Performance SLA'), 'members' => gettext('Members'),
+	    'strategy' => gettext('Selection strategy'), 'service_check_mode' => gettext('Service checks')],
 ];
 $strategies = ['cost' => gettext('Lowest cost'), 'latency' => gettext('Lowest RTT'),
     'balance' => gettext('Weighted balancing within SLA')];
+$service_check_modes = [
+	'any' => gettext('Any configured check'),
+	'none' => gettext('Gateway SLA only'),
+	'primary' => gettext('Require primary check'),
+	'secondary' => gettext('Require secondary check'),
+];
 $url = '/sdwan/' . $collection . '.php';
 $revision = sdwan_config_revision($sdwan);
 $rows = $sdwan[$collection];
@@ -60,16 +67,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 					$selected = [];
 				}
 				$sdwan_record[$key] = array_map('sdwan_ui_choice_value', array_values($selected));
+			} elseif ($key === 'service_check_mode') {
+				$sdwan_record[$key] = array_key_exists($key, $_POST) ? sdwan_ui_scalar($_POST, $key) :
+				    ($position === false ? 'any' : ($rows[$position][$key] ?? 'any'));
+				if (!isset($service_check_modes[$sdwan_record[$key]])) {
+					$errors[] = gettext('Select a valid service check mode.');
+				}
 			} elseif (in_array($key, ['sla', 'gateway'], true)) {
 				$sdwan_record[$key] = sdwan_ui_choice_value(sdwan_ui_scalar($_POST, $key));
 			} else {
 				$sdwan_record[$key] = sdwan_ui_scalar($_POST, $key);
 			}
 		}
-		$optional = ['members' => ['probe_primary', 'probe_secondary'], 'slas' => ['rttsd_ms']];
+		$optional = ['members' => ['probe_primary', 'probe_secondary'], 'slas' => ['rttsd_ms'],
+		    'policies' => ['service_check_mode']];
 		$cleared = [];
 		foreach ($optional[$collection] ?? [] as $field) {
-			if ($sdwan_record[$field] === '') {
+			if ($sdwan_record[$field] === '' || ($field === 'service_check_mode' && $sdwan_record[$field] === 'any')) {
 				unset($sdwan_record[$field]);
 				$cleared[$field] = true;
 			}
@@ -157,6 +171,8 @@ if (!$display_form): ?>
 					$value = implode(', ', $value);
 				} elseif ($key === 'strategy') {
 					$value = $strategies[$value] ?? $value;
+				} elseif ($key === 'service_check_mode') {
+					$value = $service_check_modes[$row[$key] ?? 'any'] ?? $value;
 				}
 			?>
 			<td><?=sdwan_ui_escape($value)?></td>
@@ -220,7 +236,7 @@ elseif (!$display_form): ?>
 		    ->setHelp(gettext('Optional. Enter a TCP service address such as tcp://192.0.2.20:587, or an HTTPS URL or DNS name followed by a space and the target IP. Add a host route through this gateway under System > Routing. HTTPS requires a valid certificate.'));
 		$section->addInput(new Form_Input('probe_secondary', gettext('Secondary service check'), 'text',
 		    $sdwan_record['probe_secondary'] ?? '', ['maxlength' => 512]))
-		    ->setHelp(gettext('Use a different target IP and its own host route. A member with service checks needs at least one passing check.'));
+		    ->setHelp(gettext('Use a different target IP and its own host route. Under Policies, choose which checks the policy requires.'));
 	} elseif ($collection === 'slas') {
 		$section->addInput(new Form_Input('latency_ms', gettext('Maximum RTT (ms)'), 'number', $sdwan_record['latency_ms'] ?? '',
 			['min' => '0.000001', 'max' => '600000', 'step' => 'any', 'required' => true]));
@@ -247,6 +263,9 @@ elseif (!$display_form): ?>
 			->setAttribute('required', 'required')
 			->setHelp(gettext('Select one member to monitor a path, or two or more of the same address family to compare paths. For equal scores the first selected member in the displayed list wins.'));
 		$section->addInput(new Form_Select('strategy', gettext('Selection strategy'), $sdwan_record['strategy'] ?? 'cost', $strategies));
+		$section->addInput(new Form_Select('service_check_mode', gettext('Service checks'),
+		    $sdwan_record['service_check_mode'] ?? 'any', $service_check_modes))
+		    ->setHelp(gettext('Any configured check accepts a member when at least one of its checks passes, or uses its gateway SLA if no check is configured. A required check must pass for the member to be eligible.'));
 	}
 	$form->add($section);
 	foreach (['revision' => $revision, 'action' => 'save', 'original' => $original] as $field => $value) {

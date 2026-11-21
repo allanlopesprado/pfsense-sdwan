@@ -30,6 +30,34 @@ def stop(process):
             process.wait(timeout=3)
 
 
+def start_dns_server(peer, address, status_path, ready_path, cleanup):
+    server = subprocess.Popen(["jexec", peer, sys.executable, "-c", """
+import pathlib
+import socket
+import struct
+import sys
+
+with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as server:
+    server.bind((sys.argv[1], 53))
+    pathlib.Path(sys.argv[3]).touch()
+    while True:
+        query, source = server.recvfrom(512)
+        if len(query) <= 12:
+            continue
+        available = pathlib.Path(sys.argv[2]).read_text() == "available"
+        flags = 0x8180 if available else 0x8183
+        header = query[:2] + struct.pack("!HHHHH", flags, 1, int(available), 0, 0)
+        data = struct.pack("!HHHIHBBBB", 0xc00c, 1, 1, 30, 4, 192, 0, 2, 42) if available else b""
+        server.sendto(header + query[12:] + data, source)
+""", address, str(status_path), str(ready_path)])
+    cleanup.callback(stop, server)
+    for _ in range(50):
+        if ready_path.exists() or server.poll() is not None:
+            break
+        time.sleep(.1)
+    assert ready_path.exists() and server.poll() is None, f"The isolated DNS server on {address} did not start"
+
+
 def verify_erp(work, core, rules_dir, client, lan, firewall, peer, remote_a, remote_b,
                upstream, standby_probe, config, expect_snapshot, cleanup):
     """Observe isolated endpoint loss and load the filter generator's output."""
@@ -54,9 +82,19 @@ def verify_erp(work, core, rules_dir, client, lan, firewall, peer, remote_a, rem
         "gw": native_primary, "int": native_path["interface"], "gwip": native_path["address"], "weight": 1,
     }]}
     settings = config["installedpackages/sdwan"]
-    settings["policies"]["item"].append(adapter["installedpackages/sdwan"]["policies"]["item"][0])
+    app_policy = adapter["installedpackages/sdwan"]["policies"]["item"][0]
+    app_policy["service_check_mode"] = "primary"
+    settings["policies"]["item"].append(app_policy)
     for member, target in zip(settings["members"]["item"], (upstream, standby_probe)):
         member["probe_primary"] = f"tcp://{target}:7"
+    for member, address, gateway in zip(settings["members"]["item"],
+            ("192.0.2.166", "192.0.2.167"), ("198.51.100.2", "203.0.113.2")):
+        jexec(peer, "ifconfig", "lo0", "inet", f"{address}/32", "alias")
+        cleanup.callback(jexec, peer, "ifconfig", "lo0", "inet", address, "-alias")
+        jexec(firewall, "route", "-n", "add", "-host", address, gateway)
+        cleanup.callback(jexec, firewall, "route", "-n", "delete", "-host", address)
+        start_dns_server(peer, address, work / "dns-status", work / f"dns-{address}.ready", cleanup)
+        member["probe_secondary"] = f"dns://health.sdwan.test {address}"
     backup_service = "192.0.2.165"
     jexec(peer, "ifconfig", "lo0", "inet", f"{backup_service}/32", "alias")
     cleanup.callback(jexec, peer, "ifconfig", "lo0", "inet", backup_service, "-alias")
@@ -138,9 +176,15 @@ def verify_erp(work, core, rules_dir, client, lan, firewall, peer, remote_a, rem
     failed_a = {"a": "Timed out", "b": "Passed"}
     failed_both = {"a": "Timed out", "b": "Timed out"}
 
-    def converge(choices, checks, expected_gateway):
-        snapshot = expect_snapshot([0, 0, 0], choices, checks, ("G", expected_gateway))
+    def converge(checks, expected_gateway):
+        # Each legacy policy keeps WAN1 because its secondary DNS check passes.
+        snapshot = expect_snapshot([0, 0, 0], ["a", "a", "a"], checks, ("G", expected_gateway))
         assert all(snapshot["members"][name]["status"] == "online" for name in "abc"), snapshot
+        assert all(snapshot["members"][name]["checks"]["probe_secondary"] == "Passed"
+                   for name in "ab"), snapshot
+        return_path = snapshot["policies"]["calls"]["selected"]
+        expected_member = {None: None, "GW_A": "a", "GW_B": "b"}[expected_gateway]
+        assert return_path == expected_member, snapshot
         load_policy()  # The expected gateway is never an input to rule generation.
         check_dns()
 
@@ -157,7 +201,7 @@ def verify_erp(work, core, rules_dir, client, lan, firewall, peer, remote_a, rem
     default_before = default_path()
     assert any(line.partition(":")[2].strip() == native_path["address"]
                for line in default_before if line.startswith("gateway:")), default_before
-    converge(["a", "a", "a"], healthy, "GW_A")
+    converge(healthy, "GW_A")
     with ThreadPoolExecutor(max_workers=2) as requests:
         initial_backup = requests.submit(check_backup, "primary")
         standby = requests.submit(transaction, firewall, standby_probe, "erp-standby", source_b)
@@ -186,7 +230,7 @@ def verify_erp(work, core, rules_dir, client, lan, firewall, peer, remote_a, rem
             while time.monotonic() < deadline and packets(peer, label) == before:
                 time.sleep(0.1)
             assert packets(peer, label) > before, "Established ERP flow did not reach the WAN1 drop rule"
-            converge([None, "b", "b"], failed_a, "GW_B")
+            converge(failed_a, "GW_B")
             assert transaction(client, upstream, "erp-failover") == f"{source_b} erp-failover"
             check_backup("erp-failover")
             assert "erp-established-after-loss" not in session_log.read_text(), "Old ERP session received a reply"
@@ -196,15 +240,16 @@ def verify_erp(work, core, rules_dir, client, lan, firewall, peer, remote_a, rem
             session.stdin.close()
     assert default_path() == default_before, "ERP failover changed the firewall default route"
     print("ok - ERP-only loss on WAN1 moved a new LAN transaction to WAN2; backup, dpinger and DNS stayed up", flush=True)
+    print("ok - the required ERP probe excluded WAN1 for its own policy while independent legacy policies kept it", flush=True)
 
     set_service_loss()
-    converge(["a", "a", "a"], healthy, "GW_A")
+    converge(healthy, "GW_A")
     assert transaction(client, upstream, "erp-failback") == f"{source_a} erp-failback"
     check_backup("erp-failback")
     print("ok - ERP recovery returned new LAN traffic to WAN1 after the observer's hold", flush=True)
 
     set_service_loss(remote_a, remote_b)
-    converge([None, None, "c"], failed_both, None)
+    converge(failed_both, None)
     blocked = packets(firewall, "descr=erp-policy")
     assert not transaction(client, upstream, "erp-no-path")
     assert packets(firewall, "descr=erp-policy") > blocked, "New ERP flow did not hit the bound deny rule"
@@ -212,7 +257,7 @@ def verify_erp(work, core, rules_dir, client, lan, firewall, peer, remote_a, rem
     print("ok - both ERP paths ineligible: PF denied the new ERP flow and client DNS still answered", flush=True)
 
     set_service_loss(remote_a)
-    converge([None, "b", "b"], failed_a, "GW_B")
+    converge(failed_a, "GW_B")
     assert transaction(client, upstream, "erp-before-rollback") == f"{source_b} erp-before-rollback"
     check_backup("before-rollback")
     del config["gateways/sdwan_bindings"], config["gateways/sdwan_bindings/item"]
@@ -379,31 +424,7 @@ def run(firewall, peer, remote_a, remote_b, remote_c, restore, erp=None):
         dns_status = work / "dns-status"
         dns_status.write_text("available")
         ready = work / "dns-ready"
-        server = subprocess.Popen(["jexec", peer, sys.executable, "-c", """
-import pathlib
-import socket
-import struct
-import sys
-
-with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as server:
-    server.bind((sys.argv[1], 53))
-    pathlib.Path(sys.argv[3]).touch()
-    while True:
-        query, source = server.recvfrom(512)
-        if len(query) <= 12:
-            continue
-        available = pathlib.Path(sys.argv[2]).read_text() == "available"
-        flags = 0x8180 if available else 0x8183
-        header = query[:2] + struct.pack("!HHHHH", flags, 1, int(available), 0, 0)
-        data = struct.pack("!HHHIHBBBB", 0xc00c, 1, 1, 30, 4, 192, 0, 2, 42) if available else b""
-        server.sendto(header + query[12:] + data, source)
-""", upstream, str(dns_status), str(ready)])
-        cleanup.callback(stop, server)
-        for _ in range(50):
-            if ready.exists() or server.poll() is not None:
-                break
-            time.sleep(.1)
-        assert ready.exists() and server.poll() is None, "The isolated DNS server did not start"
+        start_dns_server(peer, upstream, dns_status, ready, cleanup)
 
         healthy = {"a": "Passed", "b": "Passed"}
         expect_snapshot([0, 0, 0], ["a", "a", "a"], healthy)
