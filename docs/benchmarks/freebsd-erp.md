@@ -38,7 +38,11 @@ In the baseline, ERP succeeded **63 / 63** times in each mode. The pooled p95 fo
 
 The loaded ERP tracker `41001` moved from WAN1 next hop `198.51.100.2` to WAN2 next hop `203.0.113.2`. The reply included the source seen by the server after NAT. All 105 successful ERP replies during the fault reported WAN2 source `203.0.113.1`, and all 144 backup replies reported WAN1 source `198.51.100.1` in each mode. The 12 rule loads recorded the same NAT rules SHA-256. An open ERP session stopped replying during the fault in both modes, with sustained replies resuming about 5.98 s after repair.
 
-Read the [complete per-run and pooled tables](evidence/freebsd-erp-44941257858/report.md) for attempt counts, failure and timeout rates, response and connection p50, p95 and maximum, source breakout, boundary-crossing requests, probe timing, and gateway loss and RTT. The [machine-readable summary](evidence/freebsd-erp-44941257858/summary.json) contains the same results with the recorded observation windows.
+### Independent rerun of the same workflow
+
+The second Actions attempt repeated all six trials against the same source revision. It again recorded 0/144 new ERP replies in native mode and 105/144 with SD-WAN, with the first WAN2 reply at 3.492 s and the third at 3.992 to 3.993 s. Across both attempts, new ERP replies during the fault totaled 0/288 native and 210/288 (72.92%) with SD-WAN. Backup and DNS each returned 288/288 replies in each mode during the fault. The original ERP sockets returned 0/288 in both modes during the fault. The rerun measured baseline ERP response p95 at 1.961 ms native and 1.946 ms with SD-WAN, with 63 successful replies per mode. In the rerun's recovery window new ERP replies were 453/453 in both modes. [Rerun in Actions](https://github.com/allanlopesprado/pfsense-sdwan/actions/runs/44941257858/attempts/2) · [Rerun tables](evidence/freebsd-erp-44941257858-attempt2/report.md) · [Rerun raw measurements](evidence/freebsd-erp-44941257858-attempt2/)
+
+Read the [complete per-run and pooled tables for the first attempt](evidence/freebsd-erp-44941257858/report.md) for attempt counts, failure and timeout rates, response and connection p50, p95 and maximum, source breakout, boundary-crossing requests, probe timing, and gateway loss and RTT. The [machine-readable summary](evidence/freebsd-erp-44941257858/summary.json) contains the same results with the recorded observation windows.
 
 ## Interpretation
 

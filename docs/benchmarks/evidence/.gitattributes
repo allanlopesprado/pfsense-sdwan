@@ -1,0 +1,8 @@
+# Keep the hashed measurements identical across checkouts.
+ce291-appliance/ce291-result.log -text
+ce292-interface-original/native-wan-raw.log -text
+
+# The lab scripts run in a FreeBSD guest.
+*.py text eol=lf
+*.php text eol=lf
+*.sh text eol=lf

@@ -1,6 +1,6 @@
 # Interface interruption on pfSense CE 2.9.2
 
-This pair of trials used the released SD-WAN 0.4.28 package and ABI 2 adapter on an isolated QEMU appliance running pfSense CE 2.9.2-RELEASE. The signed Netgate package set provided the appliance software. WAN1 and WAN2 used QEMU user networks with synthetic addresses and no access to production. The package [SHA-256](../../dist/release.json) was `c23dfbc1f1484469e9831a5099402c93a5a22d4bd9c0f339ab42d6a074398fe5`.
+This pair of trials used the released SD-WAN 0.4.28 package and ABI 2 adapter on an isolated QEMU appliance running pfSense CE 2.9.2-RELEASE. The signed Netgate package set provided the appliance software. WAN1 and WAN2 used QEMU user networks with synthetic addresses and no access to production. The package SHA-256 was `c23dfbc1f1484469e9831a5099402c93a5a22d4bd9c0f339ab42d6a074398fe5`. [Pinned release index](https://github.com/allanlopesprado/pfsense-sdwan/blob/v0.4.28/dist/release.json)
 
 The native gateway group used WAN1 in Tier 1 and WAN2 in Tier 2, with Member Down as its trigger. SD-WAN also preferred WAN1, with costs 10 and 20, an RTT limit of 250 ms, and loss of at most 25%. No RTT standard-deviation limit was set. The same scoped LAN rule and its adjacent block rule were present in both modes. Native mode had the binding removed and the observer stopped. SD-WAN mode restored the binding and started the observer. There was one trial in each mode, in that order.
 
