@@ -190,12 +190,13 @@ if [ -n "${SDWAN_RENDERED_RULES:-}" ]; then
         node=$1
         shift
         jexec "$node" /usr/local/bin/php -n -r '
+            function get_real_interface($interface, $family, $realv6iface, $flush) { return $interface; }
             require $argv[1] . "/files/usr/local/pkg/sdwan_steering.inc";
             $binding = ["gateways" => ["A", "B"], "trackers" => ["41001"]];
             $state = ["gateway" => $argv[4], "revision" => sdwan_config_revision($binding)];
             $inventory = [
-                "A" => ["device" => $argv[2], "address" => "198.51.100.2"],
-                "B" => ["device" => $argv[3], "address" => "203.0.113.2"],
+                "A" => ["interface" => $argv[2], "family" => "inet", "address" => "198.51.100.2"],
+                "B" => ["interface" => $argv[3], "family" => "inet", "address" => "203.0.113.2"],
             ];
             $status = sdwan_steering_pf_status($binding, $state, $inventory, sdwan_steering_pf_rules());
             if ($status !== $argv[5]) {

@@ -1,5 +1,15 @@
 # SD-WAN lab results
 
+## Read this evidence by environment
+
+The current release notes link to the exact GitHub Actions run. PHP and native filter compilation tests verify decisions, rule generation and UI diagnostics. The FreeBSD VM loads the generated rules into PF and checks new flows, return traffic, NAT, existing states and supported failure cases. Separate labs cover VPN and inspection implementations. A passing CI run does not certify every combination of packages on a specific pfSense appliance.
+
+On a CE 2.9.2 appliance with the matching experimental core and two working WANs, SD-WAN 0.4.27 selected WAN2 for new LAN connections while the default route remained on WAN1. PF showed the rule tracker, next hop and both directions of real TCP and UDP flows. The NAT state translated them to WAN2's address. External HTTPS management and the two port forwards answered on both WANs. A controlled physical outage, a complete reboot and restore, and combined HA and IPsec interoperability still require an isolated appliance test.
+
+[Current release evidence](https://github.com/allanlopesprado/pfsense-sdwan/releases/latest) ? [Compatibility matrix](PACKAGE-COMPATIBILITY.md) ? [Acceptance procedure](LAB.md)
+
+## Early laboratory acceptance
+
 Package 0.3.0 includes the WebGUI, widget, measurement daemon, and selection module. The filter adapter ships separately for a lab image. The `pfSense-pkg-SDWAN-0.3.0.pkg` archive is 25,004 bytes with SHA-256 `6552b2fcbc97de2be53a5c926c7f1539d06514902a42b1eb87f9b0a2aa595476`. [Pinned binary](https://github.com/allanlopesprado/pfsense-sdwan/blob/fe20885be522fb680e2c607bb4c298fbfdb76490/dist/pfSense-pkg-SDWAN-0.3.0.pkg)
 
 | Test | Observation |

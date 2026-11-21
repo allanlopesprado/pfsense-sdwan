@@ -410,24 +410,28 @@ function sdwan_steering_pf_rules(): ?array {
 	return $status === 0 && preg_match('/^Status:\s+Enabled(?:\s|$)/', $lines[0] ?? '') ? $lines : null;
 }
 
-/* Use the native hop current at verification time, including after renewal. */
-function sdwan_steering_resolve_hop(array $gateway): ?string {
-	if (($gateway['address'] ?? '') !== 'dynamic') {
-		return $gateway['address'] ?? null;
-	}
-	$lookup = match ($gateway['family'] ?? null) {
+/* Use the filter generator's device selection and the current next hop. */
+function sdwan_steering_resolve_path(array $gateway): ?array {
+	$interface = $gateway['interface'] ?? null;
+	$family = $gateway['family'] ?? null;
+	$address = $gateway['address'] ?? null;
+	$lookup = match ($family) {
 		'inet' => 'get_interface_gateway',
 		'inet6' => 'get_interface_gateway_v6',
 		default => null,
 	};
-	if ($lookup === null || !isset($gateway['interface'])) {
+	if ($lookup === null || !is_string($interface) || $interface === '') {
 		return null;
 	}
-	if (!function_exists($lookup)) {
+	if (!function_exists('get_real_interface') || ($address === 'dynamic' && !function_exists($lookup))) {
 		require_once('gwlb.inc');
 	}
-	$address = $lookup($gateway['interface']);
-	return is_string($address) ? $address : null;
+	$device = get_real_interface($interface, $family, false, false);
+	if ($address === 'dynamic') {
+		$address = $lookup($interface);
+	}
+	return is_string($device) && $device !== '' && is_string($address) && $address !== '' ?
+	    ['device' => $device, 'address' => $address] : null;
 }
 
 const SDWAN_RELOAD_MAX_ATTEMPTS = 3;
@@ -435,21 +439,21 @@ const SDWAN_RELOAD_RETRY_INTERVAL = 30;
 const SDWAN_STARTUP_RETRY_WINDOW = 300;
 
 function sdwan_steering_runtime_signature(array $snapshot, array $inventory): string {
-	$hops = [];
+	$paths = [];
 	$sticky = false;
 	foreach ($snapshot['steering'] as $state) {
 		$pool = $state['pool'] ?? array_filter([$state['gateway']]);
 		$sticky = $sticky || sdwan_steering_sticky_paths($pool);
 		foreach ($pool as $name) {
 			if (isset($inventory[$name])) {
-				$hops[$name] = sdwan_steering_resolve_hop($inventory[$name]);
+				$paths[$name] = sdwan_steering_resolve_path($inventory[$name]);
 			}
 		}
 	}
-	ksort($hops, SORT_STRING);
+	ksort($paths, SORT_STRING);
 	return sdwan_config_revision([
 	    $snapshot['config_revision'], $snapshot['gateway_inventory_revision'],
-	    sdwan_steering_signature($snapshot['steering']), $hops, $sticky,
+	    sdwan_steering_signature($snapshot['steering']), $paths, $sticky,
 	]);
 }
 
@@ -582,15 +586,15 @@ function sdwan_steering_pf_status(array $binding, array $state, array $inventory
 	$gateways = [];
 	foreach ($pool as $name) {
 		if (!is_string($name) || !in_array($name, $binding['gateways'], true) ||
-		    !isset($inventory[$name]['device'], $inventory[$name]['address'])) {
+		    !isset($inventory[$name])) {
 			return 'pending';
 		}
 		$gateway = $inventory[$name];
-		$gateway['address'] = sdwan_steering_resolve_hop($gateway);
-		if ($gateway['address'] === null) {
+		$path = sdwan_steering_resolve_path($gateway);
+		if ($path === null) {
 			return 'pending';
 		}
-		$gateways[$gateway['device']] = $gateway;
+		$gateways[$path['device']] = array_replace($gateway, $path);
 	}
 	if (count($gateways) !== count($pool)) {
 		return 'pending';
@@ -684,14 +688,9 @@ function sdwan_steering_reconnect(string $group, string $gateway, string $revisi
 			return ['errors' => ['Reconnect is available after the filter has applied a different eligible gateway.']];
 		}
 		$metadata = $inventory[$gateway] ?? [];
-		$address = $metadata['address'] ?? '';
-		$device = $metadata['device'] ?? '';
-		if ($address === 'dynamic') {
-			$address = $metadata['family'] === 'inet6' ? get_interface_gateway_v6($metadata['interface'])
-			    : get_interface_gateway($metadata['interface']);
-		}
-		if (!is_string($address) || $device === '' ||
-		    sdwan_monitor_address($address, $metadata['family'] ?? '', $device, true) === null ||
+		$path = sdwan_steering_resolve_path($metadata);
+		if ($path === null ||
+		    sdwan_monitor_address($path['address'], $metadata['family'], $path['device'], true) === null ||
 		    !function_exists('popen') || !function_exists('pclose') || !function_exists('exec')) {
 			return ['errors' => ['The previous native next hop cannot be identified.']];
 		}
@@ -704,7 +703,7 @@ function sdwan_steering_reconnect(string $group, string $gateway, string $revisi
 				yield $line;
 			}
 		};
-		$ids = sdwan_steering_state_ids($lines(), $binding['trackers'], $device, $address);
+		$ids = sdwan_steering_state_ids($lines(), $binding['trackers'], $path['device'], $path['address']);
 		if (pclose($stream) !== 0) {
 			return ['errors' => ['Unable to read the full state table. No states were removed.']];
 		}

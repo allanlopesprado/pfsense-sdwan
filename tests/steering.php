@@ -28,6 +28,16 @@ function filter_configure(): void { global $pending; $pending++; }
 function get_interface_gateway($interface): ?string {
 	return config_get_path('fixture/dynamic/' . $interface);
 }
+function get_interface_gateway_v6($interface): ?string {
+	return get_interface_gateway($interface);
+}
+function get_real_interface($interface, $family, $realv6iface, $flush): ?string {
+	if ($realv6iface !== false || $flush !== false) {
+		throw new RuntimeException('Steering must use the native filter generator interface lookup');
+	}
+	return config_get_path('fixture/devices/' . $family . '/' . $interface) ??
+	    (config_get_path('interfaces', [])[$interface]['if'] ?? null);
+}
 function verify(bool $ok, string $label): void {
 	if (!$ok) { throw new RuntimeException($label); }
 	echo "ok - {$label}\n";
@@ -161,7 +171,7 @@ verify(sdwan_save_config($reduced, sdwan_config_revision($reordered), true) !== 
 unset($disk[SDWAN_BINDINGS_PATH . '/item']);
 
 $runtime = ['revision' => sdwan_config_revision($edited_binding), 'gateway' => 'A'];
-$inventory = ['A' => ['device' => 'igb0', 'address' => '192.0.2.1']];
+$inventory = ['A' => ['interface' => 'wan', 'family' => 'inet', 'device' => 'igb0', 'address' => '192.0.2.1']];
 $loaded = ['pass in quick on igb2 route-to (igb0 192.0.2.1) inet all label "descr=Test" ridentifier 301'];
 verify(sdwan_steering_pf_status($edited_binding, $runtime, $inventory, $loaded) === 'applied',
     'active PF verifies expected tracker and exact next hop');
@@ -190,8 +200,27 @@ verify(sdwan_steering_pf_status($edited_binding, $runtime, $dynamic, $loaded) ==
 unset($current['fixture/dynamic/wan']);
 verify(sdwan_steering_pf_status($edited_binding, $runtime, $dynamic, $loaded) === 'pending',
     'an unresolved dynamic gateway is not shown as applied');
+$ipv6 = ['A' => ['interface' => 'wan', 'family' => 'inet6', 'device' => 'igb0', 'address' => '2001:db8::1']];
+$loaded6rd = ['pass in quick on igb2 route-to (wan_stf 2001:db8::1) inet6 all ridentifier 301'];
+$current['fixture/devices/inet6/wan'] = 'wan_stf';
+$signature6rd = sdwan_steering_runtime_signature($publication, $ipv6);
+verify(sdwan_steering_pf_status($edited_binding, $runtime, $ipv6, $loaded6rd) === 'applied',
+    'IPv6 6rd PF verification uses the resolved tunnel device');
+$current['fixture/devices/inet6/wan'] = 'igb0.42';
+verify(sdwan_steering_runtime_signature($publication, $ipv6) !== $signature6rd &&
+    sdwan_steering_pf_status($edited_binding, $runtime, $ipv6, $loaded6rd) === 'pending',
+    'a live device change invalidates PF verification and the reconciliation fingerprint even with the same next hop');
+$pppoe = ['A' => array_replace($ipv6['A'], ['device' => 'pppoe0', 'address' => 'dynamic'])];
+$current['fixture/dynamic/wan'] = '2001:db8::1';
+$loadedPppoe = ['pass in quick on igb2 route-to (igb0.42 2001:db8::1) inet6 all ridentifier 301'];
+verify(sdwan_steering_pf_status($edited_binding, $runtime, $pppoe, $loadedPppoe) === 'applied',
+    'IPv6 alongside PPPoE resolves the parent VLAN and live next hop');
+$current['fixture/devices/inet6/wan'] = '';
+verify(sdwan_steering_pf_status($edited_binding, $runtime, $pppoe, $loadedPppoe) === 'pending',
+    'an unresolved live device is not accepted');
+unset($current['fixture/dynamic/wan'], $current['fixture/devices/inet6/wan']);
 $pooled = ['revision' => sdwan_config_revision($edited_binding), 'gateway' => 'A', 'pool' => ['A', 'B']];
-$inventory['B'] = ['device' => 'igb1', 'address' => '192.0.2.2', 'weight' => 2];
+$inventory['B'] = ['interface' => 'opt1', 'family' => 'inet', 'device' => 'igb1', 'address' => '192.0.2.2', 'weight' => 2];
 $weighted = 'pass in quick on igb2 route-to { ' . str_repeat('(igb0 192.0.2.1), ', 2) .
     str_repeat('(igb1 192.0.2.2), ', 3) . '(igb1 192.0.2.2) } round-robin inet all ridentifier 301';
 verify(sdwan_steering_pf_status($edited_binding, $pooled, $inventory, [$weighted]) === 'applied' &&

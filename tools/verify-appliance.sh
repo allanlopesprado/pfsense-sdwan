@@ -2,8 +2,8 @@
 # Read-only acceptance check for an installed SD-WAN package on pfSense CE.
 set -eu
 
-if [ "$#" -ne 1 ]; then
-    echo "Usage: sh verify-appliance.sh <expected-package-version>" >&2
+if [ "$#" -lt 1 ] || [ "$#" -gt 2 ] || { [ "$#" -eq 2 ] && [ "$2" != "--forwarding" ]; }; then
+    echo "Usage: sh verify-appliance.sh <expected-package-version> [--forwarding]" >&2
     exit 2
 fi
 
@@ -46,8 +46,9 @@ if (count($registered) !== 1 || ($registered[0]["name"] ?? "") !== $service_name
 try {
     // Keep the native pfSense $config global available for gateway discovery.
     $sdwan_settings = sdwan_get_config();
+    $inventory = function_exists("sdwan_current_snapshot") ? sdwan_gateways() : [];
     $snapshot = function_exists("sdwan_current_snapshot") ?
-        sdwan_current_snapshot($sdwan_settings, sdwan_gateways()) : sdwan_read_snapshot();
+        sdwan_current_snapshot($sdwan_settings, $inventory) : sdwan_read_snapshot();
     if (($snapshot["config_revision"] ?? null) !== sdwan_config_revision($sdwan_settings)) {
         throw new RuntimeException();
     }
@@ -61,10 +62,43 @@ printf("Package, Services menu and service registered. Latest sample: %d seconds
 require_once("filter.inc");
 $abi = function_exists("filter_sdwan_binding_api") ? filter_sdwan_binding_api() : "unavailable";
 printf("Native forwarding ABI: %s.\n", $abi);
+if ($argv[2] === "--forwarding") {
+    $steering = "/usr/local/pkg/sdwan_steering.inc";
+    if (is_file($steering)) {
+        require_once($steering);
+    }
+    if (!function_exists("sdwan_steering_pf_status") || !sdwan_steering_supported()) {
+        fwrite(STDERR, "Native SD-WAN forwarding verification is unavailable.\n");
+        exit(1);
+    }
+    try {
+        $bindings = sdwan_steering_bindings();
+    } catch (UnexpectedValueException $error) {
+        fwrite(STDERR, "Invalid saved SD-WAN forwarding bindings.\n");
+        exit(1);
+    }
+    if (!$bindings) {
+        fwrite(STDERR, "No SD-WAN forwarding bindings are configured.\n");
+        exit(1);
+    }
+    $rules = sdwan_steering_pf_rules();
+    $verified = true;
+    foreach ($bindings as $group => $binding) {
+        $state = $snapshot["steering"][$group] ?? [];
+        $status = sdwan_steering_pf_status($binding, is_array($state) ? $state : [], $inventory, $rules);
+        printf("Group %s, policy %s, trackers %s: %s.\n", $group, $binding["policy"],
+            implode(", ", $binding["trackers"]), $status);
+        $verified = $verified && in_array($status, ["applied", "blocked"], true);
+    }
+    if (!$verified) {
+        fwrite(STDERR, "Active PF rules could not be confirmed for every SD-WAN binding.\n");
+        exit(1);
+    }
+}
 if (is_readable("/var/log/system.log")) {
     require_once("syslog.inc");
     $rows = conv_log_filter("/var/log/system.log", 500, 500, "", "");
     $events = array_filter($rows, static fn($row) => ($row["process"] ?? null) === "sdwan");
     printf("SD-WAN events in recent native System Logs rows: %d.\n", count($events));
 }
-' -- "$installed"
+' -- "$installed" "${2:-}"

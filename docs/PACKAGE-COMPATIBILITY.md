@@ -21,6 +21,18 @@ On standard pfSense CE, this SD-WAN package reads dpinger statistics and display
 | **OpenVPN Client Export** | Verify that the generated profile lists the intended endpoints. The Multi-WAN export options derive endpoints from the configured port forwards and, for DDNS, the matching hostnames. Confirm that a client can reconnect to the backup endpoint and carry tunnel traffic. [OpenVPN Client Export](https://docs.netgate.com/pfsense/en/latest/packages/openvpn-client-export.html) |
 | **System Patches** | Review applied patches that change the filter generator, gateway monitoring, or routing. Rerun the relevant tests with those patches installed on a clone. [System Patches](https://docs.netgate.com/pfsense/en/latest/development/system-patches.html) |
 
+## Native settings that can change the observed path
+
+| Setting | What to verify |
+| --- | --- |
+| Floating quick rules, interface groups and package block tables | Rules that match earlier determine the outcome. Compare a permitted new connection and a denied one with PF rule counters, state, and the reply path. |
+| Traffic shaper, limiters and logging | The binding must preserve the logged match and the native queue or pipe qualifiers. Verify the loaded tracker, then confirm throughput and queue counters separately with the actual limiter configuration. |
+| Sticky connections | An updated lab adapter preserves source affinity for a weighted pool when the native setting is enabled. Use new connections from the same LAN source and compare the translated address observed by the peer. |
+| DHCP, PPPoE and IPv6 transition interfaces | Recheck the current device and next hop after renewal, plus the selected source address and NAT. The configured interface name may differ from the device that PF uses. |
+| CARP, IP aliases and routed IPsec | Check the underlay of each VTI. Paths on the same physical transport share its failure domain even when they use distinct VIPs. Full tunnel, HA and state migration require an isolated test with the actual peer and addresses. |
+
+A rule reported as applied has the expected forwarding path in PF. Use counters and a bidirectional application transaction to check that an earlier rule or packet inspector allows a representative flow. Include the actual package versions and interface drivers in the test record.
+
 ## Verification
 
 - The [Suricata lab](../tests/lab/inspection.py) exercises real Suricata in passive PCAP mode and inline Linux NFQUEUE mode across two paths. It compares the SD-WAN policy evaluator against live ICMP probes and checks application responses, EVE alert and drop events, and the path used by ordinary and blocked requests. It also checks what happens to queued HTTP traffic when the inspector stops. The lab applies the evaluator's recommendation to Linux routes.
