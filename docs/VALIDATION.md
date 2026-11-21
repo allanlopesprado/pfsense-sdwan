@@ -2,6 +2,18 @@
 
 The appliance targets are pfSense CE 2.9.1 and 2.9.2. The package uses native gateways, dpinger, privileges, forms, services, and System Logs. On a compatible lab core, the recommendation applies to explicitly bound rule trackers. Comparable products inform the test scenarios. Cross-vendor acceptance requires exercising the same flow on both devices. [Integration and package limits](INTEGRATION.md)
 
+## Recurring regression and divergence audit
+
+**Package checks** runs daily at 05:23 UTC on the default branch. It can also run from **Actions → Package checks → Run workflow**. The workflow runs the existing FreeBSD/PF and interoperability checks and a separate offline audit of forwarding, policy decisions, transitions, and service lifecycle. The scheduled jobs use GitHub-hosted runners and synthetic test environments. [Workflow and recent runs](https://github.com/allanlopesprado/pfsense-sdwan/actions/workflows/checks.yml)
+
+The run summary and the `sdwan-divergence-audit` artifact record the revision, seed, expected values, and observed values. An unexpected mismatch fails the audit. A previously reproduced discrepancy remains visible as a warning while it matches its recorded outcome. When its expected behavior starts passing, the audit reports it as resolved. GitHub can disable scheduled runs in public repositories after 60 days of inactivity. [GitHub schedule behavior](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#schedule)
+
+Reproduce an offline run with PHP CLI and Python 3. Use its run ID as the seed.
+
+```sh
+python3 tests/audit/run.py --seed 44955564168 --output ./audit-results
+```
+
 ## Vendor references and test implications
 
 | Official reference | Documented behavior | pfSense verification |
