@@ -337,11 +337,12 @@ def run(php, classes, screenshot_dir=None):
         diagnostic = request("diagnostics", config=checked, snapshot={
             "members": readings, "policies": {"VOICE": required},
         })
-        assert "Require primary check" in diagnostic and "Primary · TCP check failed" in diagnostic
-        assert "Required primary service check failed" in diagnostic and "Secondary · Passed" in diagnostic
+        assert "Require primary check" in diagnostic and "Required primary service check failed" in diagnostic
+        assert re.search(r"Primary[^<\n]*TCP check failed", diagnostic), diagnostic
+        assert re.search(r"Secondary[^<\n]*Passed", diagnostic), diagnostic
         gateway_only = {**checked, "policies": configured["policies"]}
         diagnostic = request("diagnostics", config=gateway_only, snapshot={**snapshot, "members": readings})
-        assert "Gateway SLA only" in diagnostic and "Primary · TCP check failed" not in diagnostic
+        assert "Gateway SLA only" in diagnostic and "TCP check failed" not in diagnostic
         print("ok - native CSRF verifies posts; Status and Diagnostics suppress outdated observations")
         assert "Multiple eligible paths" in fresh and 'class="bg-success"' in fresh
         assert 'id="restartservice-sdwan"' in fresh and 'id="stopservice-sdwan"' in fresh and 'id="startservice-sdwan"' not in fresh
