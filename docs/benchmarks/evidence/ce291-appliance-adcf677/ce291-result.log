@@ -1,0 +1,71 @@
+FreeBSD  16.0-CURRENT FreeBSD 16.0-CURRENT #1 RELENG_2_9_1-n256136-65fce9be026d: Wed Nov 11 02:28:50 UTC 2026     root@pfsense-build-release-amd64-2.eng.atx.netgate.com:/var/jenkins/workspace/pfSense-CE-snapshots-2_9_1-main/obj/amd64/srAtMWOb/var/jenkins/workspace/pfSense-CE-snapshots-2_9_1-main/sources/FreeBSD-src-RELENG_2_9_1/amd64.amd64/sys/pfSense amd64
+pfSense-base 2.9.1
+pfSense-kernel-pfSense 2.9.1
+['To use the stroke interface by default either compile the port without the vici option or', 'set \'strongswan_interface="stroke"\' in your rc.conf file.', '=====', 'Message from php85-pfSense-module-2.9.1:', '', '--', 'This file has been added to automatically load the installed extension:', '/usr/local/etc/php/ext-20-pfSense.ini.sample']
+pfSense 2.9.1
+pfSense-system 2.9.1
+pfSense-default-config-serial 2.9.1
+CE_OFFLINE_INSTALL_OK
+2.9.1-RELEASE
+FreeBSD pfSense.home.arpa 16.0-CURRENT FreeBSD 16.0-CURRENT #1 RELENG_2_9_1-n256136-65fce9be026d: Wed Nov 11 02:28:50 UTC 2026     root@pfsense-build-release-amd64-2.eng.atx.netgate.com:/var/jenkins/workspace/pfSense-CE-snapshots-2_9_1-main/obj/amd64/srAtMWOb/var/jenkins/workspace/pfSense-CE-snapshots-2_9_1-main/sources/FreeBSD-src-RELENG_2_9_1/amd64.amd64/sys/pfSense amd64
+DHCP lease: 'inet 203.0.113.1 netmask 0xfffffff8 broadcast 203.0.113.7\n203.0.113.2'
+['Loading package instructions...', 'Custom commands...', 'Executing custom_php_install_command()...done.', 'Menu items... done.', 'Services... done.', 'Writing configuration... done.']
+PACKAGE_INSTALLED_WITH_NATIVE_HOOKS; STOCK_MODE_OBSERVATION
+NATIVE_UPGRADE_PRESERVES_POLICY_CONFIGURATION
+baseline: native LAN HTTPS replied with the original certificate
+baseline PF pass in log quick on vtnet1 route-to (vtnet0 198.51.100.2) inet proto tcp from 192.0.2.11 to 192.0.2.162 port = echo flags S/SA keep state (if-bound) label "id=41001" label "gw=1:G" label "tags=user_rule" label "descr=ERP pass" ridentifier 41001
+baseline PF pass in log quick on vtnet1 route-to (vtnet0 198.51.100.2) inet proto tcp from 192.0.2.11 to 192.0.2.163 port = echo flags S/SA keep state (if-bound) label "id=41003" label "gw=1:B" label "tags=user_rule" label "descr=Backup pass" ridentifier 41003
+baseline: ERP='198.51.100.1 baseline' Backup='198.51.100.1 baseline'
+SAME_IP_TWO_FIBS_OK: 192.0.2.168 returned via both physical WANs: '198.51.100.1 same-target\n203.0.113.1 same-target'
+VTI_WITHOUT_SA_BLOCKS_WITHOUT_CLEARTEXT
+accepted but divergent: native LAN HTTPS replied with the original certificate
+NATIVE_RELOAD_ACCEPTED_BUT_DIVERGENT_RESTART_AND_RETRY_LIMIT_OK
+verified after repairing the renderer PF pass in log quick on vtnet1 route-to (vtnet2 203.0.113.2) inet proto tcp from 192.0.2.11 to 192.0.2.162 port = echo flags S/SA keep state (if-bound) label "id=41001" label "gw=2:G" label "tags=user_rule" label "descr=ERP pass" ridentifier 41001
+verified after repairing the renderer PF pass in log quick on vtnet1 route-to (vtnet0 198.51.100.2) inet proto tcp from 192.0.2.11 to 192.0.2.163 port = echo flags S/SA keep state (if-bound) label "id=41003" label "gw=1:B" label "tags=user_rule" label "descr=Backup pass" ridentifier 41003
+restored after divergent reload PF pass in log quick on vtnet1 route-to (vtnet0 198.51.100.2) inet proto tcp from 192.0.2.11 to 192.0.2.162 port = echo flags S/SA keep state (if-bound) label "id=41001" label "gw=1:G" label "tags=user_rule" label "descr=ERP pass" ridentifier 41001
+restored after divergent reload PF pass in log quick on vtnet1 route-to (vtnet0 198.51.100.2) inet proto tcp from 192.0.2.11 to 192.0.2.163 port = echo flags S/SA keep state (if-bound) label "id=41003" label "gw=1:B" label "tags=user_rule" label "descr=Backup pass" ridentifier 41003
+restored after divergence: native LAN HTTPS replied with the original certificate
+stale observation: ERP='' Backup=''
+stale observation: native LAN HTTPS replied with the original certificate
+fresh observation after expiry PF pass in log quick on vtnet1 route-to (vtnet0 198.51.100.2) inet proto tcp from 192.0.2.11 to 192.0.2.162 port = echo flags S/SA keep state (if-bound) label "id=41001" label "gw=1:G" label "tags=user_rule" label "descr=ERP pass" ridentifier 41001
+fresh observation after expiry PF pass in log quick on vtnet1 route-to (vtnet0 198.51.100.2) inet proto tcp from 192.0.2.11 to 192.0.2.163 port = echo flags S/SA keep state (if-bound) label "id=41003" label "gw=1:B" label "tags=user_rule" label "descr=Backup pass" ridentifier 41003
+fresh observation after expiry: ERP='198.51.100.1 fresh observation after expiry' Backup='198.51.100.1 fresh observation after expiry'
+EXPIRED_SAMPLE_BLOCKED_AND_REPORTED_IN_SYSTEM_LOGS
+before WAN2 lease change PF pass in log quick on vtnet1 route-to (vtnet2 203.0.113.2) inet proto tcp from 192.0.2.11 to 192.0.2.162 port = echo flags S/SA keep state (if-bound) label "id=41001" label "gw=2:G" label "tags=user_rule" label "descr=ERP pass" ridentifier 41001
+before WAN2 lease change PF pass in log quick on vtnet1 route-to (vtnet0 198.51.100.2) inet proto tcp from 192.0.2.11 to 192.0.2.163 port = echo flags S/SA keep state (if-bound) label "id=41003" label "gw=1:B" label "tags=user_rule" label "descr=Backup pass" ridentifier 41003
+before WAN2 lease change: ERP='203.0.113.1 before WAN2 lease change' Backup='198.51.100.1 before WAN2 lease change'
+DHCP lease: 'inet 203.0.113.4 netmask 0xfffffff8 broadcast 203.0.113.7\n203.0.113.3'
+after WAN2 lease change PF pass in log quick on vtnet1 route-to (vtnet2 203.0.113.3) inet proto tcp from 192.0.2.11 to 192.0.2.162 port = echo flags S/SA keep state (if-bound) label "id=41001" label "gw=2:G" label "tags=user_rule" label "descr=ERP pass" ridentifier 41001
+after WAN2 lease change PF pass in log quick on vtnet1 route-to (vtnet0 198.51.100.2) inet proto tcp from 192.0.2.11 to 192.0.2.163 port = echo flags S/SA keep state (if-bound) label "id=41003" label "gw=1:B" label "tags=user_rule" label "descr=Backup pass" ridentifier 41003
+after WAN2 lease change: ERP='203.0.113.4 after WAN2 lease change' Backup='198.51.100.1 after WAN2 lease change'
+after WAN2 lease change: native LAN HTTPS replied with the original certificate
+NATIVE_DHCP_LEASE_NEW_ADDRESS_AND_HOP_APPLIED_IN_PF
+DHCP lease: 'inet 203.0.113.1 netmask 0xfffffff8 broadcast 203.0.113.7\n203.0.113.2'
+original WAN2 lease restored PF pass in log quick on vtnet1 route-to (vtnet0 198.51.100.2) inet proto tcp from 192.0.2.11 to 192.0.2.162 port = echo flags S/SA keep state (if-bound) label "id=41001" label "gw=1:G" label "tags=user_rule" label "descr=ERP pass" ridentifier 41001
+original WAN2 lease restored PF pass in log quick on vtnet1 route-to (vtnet0 198.51.100.2) inet proto tcp from 192.0.2.11 to 192.0.2.163 port = echo flags S/SA keep state (if-bound) label "id=41003" label "gw=1:B" label "tags=user_rule" label "descr=Backup pass" ridentifier 41003
+WAN1 DNS replied during the ERP outage
+ERP outage PF pass in log quick on vtnet1 route-to (vtnet2 203.0.113.2) inet proto tcp from 192.0.2.11 to 192.0.2.162 port = echo flags S/SA keep state (if-bound) label "id=41001" label "gw=2:G" label "tags=user_rule" label "descr=ERP pass" ridentifier 41001
+ERP outage PF pass in log quick on vtnet1 route-to (vtnet0 198.51.100.2) inet proto tcp from 192.0.2.11 to 192.0.2.163 port = echo flags S/SA keep state (if-bound) label "id=41003" label "gw=1:B" label "tags=user_rule" label "descr=Backup pass" ridentifier 41003
+ERP outage: ERP='203.0.113.1 ERP outage' Backup='198.51.100.1 ERP outage'
+ERP outage: native LAN HTTPS replied with the original certificate
+Native event acknowledged and applied. Preserved established PF states=[('4514026b00000000', '9d326647'), ('4614026b00000000', '9d326647'), ('4714026b00000000', '9d326647'), ('4814026b00000000', '9d326647')]
+recovery PF pass in log quick on vtnet1 route-to (vtnet0 198.51.100.2) inet proto tcp from 192.0.2.11 to 192.0.2.162 port = echo flags S/SA keep state (if-bound) label "id=41001" label "gw=1:G" label "tags=user_rule" label "descr=ERP pass" ridentifier 41001
+recovery PF pass in log quick on vtnet1 route-to (vtnet0 198.51.100.2) inet proto tcp from 192.0.2.11 to 192.0.2.163 port = echo flags S/SA keep state (if-bound) label "id=41003" label "gw=1:B" label "tags=user_rule" label "descr=Backup pass" ridentifier 41003
+recovery: ERP='198.51.100.1 recovery' Backup='198.51.100.1 recovery'
+both WANs down PF block drop in log quick on vtnet1 inet proto tcp from 192.0.2.11 to 192.0.2.162 port = echo label "id=41001" label "tags=user_rule" label "descr=ERP pass" ridentifier 41001
+both WANs down PF block drop in log quick on vtnet1 inet proto tcp from 192.0.2.11 to 192.0.2.163 port = echo label "id=41003" label "tags=user_rule" label "descr=Backup pass" ridentifier 41003
+both WANs down: ERP='' Backup=''
+both WANs down: native LAN HTTPS replied with the original certificate
+WANs recovered PF pass in log quick on vtnet1 route-to (vtnet0 198.51.100.2) inet proto tcp from 192.0.2.11 to 192.0.2.162 port = echo flags S/SA keep state (if-bound) label "id=41001" label "gw=1:G" label "tags=user_rule" label "descr=ERP pass" ridentifier 41001
+WANs recovered PF pass in log quick on vtnet1 route-to (vtnet0 198.51.100.2) inet proto tcp from 192.0.2.11 to 192.0.2.163 port = echo flags S/SA keep state (if-bound) label "id=41003" label "gw=1:B" label "tags=user_rule" label "descr=Backup pass" ridentifier 41003
+WANs recovered: ERP='198.51.100.1 WANs recovered' Backup='198.51.100.1 WANs recovered'
+Original ERP and backup TCP sessions replied after both WANs recovered
+after reboot PF pass in log quick on vtnet1 route-to (vtnet0 198.51.100.2) inet proto tcp from 192.0.2.11 to 192.0.2.162 port = echo flags S/SA keep state (if-bound) label "id=41001" label "gw=1:G" label "tags=user_rule" label "descr=ERP pass" ridentifier 41001
+after reboot PF pass in log quick on vtnet1 route-to (vtnet0 198.51.100.2) inet proto tcp from 192.0.2.11 to 192.0.2.163 port = echo flags S/SA keep state (if-bound) label "id=41003" label "gw=1:B" label "tags=user_rule" label "descr=Backup pass" ridentifier 41003
+after reboot: ERP='198.51.100.1 after reboot' Backup='198.51.100.1 after reboot'
+REBOOT_WITH_NATIVE_SERVICES_OK
+native rollback: ERP='198.51.100.1 native rollback' Backup='198.51.100.1 native rollback'
+native rollback: native LAN HTTPS replied with the original certificate
+package rollback: ERP='198.51.100.1 package rollback' Backup='198.51.100.1 package rollback'
+NATIVE_AND_PACKAGE_ROLLBACK_OK
+CE_291_TWO_WAN_APPLIANCE_ACCEPTED
