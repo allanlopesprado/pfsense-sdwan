@@ -82,6 +82,7 @@ echo json_encode([http_response_code() ?: 200, $body, $sdwan_title_link,
     fixture = json.loads(config.read_text())
     fixture["interfaces"]["opt1"]["if"] = "igb0"
     fixture["interfaces"]["opt2"]["if"] = "igb1"
+    fixture["fixture_devices"] = {"opt1": "igb0", "opt2": "igb1"}
     settings = fixture["installedpackages/sdwan"]
     rules = settings["policies"]["item"]
     rules[0]["name"] = "Voice"
