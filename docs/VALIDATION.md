@@ -1,6 +1,6 @@
 # SD-WAN validation on pfSense
 
-The target is pfSense CE 2.9.1. The package uses native gateways, dpinger, privileges, forms, services, and System Logs. On a compatible lab core, the recommendation applies to explicitly bound rule trackers. Comparable products inform the test scenarios. Cross-vendor acceptance requires exercising the same flow on both devices. [Integration and package limits](INTEGRATION.md)
+The appliance targets are pfSense CE 2.9.1 and 2.9.2. The package uses native gateways, dpinger, privileges, forms, services, and System Logs. On a compatible lab core, the recommendation applies to explicitly bound rule trackers. Comparable products inform the test scenarios. Cross-vendor acceptance requires exercising the same flow on both devices. [Integration and package limits](INTEGRATION.md)
 
 ## Vendor references and test implications
 

@@ -20,6 +20,9 @@ foreach (['sdwan.inc', 'sdwan_engine.inc', 'sdwan_steering.inc', 'sdwan_prefligh
 set_include_path(__DIR__ . '/fixtures/write');
 require 'config.inc';
 require $dir . '/sdwan_steering.inc';
+function config_path_enabled($section, $key): bool {
+	return isset(config_get_path($section, [])[$key]);
+}
 function filter_sdwan_binding_api(): int { global $abi; return $abi; }
 function filter_configure(): void { global $pending; $pending++; }
 function get_interface_gateway($interface): ?string {
@@ -188,6 +191,12 @@ $weighted = 'pass in quick on igb2 route-to { ' . str_repeat('(igb0 192.0.2.1), 
 verify(sdwan_steering_pf_status($edited_binding, $pooled, $inventory, [$weighted]) === 'applied' &&
     sdwan_steering_pf_status($edited_binding, $pooled, $inventory, [str_replace('(igb0 192.0.2.1), ', '', $weighted)]) === 'pending',
     'loaded PF verification checks each balancing route and native weight');
+$current['system']['lb_use_sticky'] = '';
+$sticky = str_replace('round-robin', 'round-robin sticky-address', $weighted);
+verify(sdwan_steering_pf_status($edited_binding, $pooled, $inventory, [$sticky]) === 'applied' &&
+    sdwan_steering_pf_status($edited_binding, $pooled, $inventory, [$weighted]) === 'pending',
+    'loaded PF verification checks the configured native sticky option');
+unset($current['system']['lb_use_sticky']);
 $runtime['gateway'] = null;
 verify(sdwan_steering_pf_status($edited_binding, $runtime, $inventory, ['block drop in quick on igb2 inet all ridentifier 301']) === 'blocked' &&
     sdwan_steering_pf_status($edited_binding, $runtime, $inventory, $loaded) === 'pending' &&

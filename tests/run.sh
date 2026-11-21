@@ -18,6 +18,7 @@ find files tests -type f \( -name '*.php' -o -name '*.inc' \) -print0 |
 "$PHP_BIN" tests/steering_preflight.php
 "$PHP_BIN" tests/steering.php
 python3 -B tests/steering_daemon.py "$PHP_BIN"
+python3 -B tests/steering_startup.py "$PHP_BIN"
 "$PHP_BIN" tests/config_edits.php
 python3 -B tests/widget.py "$PHP_BIN"
 "$PHP_BIN" tests/release.php

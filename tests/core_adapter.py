@@ -248,6 +248,8 @@ def run(php, core, output, replay, family, links, vti=False):
             assert "round-robin sticky-address" in sticky_pool, sticky_pool
             sticky_backup = observe([100, 0], "weighted-sticky-backup")
             assert "sticky-address" not in sticky_backup and f'route-to ({next_hop("GW_B")})' in sticky_backup, sticky_backup
+            rules["weighted-sticky-pool"] = sticky_pool
+            rules["weighted-sticky-backup"] = sticky_backup
             config = legacy
             print("ok - weighted members, sticky option, one eligible next hop, and an empty SLA set reached the native filter compiler")
 

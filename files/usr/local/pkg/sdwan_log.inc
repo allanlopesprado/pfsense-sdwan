@@ -83,6 +83,7 @@ function sdwan_log_plan(array $state, string $kind, array $snapshot, string $cau
 			'status' => 'Cannot publish the observation snapshot.',
 			'bindings' => 'Invalid forwarding bindings. No path was authorized for them.',
 			'reload' => 'Cannot record the native filter reload request.',
+			'startup_filter' => 'Cannot confirm withdrawal of the previous forwarding rule. Observer will retry starting.',
 			default => 'Gateway observation failed.',
 		};
 		$last = $state['failure_at'] ?? null;

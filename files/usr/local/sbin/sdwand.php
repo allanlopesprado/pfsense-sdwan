@@ -72,6 +72,10 @@ function sdwan_gateway_observations(array $names, array $inventory): array {
 	return $observations;
 }
 
+function sdwan_load_steering(): void {
+	require_once('/usr/local/pkg/sdwan_steering.inc');
+}
+
 function sdwan_observe_once(): void {
 	$lock = fopen(SDWAN_SNAPSHOT_PATH . '.lock', 'c');
 	if ($lock === false) {
@@ -109,7 +113,7 @@ function sdwan_observe_once(): void {
 		/* Stock systems without bindings never run the native adapter. */
 		$bound = config_get_path('gateways/sdwan_bindings/item', []);
 		if ($bound || is_file($receipt_path)) {
-			require_once('/usr/local/pkg/sdwan_steering.inc');
+			sdwan_load_steering();
 			if (sdwan_steering_supported()) {
 				$prior = sdwan_current_snapshot($config, $inventory);
 				try {
@@ -209,6 +213,14 @@ if (PHP_SAPI !== 'cli' || !in_array(array_slice($argv, 1), [[], ['--once']], tru
 }
 $once = count($argv) === 2;
 if (!$once) {
+	if (config_get_path('gateways/sdwan_bindings/item', [])) {
+		sdwan_load_steering();
+		if (!sdwan_steering_retire_on_start()) {
+			// The FreeBSD daemon supervisor retries service starts.
+			sdwan_log_event('error', [], 'startup_filter');
+			exit(1);
+		}
+	}
 	sdwan_log_event('start');
 }
 do {

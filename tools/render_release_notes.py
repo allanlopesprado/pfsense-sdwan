@@ -53,7 +53,7 @@ def render_release(index, changes, repository, tags, run_id=None):
         evidence.append(f"[Compare {previous} with {tag}]({repo_url}/compare/{previous}...{tag})")
 
     return "\n".join([
-        f"{maturity.capitalize()} package for **pfSense CE 2.9.1** on amd64.",
+        f"{maturity.capitalize()} package for **pfSense CE 2.9.1 and 2.9.2** on amd64.",
         "",
         "## What changed",
         "",

@@ -14,7 +14,9 @@ jobs:
         with:
           persist-credentials: false
       - name: Verify native filter reload acknowledgement and reconciliation
-        run: python3 -B tests/steering_daemon.py php
+        run: |
+          python3 -B tests/steering_daemon.py php
+          python3 -B tests/steering_startup.py php
       - name: Verify probes and native forwarding before packaging
         run: |
           php tests/behavior.php

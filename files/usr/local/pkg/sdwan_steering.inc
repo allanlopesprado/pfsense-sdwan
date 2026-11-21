@@ -483,6 +483,82 @@ function sdwan_steering_write_receipt(string $path, array $receipt): bool {
 	}
 }
 
+/* A restarted observer withdraws the interrupted decision before sampling. A
+ * loaded pass rule can survive its publisher and the expiration of its file. */
+function sdwan_steering_retire_on_start(): bool {
+	if (!sdwan_steering_supported() || is_platform_booting() ||
+	    config_path_enabled('system', 'disablefilter')) {
+		return true;
+	}
+	$lock = @fopen(SDWAN_SNAPSHOT_PATH . '.lock', 'c');
+	if ($lock === false) {
+		return false;
+	}
+	try {
+		clearstatcache();
+		if (!flock($lock, LOCK_EX | LOCK_NB) || !config_read_file(false, true)) {
+			return false;
+		}
+		$trackers = [];
+		foreach ((array)config_get_path(SDWAN_BINDINGS_PATH . '/item', []) as $binding) {
+			foreach ((array)($binding['trackers']['item'] ?? []) as $tracker) {
+				if ((is_int($tracker) || is_string($tracker)) && preg_match('/^[1-9][0-9]{0,9}$/D', (string)$tracker)) {
+					$trackers[$tracker] = true;
+				}
+			}
+		}
+		if (!$trackers) {
+			return true;
+		}
+		$path = SDWAN_SNAPSHOT_PATH . '.forwarded';
+		if (is_file(SDWAN_SNAPSHOT_PATH) && !unlink(SDWAN_SNAPSHOT_PATH)) {
+			return false;
+		}
+		$closed = static function () use ($trackers): bool {
+			$rules = sdwan_steering_pf_rules();
+			if ($rules === null) {
+				return false;
+			}
+			foreach ($rules as $rule) {
+				if (str_starts_with($rule, 'pass ') && preg_match('/\bridentifier ([0-9]+)\s*$/D', $rule, $id) &&
+				    isset($trackers[$id[1]])) {
+					return false;
+				}
+			}
+			return true;
+		};
+		if ($closed()) {
+			return !is_file($path) || unlink($path);
+		}
+		$signature = sdwan_config_revision(['startup', array_keys($trackers)]);
+		$receipt = sdwan_steering_read_receipt($path);
+		$now = time();
+		if (($receipt['signature'] ?? null) !== $signature || $receipt['requested_at'] > $now) {
+			$receipt = ['signature' => $signature, 'attempts' => 0, 'requested_at' => 0,
+			    'accepted' => false, 'confirmed' => false];
+		}
+		if ($receipt['attempts'] >= SDWAN_RELOAD_MAX_ATTEMPTS ||
+		    $now - $receipt['requested_at'] < SDWAN_RELOAD_RETRY_INTERVAL) {
+			return false;
+		}
+		$receipt['attempts']++;
+		$receipt['requested_at'] = $now;
+		if (!sdwan_steering_write_receipt($path, $receipt) || !sdwan_steering_request_reload()) {
+			return false;
+		}
+		$deadline = hrtime(true) + 5_000_000_000;
+		do {
+			if ($closed()) {
+				return !is_file($path) || unlink($path);
+			}
+			usleep(250000);
+		} while (hrtime(true) < $deadline);
+		return false;
+	} finally {
+		fclose($lock);
+	}
+}
+
 function sdwan_steering_pf_status(array $binding, array $state, array $inventory, ?array $lines): string {
 	if ($lines === null) {
 		return 'unavailable';

@@ -380,8 +380,13 @@ if [ -n "${SDWAN_RENDERED_RULES:-}" ]; then
     : >"$work/weighted-replies"
     for seq in $(jot 18); do request 192.0.2.162 "weighted-$seq" >>"$work/weighted-replies"; done
     awk '$1=="198.51.100.1"{a++} $1=="203.0.113.1"{b++} END{exit !(NR==18 && a==6 && b==12)}' "$work/weighted-replies"
-    weighted_rule backup
+    weighted_rule sticky-pool
+    : >"$work/sticky-replies"
+    for seq in $(jot 6); do request 192.0.2.162 "sticky-$seq" >>"$work/sticky-replies"; done
+    awk 'NR==1{chosen=$1} $1!=chosen{bad=1} END{exit !(NR==6 && !bad && (chosen=="198.51.100.1" || chosen=="203.0.113.1"))}' "$work/sticky-replies"
+    weighted_rule sticky-backup
     expect_roundtrip 192.0.2.162 203.0.113.1 only-eligible-weighted
+    echo 'ok - native sticky option kept new sessions from the same source on one eligible WAN'
     weighted_rule blocked
     if request 192.0.2.162 weighted-no-member >"$work/weighted-blocked"; then
         echo 'An empty weighted pool allowed a new connection' >&2
