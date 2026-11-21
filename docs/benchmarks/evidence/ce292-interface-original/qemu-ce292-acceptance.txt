@@ -1,0 +1,80 @@
+pfSense CE 2.9.2-RELEASE / SD-WAN v0.4.28
+2026-11-21 — isolated QEMU, three synthetic interfaces and no production config
+The VM was assembled from the verified signed Netgate package set. The original catalogues and read-only media stayed local.
+The first WAN1 interruption was sampled while the rule was pending. The extended repetition confirmed WAN2 in PF.
+The pre- and post-restore hashes of the tested configuration scope match: 345fe8660867ecc6d3d9dddd98d6a4bc5b8847a53a24ab1c37d1270f386df4a1
+
+Observed native package, decision, kernel and PF output follows.
+
+FreeBSD 16.0-CURRENT #0 RELENG_2_9_2-n256191-f78ac9bd635f: Thu Nov 19 20:24:57 UTC 2026
+FreeBSD 16.0-CURRENT #0 RELENG_2_9_2-n256191-f78ac9bd635f: Thu Nov 19 20:24:57 UTC 2026
+FreeBSD 16.0-CURRENT #0 RELENG_2_9_2-n256191-f78ac9bd635f: Thu Nov 19 20:24:57 UTC 2026
+FreeBSD 16.0-CURRENT #0 RELENG_2_9_2-n256191-f78ac9bd635f: Thu Nov 19 20:24:57 UTC 2026
+2.9.2-RELEASE
+pfSense 2.9.2
+pfSense-system 2.9.2
+pfSense-kernel-pfSense 2.9.2
+Installing pfSense-pkg-SDWAN-0.4.28...
+Checking pfSense-pkg-SDWAN: . done
+Native reload finished. Inspect loaded trackers separately.
+FreeBSD 16.0-CURRENT #0 RELENG_2_9_2-n256191-f78ac9bd635f: Thu Nov 19 20:24:57 UTC 2026
+Bound via the native config and reload path.
+nginx: configuration file /var/etc/nginx-webConfigurator.conf test is successful
+    "config_scope_sha256": "345fe8660867ecc6d3d9dddd98d6a4bc5b8847a53a24ab1c37d1270f386df4a1",
+    "binding": "present",
+    "snapshot_epoch": 1795288089,
+    "gateway": "LAB_WAN1",
+    "pf": "applied"
+kern.boottime: { sec = 1795287905, usec = 66838 } Sat Nov 21 19:05:05 2026
+sdwand is running as pid 48901.
+            "gateway": "LAB_WAN1",
+pass in quick on em1 route-to (em0 198.18.10.2) inet proto tcp from 192.168.1.10 to any port = 18080 flags S/SA keep state (if-bound) label "id=771292101" label "gw=1:LAB_SD" label "tags=user_rule" label "descr=Lab SD-WAN TCP 18080" ridentifier 771292101
+block drop in quick on em1 inet proto tcp from 192.168.1.10 to any port = 18080 flags S/SA label "id=771292102" label "tags=user_rule" label "descr=Lab SD-WAN fallback block" ridentifier 771292102
+LAB_WAN1_DOWN
+    "config_scope_sha256": "345fe8660867ecc6d3d9dddd98d6a4bc5b8847a53a24ab1c37d1270f386df4a1",
+    "binding": "present",
+    "snapshot_epoch": 1795288151,
+    "gateway": "LAB_WAN1",
+    "pf": "pending"
+block drop in quick on em1 inet proto tcp from 192.168.1.10 to any port = 18080 label "id=771292101" label "tags=user_rule" label "descr=Lab SD-WAN TCP 18080" ridentifier 771292101
+LAB_BOTH_DOWN
+    "config_scope_sha256": "345fe8660867ecc6d3d9dddd98d6a4bc5b8847a53a24ab1c37d1270f386df4a1",
+    "binding": "present",
+    "snapshot_epoch": 1795288182,
+    "gateway": null,
+    "pf": "blocked"
+block drop in quick on em1 inet proto tcp from 192.168.1.10 to any port = 18080 label "id=771292101" label "tags=user_rule" label "descr=Lab SD-WAN TCP 18080" ridentifier 771292101
+LAB_LINKS_RESTORED
+    "config_scope_sha256": "345fe8660867ecc6d3d9dddd98d6a4bc5b8847a53a24ab1c37d1270f386df4a1",
+    "binding": "present",
+    "snapshot_epoch": 1795288214,
+    "gateway": "LAB_WAN1",
+    "pf": "applied"
+LAB_WAN1_EXTENDED
+    "config_scope_sha256": "345fe8660867ecc6d3d9dddd98d6a4bc5b8847a53a24ab1c37d1270f386df4a1",
+    "binding": "present",
+    "snapshot_epoch": 1795288306,
+    "gateway": "LAB_WAN2",
+    "pf": "applied"
+pass in quick on em1 route-to (em2 198.18.20.2) inet proto tcp from 192.168.1.10 to any port = 18080 flags S/SA keep state (if-bound) label "id=771292101" label "gw=2:LAB_SD" label "tags=user_rule" label "descr=Lab SD-WAN TCP 18080" ridentifier 771292101
+Unbound via the native config and reload path.
+LAB_UNBOUND
+    "config_scope_sha256": "99e9ca43479bb3ac2e26d73e4590aaae88663159e7447586bbd1304117a2af1b",
+    "binding": "absent",
+    "snapshot_epoch": 1795288358,
+    "gateway": null,
+    "pf": "native"
+pass in quick on em1 route-to (em0 198.18.10.2) inet proto tcp from 192.168.1.10 to any port = 18080 flags S/SA keep state (if-bound) label "id=771292101" label "gw=1:LAB_SD" label "tags=user_rule" label "descr=Lab SD-WAN TCP 18080" ridentifier 771292101
+Native configuration restore succeeded. Run reboot to activate the full scenario.
+FreeBSD 16.0-CURRENT #0 RELENG_2_9_2-n256191-f78ac9bd635f: Thu Nov 19 20:24:57 UTC 2026
+LAB_RESTORED_REBOOT
+    "config_scope_sha256": "345fe8660867ecc6d3d9dddd98d6a4bc5b8847a53a24ab1c37d1270f386df4a1",
+    "binding": "present",
+    "snapshot_epoch": 1795288636,
+    "gateway": "LAB_WAN1",
+    "pf": "applied"
+kern.boottime: { sec = 1795288422, usec = 68374 } Sat Nov 21 19:13:42 2026
+sdwand is running as pid 48113.
+            "gateway": "LAB_WAN1",
+pass in quick on em1 route-to (em0 198.18.10.2) inet proto tcp from 192.168.1.10 to any port = 18080 flags S/SA keep state (if-bound) label "id=771292101" label "gw=1:LAB_SD" label "tags=user_rule" label "descr=Lab SD-WAN TCP 18080" ridentifier 771292101
+block drop in quick on em1 inet proto tcp from 192.168.1.10 to any port = 18080 flags S/SA label "id=771292102" label "tags=user_rule" label "descr=Lab SD-WAN fallback block" ridentifier 771292102

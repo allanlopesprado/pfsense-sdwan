@@ -1,0 +1,24 @@
+{
+    "php": "8.4.28",
+    "platform": "Windows",
+    "source_tag": "v0.4.28",
+    "sla": {
+        "name": "sla",
+        "latency_ms": "40",
+        "rttsd_ms": "30",
+        "loss_pct": "5"
+    },
+    "wan_cost": {
+        "WAN1": 2,
+        "WAN2": 1
+    },
+    "samples_per_WAN": 27,
+    "paired_threshold_cases": 729,
+    "selected": {
+        "WAN1": 152,
+        "WAN2": 216,
+        "no_candidate": 361
+    },
+    "transition_steps": 14,
+    "configured_preference_hold_seconds": 30
+}

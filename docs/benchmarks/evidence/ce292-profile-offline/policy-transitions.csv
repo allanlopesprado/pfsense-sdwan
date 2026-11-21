@@ -1,0 +1,15 @@
+sequence,simulated_seconds,wan1_status,wan2_status,wan2_primary,wan2_secondary,preferred,expected,actual,pending_preference,wan2_reason
+link_loss_and_recovery,0,online,online,Passed,Passed,WAN2,WAN2,WAN2,,Eligible
+link_loss_and_recovery,1,online,down,Passed,Passed,WAN1,WAN1,WAN1,,"Gateway is down"
+link_loss_and_recovery,2,online,online,Passed,Passed,WAN2,WAN1,WAN1,WAN2,Eligible
+link_loss_and_recovery,31,online,online,Passed,Passed,WAN2,WAN1,WAN1,WAN2,Eligible
+link_loss_and_recovery,32,online,online,Passed,Passed,WAN2,WAN2,WAN2,,Eligible
+link_loss_and_recovery,33,down,down,Passed,Passed,,no_candidate,no_candidate,,"Gateway is down"
+link_loss_and_recovery,34,down,online,Passed,Passed,WAN2,WAN2,WAN2,,Eligible
+service_probes_and_preference_hold,0,online,online,Failed,Passed,WAN2,WAN2,WAN2,,Eligible
+service_probes_and_preference_hold,1,online,online,Failed,Failed,WAN1,WAN1,WAN1,,"No configured service check passed"
+service_probes_and_preference_hold,2,online,online,Passed,Passed,WAN2,WAN1,WAN1,WAN2,Eligible
+service_probes_and_preference_hold,10,online,unknown,Unavailable,Unavailable,WAN1,WAN1,WAN1,,"No valid gateway measurement"
+service_probes_and_preference_hold,11,online,online,Passed,Passed,WAN2,WAN1,WAN1,WAN2,Eligible
+service_probes_and_preference_hold,40,online,online,Passed,Passed,WAN2,WAN1,WAN1,WAN2,Eligible
+service_probes_and_preference_hold,41,online,online,Passed,Passed,WAN2,WAN2,WAN2,,Eligible

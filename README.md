@@ -2,7 +2,7 @@
 
 An experimental package for monitoring links, comparing gateways against SLAs, and viewing path recommendations in the **pfSense CE 2.9.1 and 2.9.2** WebGUI. This project is independent of Netgate.
 
-[Download the latest release](https://github.com/allanlopesprado/pfsense-sdwan/releases/latest) · [Installation](#install-from-diagnostics--command-prompt) · [Changelog](CHANGELOG.md) · [Lab results](docs/RESULTS.md)
+[Download the latest release](https://github.com/allanlopesprado/pfsense-sdwan/releases/latest) · [Installation](#install-from-diagnostics--command-prompt) · [Changelog](CHANGELOG.md) · [A/B benchmarks and raw data](docs/benchmarks/README.md)
 
 [![Package checks](https://github.com/allanlopesprado/pfsense-sdwan/actions/workflows/checks.yml/badge.svg?branch=main)](https://github.com/allanlopesprado/pfsense-sdwan/actions/workflows/checks.yml)
 
@@ -55,6 +55,7 @@ On CE 2.9.2, upgrade manually once from SD-WAN 0.4.27 or earlier. Version 0.4.28
 - [Versioning and publishing](docs/VERSIONING.md)
 - [Configuration impact matrix](docs/CONFIGURATIONS.md)
 - [Validation scenarios and tests](docs/VALIDATION.md)
+- [A/B benchmarks, timings, and raw data](docs/benchmarks/README.md)
 - [Lab results and evidence](docs/RESULTS.md)
 - [Compatibility with IDS, IPS, and other packages](docs/PACKAGE-COMPATIBILITY.md)
 - [IPsec, CARP, NAT, and routing integration](docs/INTEGRATION.md)

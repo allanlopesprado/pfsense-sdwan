@@ -1,0 +1,37 @@
+FreeBSD  16.0-CURRENT FreeBSD 16.0-CURRENT #1 RELENG_2_9_1-n256136-65fce9be026d: Wed Nov 11 02:28:50 UTC 2026     root@pfsense-build-release-amd64-2.eng.atx.netgate.com:/var/jenkins/workspace/pfSense-CE-snapshots-2_9_1-main/obj/amd64/srAtMWOb/var/jenkins/workspace/pfSense-CE-snapshots-2_9_1-main/sources/FreeBSD-src-RELENG_2_9_1/amd64.amd64/sys/pfSense amd64
+pfSense-base 2.9.1
+pfSense-kernel-pfSense 2.9.1
+['To use the stroke interface by default either compile the port without the vici option or', 'set \'strongswan_interface="stroke"\' in your rc.conf file.', '=====', 'Message from php85-pfSense-module-2.9.1:', '', '--', 'This file has been added to automatically load the installed extension:', '/usr/local/etc/php/ext-20-pfSense.ini.sample']
+pfSense 2.9.1
+pfSense-system 2.9.1
+pfSense-default-config-serial 2.9.1
+CE_OFFLINE_INSTALL_OK
+2.9.1-RELEASE
+FreeBSD pfSense.home.arpa 16.0-CURRENT FreeBSD 16.0-CURRENT #1 RELENG_2_9_1-n256136-65fce9be026d: Wed Nov 11 02:28:50 UTC 2026     root@pfsense-build-release-amd64-2.eng.atx.netgate.com:/var/jenkins/workspace/pfSense-CE-snapshots-2_9_1-main/obj/amd64/srAtMWOb/var/jenkins/workspace/pfSense-CE-snapshots-2_9_1-main/sources/FreeBSD-src-RELENG_2_9_1/amd64.amd64/sys/pfSense amd64
+['Loading package instructions...', 'Custom commands...', 'Executing custom_php_install_command()...done.', 'Menu items... done.', 'Services... done.', 'Writing configuration... done.']
+PACKAGE_INSTALLED_WITH_NATIVE_HOOKS; STOCK_MODE_OBSERVATION
+baseline PF pass in log quick on vtnet1 route-to (vtnet0 198.51.100.2) inet proto tcp from 192.0.2.11 to 192.0.2.162 port = echo flags S/SA keep state (if-bound) label "id=41001" label "gw=1:G" label "tags=user_rule" label "descr=ERP pass" ridentifier 41001
+baseline PF pass in log quick on vtnet1 route-to (vtnet0 198.51.100.2) inet proto tcp from 192.0.2.11 to 192.0.2.163 port = echo flags S/SA keep state (if-bound) label "id=41003" label "gw=1:B" label "tags=user_rule" label "descr=Backup pass" ridentifier 41003
+baseline: ERP='198.51.100.1 baseline' Backup='198.51.100.1 baseline'
+WAN1 DNS replied during the ERP outage
+ERP outage PF pass in log quick on vtnet1 route-to (vtnet2 203.0.113.2) inet proto tcp from 192.0.2.11 to 192.0.2.162 port = echo flags S/SA keep state (if-bound) label "id=41001" label "gw=2:G" label "tags=user_rule" label "descr=ERP pass" ridentifier 41001
+ERP outage PF pass in log quick on vtnet1 route-to (vtnet0 198.51.100.2) inet proto tcp from 192.0.2.11 to 192.0.2.163 port = echo flags S/SA keep state (if-bound) label "id=41003" label "gw=1:B" label "tags=user_rule" label "descr=Backup pass" ridentifier 41003
+ERP outage: ERP='203.0.113.1 ERP outage' Backup='198.51.100.1 ERP outage'
+Native event acknowledged and applied. Preserved established PF states=[('7d5b006b00000000', '9d326647'), ('7e5b006b00000000', '9d326647'), ('7f5b006b00000000', '9d326647'), ('805b006b00000000', '9d326647')]
+recovery PF pass in log quick on vtnet1 route-to (vtnet0 198.51.100.2) inet proto tcp from 192.0.2.11 to 192.0.2.162 port = echo flags S/SA keep state (if-bound) label "id=41001" label "gw=1:G" label "tags=user_rule" label "descr=ERP pass" ridentifier 41001
+recovery PF pass in log quick on vtnet1 route-to (vtnet0 198.51.100.2) inet proto tcp from 192.0.2.11 to 192.0.2.163 port = echo flags S/SA keep state (if-bound) label "id=41003" label "gw=1:B" label "tags=user_rule" label "descr=Backup pass" ridentifier 41003
+recovery: ERP='198.51.100.1 recovery' Backup='198.51.100.1 recovery'
+both WANs down PF block drop in log quick on vtnet1 inet proto tcp from 192.0.2.11 to 192.0.2.162 port = echo label "id=41001" label "tags=user_rule" label "descr=ERP pass" ridentifier 41001
+both WANs down PF block drop in log quick on vtnet1 inet proto tcp from 192.0.2.11 to 192.0.2.163 port = echo label "id=41003" label "tags=user_rule" label "descr=Backup pass" ridentifier 41003
+both WANs down: ERP='' Backup=''
+WANs recovered PF pass in log quick on vtnet1 route-to (vtnet0 198.51.100.2) inet proto tcp from 192.0.2.11 to 192.0.2.162 port = echo flags S/SA keep state (if-bound) label "id=41001" label "gw=1:G" label "tags=user_rule" label "descr=ERP pass" ridentifier 41001
+WANs recovered PF pass in log quick on vtnet1 route-to (vtnet0 198.51.100.2) inet proto tcp from 192.0.2.11 to 192.0.2.163 port = echo flags S/SA keep state (if-bound) label "id=41003" label "gw=1:B" label "tags=user_rule" label "descr=Backup pass" ridentifier 41003
+WANs recovered: ERP='198.51.100.1 WANs recovered' Backup='198.51.100.1 WANs recovered'
+after reboot PF pass in log quick on vtnet1 route-to (vtnet0 198.51.100.2) inet proto tcp from 192.0.2.11 to 192.0.2.162 port = echo flags S/SA keep state (if-bound) label "id=41001" label "gw=1:G" label "tags=user_rule" label "descr=ERP pass" ridentifier 41001
+after reboot PF pass in log quick on vtnet1 route-to (vtnet0 198.51.100.2) inet proto tcp from 192.0.2.11 to 192.0.2.163 port = echo flags S/SA keep state (if-bound) label "id=41003" label "gw=1:B" label "tags=user_rule" label "descr=Backup pass" ridentifier 41003
+after reboot: ERP='198.51.100.1 after reboot' Backup='198.51.100.1 after reboot'
+REBOOT_WITH_NATIVE_SERVICES_OK
+native rollback: ERP='198.51.100.1 native rollback' Backup='198.51.100.1 native rollback'
+package rollback: ERP='198.51.100.1 package rollback' Backup='198.51.100.1 package rollback'
+NATIVE_AND_PACKAGE_ROLLBACK_OK
+CE_291_TWO_WAN_APPLIANCE_ACCEPTED
