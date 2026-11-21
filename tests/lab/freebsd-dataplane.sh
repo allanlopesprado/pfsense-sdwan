@@ -117,6 +117,13 @@ load_rules() {
 }
 : >"$work/selected.pf"
 load_rules
+if [ "${SDWAN_ERP_ONLY:-0}" = 1 ]; then
+    echo 'Testing ERP-only loss in a fresh VNET topology'
+    python3 -B "$repo/tests/lab/freebsd_dpinger.py" "$firewall" "$remote" \
+        "$remote_a" "$remote_b" "$remote_c" "$work/remote.pf" \
+        --erp "${SDWAN_NATIVE_CORE:?The ERP test needs native pfSense sources}" "$work" "$client" "$lan"
+    exit 0
+fi
 baseline() {
     jexec "$firewall" pfctl -sn
     jexec "$firewall" pfctl -sr | awk '!/label "(descr=)?(path-a|path-b|path-c|no-member)"/'
@@ -529,11 +536,8 @@ if [ -n "${SDWAN_RENDERED_RULES:-}" ]; then
 fi
 
 if [ "${SDWAN_REAL_DPINGER:-0}" = 1 ]; then
-    set -- "$firewall" "$remote" "$remote_a" "${wan_b%?}b" "$remote_c" "$work/remote.pf"
-    if [ -n "${SDWAN_NATIVE_CORE:-}" ]; then
-        set -- "$@" --erp "$SDWAN_NATIVE_CORE" "$work" "$client" "$lan"
-    fi
-    python3 -B "$repo/tests/lab/freebsd_dpinger.py" "$@"
+    python3 -B "$repo/tests/lab/freebsd_dpinger.py" "$firewall" "$remote" \
+        "$remote_a" "$remote_b" "$remote_c" "$work/remote.pf"
 fi
 
 sh "$repo/tests/lab/freebsd-vti-no-sa.sh" "$firewall" "$remote" "$wan_a" "$remote_a" "$work"

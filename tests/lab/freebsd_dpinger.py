@@ -57,7 +57,7 @@ def verify_erp(work, core, rules_dir, client, lan, firewall, peer, remote_a, rem
     settings["policies"]["item"].append(adapter["installedpackages/sdwan"]["policies"]["item"][0])
     for member, target in zip(settings["members"]["item"], (upstream, standby_probe)):
         member["probe_primary"] = f"tcp://{target}:7"
-    backup_service = "192.0.2.164"
+    backup_service = "192.0.2.165"
     jexec(peer, "ifconfig", "lo0", "inet", f"{backup_service}/32", "alias")
     cleanup.callback(jexec, peer, "ifconfig", "lo0", "inet", backup_service, "-alias")
     config_path = work / "fixture.json"
