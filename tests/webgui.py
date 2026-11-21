@@ -196,7 +196,6 @@ def run(php, classes, screenshot_dir=None):
         for ui in (root / "sdwan/ui.inc.php", root / "sdwan/forwarding.php", root / "sdwan/updates.php"):
             ui.write_text(ui.read_text().replace("'/usr/local/pkg/", "__DIR__ . '/../"))
         version = root / "pfsense-version"
-        version.write_text("2.9.1-RELEASE\n")
         release = root / "sdwan_release.inc"
         release.write_text(release.read_text().replace("'/etc/version'", repr(str(version))))
         engine = root / "sdwan_engine.inc"
@@ -238,7 +237,8 @@ def run(php, classes, screenshot_dir=None):
             "slas": [{"name": n, "latency_ms": "25", "loss_pct": "0"} for n in ("1", "01")],
             "policies": [{"name": "VOICE", "members": ["backup", "01"], "sla": "01", "strategy": "cost"}]}
 
-        def request(page, **params):
+        def request(page, *, platform_version="2.9.1-RELEASE", **params):
+            version.write_text(platform_version + "\n")
             data = {"native": native, "config": config, **params}
             result = subprocess.run([php, "-d", "disable_functions=curl_init,curl_setopt_array,curl_exec,curl_getinfo",
                                      str(ROOT / "tests/fixtures/gui_request.php"), str(root), str(classes), page], input=json.dumps(data), text=True,
@@ -407,6 +407,23 @@ def run(php, classes, screenshot_dir=None):
         assert "could not be verified" in failed and "UPGRADES=1" in failed
         installed = request("updates", post=action)
         assert "0.4.8 was installed and the observer is running" in installed and "UPGRADES=1" in installed
+        ce292 = {"platform_version": "2.9.2-RELEASE"}
+        assert "Upgrade to 0.4.8" in request("updates", post=checked, **ce292)
+        installed = request("updates", post=action, **ce292)
+        assert "0.4.8 was installed and the observer is running" in installed and "UPGRADES=1" in installed
+        current = request("updates", post=checked, installed_release="0.4.8", **ce292)
+        assert 'name="upgrade_release"' not in current and "up to date" in current
+        replay = request("updates", post=action, installed_release="0.4.8", **ce292)
+        assert "no longer newer" in replay and "UPGRADES=0" in replay
+        for options in [
+            {"platform_version": "2.9.0-RELEASE"},
+            {"platform_version": "2.9.2-DEVELOPMENT"},
+            {**ce292, "abi": "FreeBSD:16:aarch64"},
+        ]:
+            checked_platform = request("updates", post=checked, **options)
+            assert 'name="upgrade_release"' not in checked_platform and "incompatible" in checked_platform
+            denied_platform = request("updates", post=action, **options)
+            assert "incompatible" in denied_platform and "UPGRADES=0" in denied_platform
         print("ok - native CSRF, install permission, stale target, compatibility, checksum and upgrade results")
 
         if screenshot_dir:

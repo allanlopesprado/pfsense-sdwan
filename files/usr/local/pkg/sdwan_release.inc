@@ -76,7 +76,8 @@ function sdwan_release_check(): ?array {
 }
 
 function sdwan_release_compatible(): bool {
-	return trim((string)@file_get_contents('/etc/version')) === '2.9.1-RELEASE' &&
+	$version = trim((string)@file_get_contents('/etc/version'));
+	return in_array($version, ['2.9.1-RELEASE', '2.9.2-RELEASE'], true) &&
 	    pkg_exec('config ABI', $abi, $stderr) === 0 && trim($abi) === 'FreeBSD:16:amd64';
 }
 

@@ -88,13 +88,18 @@ for baseline in 0.2.0 0.3.0 0.4.0 0.4.1 0.4.2 0.4.3 0.4.4 0.4.5 0.4.6 0.4.7 0.4.
     run_pkg delete -Dy "$package"
 done
 baseline=0.4.18
-run_pkg add -I "$PWD/dist/$package-$baseline.pkg"
-printf '2.9.1-RELEASE\n' > "$root/pfsense-version"
 sed "s|'/etc/version'|'$root/pfsense-version'|" files/usr/local/pkg/sdwan_release.inc > "$root/sdwan_release.inc"
-php -n -d disable_functions=curl_init,curl_setopt_array,curl_exec,curl_getinfo \
-    tests/release_transport.php "$root/sdwan_release.inc" "$dbroot" "$version" "$PWD/dist/$package-$version.pkg" "$baseline"
-test "$(run_pkg query '%v' "$package")" = "$version"
-run_pkg check -s "$package"
+for platform in 2.9.1-RELEASE 2.9.2-RELEASE; do
+    if run_pkg info -e "$package"; then
+        run_pkg delete -Dy "$package"
+    fi
+    run_pkg add -I "$PWD/dist/$package-$baseline.pkg"
+    printf '%s\n' "$platform" > "$root/pfsense-version"
+    php -n -d disable_functions=curl_init,curl_setopt_array,curl_exec,curl_getinfo \
+        tests/release_transport.php "$root/sdwan_release.inc" "$dbroot" "$version" "$PWD/dist/$package-$version.pkg" "$baseline"
+    test "$(run_pkg query '%v' "$package")" = "$version"
+    run_pkg check -s "$package"
+done
 # Exercise the shipped service wrapper with FreeBSD rc.subr and daemon(8).
 # Substitute a temporary pidfile and a sleeping process for the pfSense worker.
 cat > "$root/observer" <<'WORKER'

@@ -46,6 +46,8 @@ If installation defers WebGUI registration, wait for PHP-FPM to return and run `
 
 For installations running **0.4.8** or later, open **SD-WAN → Updates**, click **Check GitHub**, and select **Upgrade to …** when a release is available. This action uses the native package installation privilege.
 
+On CE 2.9.2, SD-WAN versions through 0.4.27 require a one-time manual upgrade to a package whose release notes list CE 2.9.2 WebGUI updates.
+
 [pfSense log settings and severity](https://docs.netgate.com/pfsense/en/latest/monitoring/logs/settings.html) · [Removal and rollback](docs/LAB.md#removal-and-rollback)
 
 ## Development and validation
