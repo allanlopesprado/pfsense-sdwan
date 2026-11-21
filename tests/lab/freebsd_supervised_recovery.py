@@ -204,12 +204,42 @@ def run(parent, rendered, client, firewall, lan, wan_a, wan_b):
                 time.sleep(0.1)
             else:
                 raise AssertionError("The restarted observer did not confirm the recovered PF path")
+
+            # Losing both processes is different from a supervised worker crash.
+            # Stopping the publisher cannot change the rule already in the kernel.
+            supervisor_pid, worker_pid = supervisor.read_text().strip(), child.read_text().strip()
+            assert supervisor_pid != worker_pid and all(
+                pid.isdecimal() and int(pid) > 1 for pid in (supervisor_pid, worker_pid))
+            jexec(firewall, "/bin/kill", "-STOP", worker_pid, check=True)
+            read_current = ("require 'sdwan_steering.inc'; "
+                            "echo sdwan_current_snapshot(sdwan_get_config(), sdwan_gateways()) === null ? "
+                            "'expired' : 'current';")
+            assert jexec(firewall, *php, "-r", read_current, check=True).stdout == "current"
+            jexec(firewall, "/bin/kill", "-KILL", supervisor_pid, worker_pid, check=True)
+
+            stale = json.loads(snapshot.read_text())
+            stale["generated_at"] -= 31
+            snapshot.write_text(json.dumps(stale))
+            assert jexec(firewall, *php, "-r", read_current, check=True).stdout == "expired"
+            assert scoped_rule().startswith("pass "), "The test no longer demonstrates the resident-rule limit"
+            still_forwarded = request("192.0.2.162", "supervisor-lost")
+            assert still_forwarded.returncode == 0 and still_forwarded.stdout.strip() == (
+                "203.0.113.1 supervisor-lost"), still_forwarded
+
+            # An independent reload of the emitted guard changes actual PF.
+            load_rules("no-member")
+            assert scoped_rule().startswith("block ")
+            blocked = request("192.0.2.162", "after-independent-reload")
+            assert blocked.returncode and not blocked.stdout, blocked
+            control = request("192.0.2.163", "control-after-reload")
+            assert control.returncode == 0 and control.stdout.strip() == "198.51.100.1 control-after-reload", control
         except Exception:
             if log.is_file():
                 print(log.read_text(), file=sys.stderr)
             raise
     print("ok - the real supervisor restarted the killed worker, withdrew the old pass, and confirmed recovery on WAN B")
     print("ok - the loaded guard blocked a new flow while the old state and independent traffic retained WAN A")
+    print("ok - loss of both processes left an expired decision forwarding until an independent guard reload")
 
 
 if __name__ == "__main__":

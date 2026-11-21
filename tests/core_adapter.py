@@ -211,6 +211,16 @@ def run(php, core, output, replay, family, links, vti=False):
               f"agreed across all {1 << links} availability combinations")
 
         if family == "inet" and links == 2 and not vti:
+            primary = config["reload_gateways"]["GW_A"]
+            config["reload_groups"] = {"G": [{"gw": "GW_A", "int": primary["interface"],
+                                              "gwip": primary["address"], "weight": 1}]}
+            pair = json.loads(compile_rule("render-pair"))
+            assert pair["rules"][0] == compile_rule(), pair
+            assert pair["rules"][1].startswith("block") and "ridentifier 41002" in pair["rules"][1], pair
+            gateway_macros = "\n".join(pair["macros"]).splitlines()
+            assert any(macro.startswith('GWG = "') and next_hop("GW_A") in " ".join(macro.split())
+                       for macro in gateway_macros), pair
+            del config["reload_groups"]
             # Compile the weighted pool and both degraded shapes using the same
             # observer and native renderer as the single-gateway controls.
             legacy = deepcopy(config)

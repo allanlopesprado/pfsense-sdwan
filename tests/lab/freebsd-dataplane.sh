@@ -529,8 +529,11 @@ if [ -n "${SDWAN_RENDERED_RULES:-}" ]; then
 fi
 
 if [ "${SDWAN_REAL_DPINGER:-0}" = 1 ]; then
-    python3 -B "$repo/tests/lab/freebsd_dpinger.py" "$firewall" "$remote" \
-        "$remote_a" "${wan_b%?}b" "$remote_c" "$work/remote.pf"
+    set -- "$firewall" "$remote" "$remote_a" "${wan_b%?}b" "$remote_c" "$work/remote.pf"
+    if [ -n "${SDWAN_NATIVE_CORE:-}" ]; then
+        set -- "$@" --erp "$SDWAN_NATIVE_CORE" "$work" "$client" "$lan"
+    fi
+    python3 -B "$repo/tests/lab/freebsd_dpinger.py" "$@"
 fi
 
 sh "$repo/tests/lab/freebsd-vti-no-sa.sh" "$firewall" "$remote" "$wan_a" "$remote_a" "$work"

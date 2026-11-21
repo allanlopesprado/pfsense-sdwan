@@ -84,6 +84,14 @@ jobs:
           name: native-filter-rules
           path: ${{ runner.temp }}/sdwan-rules/*.pf
           if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-filter-source
+          path: |
+            pfsense-core-fixture/src/etc/inc/filter.inc
+            pfsense-core-fixture/src/etc/inc/globals.inc
+            pfsense-core-fixture/src/etc/inc/util.inc
+          if-no-files-found: error
   freebsd:
     needs: offline
     runs-on: ubuntu-24.04
@@ -100,6 +108,10 @@ jobs:
         with:
           name: native-syslog
           path: lab-syslog
+      - uses: actions/download-artifact@v4
+        with:
+          name: native-filter-source
+          path: lab-core/src/etc/inc
       - name: Configure the Ubuntu dependency mirror
         run: bash .github/scripts/ubuntu-archive.sh
       - name: Test the pinned installer and native forwarding rules in FreeBSD
@@ -109,7 +121,7 @@ jobs:
           usesh: true
           prepare: |
             env ASSUME_ALWAYS_YES=yes pkg bootstrap
-            pkg install -y php84 php84-filter python3 dpinger
+            pkg install -y php84 php84-filter php84-mbstring python3 dpinger git
             php -n -v
           run: |
             set -eu
@@ -117,7 +129,8 @@ jobs:
             sh tests/freebsd-install.sh
             sh tests/lab/freebsd-system-log.sh "$PWD/lab-syslog/syslog.inc"
             sh tests/lab/freebsd-carp.sh
-            SDWAN_REAL_DPINGER=1 SDWAN_RENDERED_RULES="$PWD/lab-rendered" sh tests/lab/freebsd-dataplane.sh
+            SDWAN_REAL_DPINGER=1 SDWAN_RENDERED_RULES="$PWD/lab-rendered" \
+              SDWAN_NATIVE_CORE="$PWD/lab-core" sh tests/lab/freebsd-dataplane.sh
   publish:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main' && startsWith(github.event.head_commit.message, 'Release ')
     needs: [offline, freebsd, ikev2, homologation]

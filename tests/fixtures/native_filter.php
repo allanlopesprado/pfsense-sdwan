@@ -16,7 +16,7 @@ function get_gateways() { return config_get_path('reload_gateways'); }
 function lookup_gateway_ip_by_name($name) { return get_gateways()[$name]['address']; }
 function is_gateway_online($gateway) { return $gateway['online']; }
 function is_gateway_action_enabled($gateway) { return !isset($gateway['action_disable']); }
-function return_gateway_groups_array($fixed) { return ['G' => []]; }
+function return_gateway_groups_array($fixed) { return config_get_path('reload_groups', ['G' => []]); }
 function config_path_enabled($path, $key) { return isset(config_get_path($path, [])[$key]); }
 function get_failover_gateway_group_label_item($gateway) { return []; }
 function interface_has_gateway($interface) { return $interface === 'wan'; }
@@ -30,7 +30,8 @@ set_error_handler(static function ($level, $message, $file) use ($work) {
 	    (str_starts_with($message, 'Undefined array key') || str_starts_with($message, 'Undefined variable'));
 });
 $PFConfig = new class {
-	function set_config($section, $lines, $group, $id) {}
+	public array $gateway_rules = [];
+	function set_config($section, $lines, $group, $id) { $this->gateway_rules = $lines; }
 };
 $g = ['varrun_path' => $work];
 $FilterIflist = [
@@ -51,6 +52,11 @@ if ($operation === 'preview') {
 filter_generate_gateways(); // Starts a single generation, populating the native route inventory.
 if ($operation === 'render') {
 	echo filter_generate_user_rule($rule);
+} elseif ($operation === 'render-pair') {
+	echo json_encode([
+	    'macros' => $PFConfig->gateway_rules,
+	    'rules' => [filter_generate_user_rule($rule), filter_generate_user_rule(config_get_path('filter/rule')[1])],
+	], JSON_THROW_ON_ERROR);
 } elseif ($operation === 'freeze') {
 	// Publishing the newer snapshot between two rule compilations must not split a binding.
 	$first = filter_generate_user_rule($rule);
