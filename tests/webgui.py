@@ -406,11 +406,11 @@ def run(php, classes, screenshot_dir=None):
         failed = request("updates", post=action, service_failure=True)
         assert "could not be verified" in failed and "UPGRADES=1" in failed
         installed = request("updates", post=action)
-        assert "0.4.8 was installed and the observer is running" in installed and "UPGRADES=1" in installed
+        assert "0.4.8 was installed. Check Status for a current observation" in installed and "UPGRADES=1" in installed
         ce292 = {"platform_version": "2.9.2-RELEASE"}
         assert "Upgrade to 0.4.8" in request("updates", post=checked, **ce292)
         installed = request("updates", post=action, **ce292)
-        assert "0.4.8 was installed and the observer is running" in installed and "UPGRADES=1" in installed
+        assert "0.4.8 was installed. Check Status for a current observation" in installed and "UPGRADES=1" in installed
         current = request("updates", post=checked, installed_release="0.4.8", **ce292)
         assert 'name="upgrade_release"' not in current and "up to date" in current
         replay = request("updates", post=action, installed_release="0.4.8", **ce292)

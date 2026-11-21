@@ -170,6 +170,12 @@ verify(sdwan_steering_pf_status($edited_binding, $runtime, $inventory, [str_repl
     sdwan_steering_pf_status($edited_binding, [], $inventory, $loaded) === 'pending' &&
     sdwan_steering_pf_status($edited_binding, $runtime, $inventory, [str_replace('in quick', 'out quick', $loaded[0])]) === 'pending',
     'wrong next hop, wrong tracker and stale samples are never shown as applied');
+$logged = 'pass in log (all, to pflog0) quick on igb2 route-to (igb0 192.0.2.1) inet all ' .
+    'label "descr=ridentifier 401" ridentifier 301 dnpipe 10';
+verify(sdwan_steering_pf_status($edited_binding, $runtime, $inventory, [$logged]) === 'applied' &&
+    sdwan_steering_pf_status($edited_binding, $runtime, $inventory, [str_replace('301 dnpipe', '401 dnpipe', $logged)]) === 'pending' &&
+    sdwan_steering_rule_tracker('label "descr=escaped \" ridentifier 301" queue wan') === null,
+    'logging and shaper modifiers do not hide the real tracker or match a label');
 $dynamic = ['A' => ['device' => 'igb0', 'address' => 'dynamic', 'family' => 'inet', 'interface' => 'wan']];
 $current['fixture/dynamic/wan'] = '192.0.2.1';
 verify(sdwan_steering_pf_status($edited_binding, $runtime, $dynamic, $loaded) === 'applied',
@@ -198,7 +204,7 @@ verify(sdwan_steering_pf_status($edited_binding, $pooled, $inventory, [$sticky])
     'loaded PF verification checks the configured native sticky option');
 unset($current['system']['lb_use_sticky']);
 $runtime['gateway'] = null;
-verify(sdwan_steering_pf_status($edited_binding, $runtime, $inventory, ['block drop in quick on igb2 inet all ridentifier 301']) === 'blocked' &&
+verify(sdwan_steering_pf_status($edited_binding, $runtime, $inventory, ['block drop in log quick on igb2 inet all ridentifier 301 queue shaped']) === 'blocked' &&
     sdwan_steering_pf_status($edited_binding, $runtime, $inventory, $loaded) === 'pending' &&
     sdwan_steering_pf_status($edited_binding, $runtime, $inventory, null) === 'unavailable',
     'blocking is verified from PF and missing output is explicit');

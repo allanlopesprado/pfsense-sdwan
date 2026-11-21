@@ -78,7 +78,7 @@ def run(php):
         stage(work)
         state = work / "snapshot.json"
         receipt = work / "snapshot.json.forwarded"
-        old_pass = ["pass in quick on igb0 inet all ridentifier 301"]
+        old_pass = ["pass in log quick on igb0 inet all ridentifier 301 dnpipe 10"]
         existing = {"bound": True, "booting": False, "abi": 2, "ack": True, "retirement_reads": 1,
                     "rules": old_pass}
 
@@ -118,6 +118,14 @@ def run(php):
         assert (result.returncode, result.stdout) == (1, ""), result
         result = launch(existing | {"rules": []}, reset=False)
         assert (result.returncode, result.stdout) == (77, "initial observation"), result
+        assert not receipt.exists()
+
+        launch(existing | {"ack": False}, paths=True)
+        ledger = json.loads(receipt.read_text())
+        ledger.update(attempts=3, requested_at=int(time.time()) - 301)
+        receipt.write_text(json.dumps(ledger))
+        result = launch(existing, reset=False)
+        assert (result.returncode, result.stdout) == (77, "requested reload; verified PF; initial observation"), result
         assert not receipt.exists()
 
         result = launch(existing | {"rules": ["pass in quick on igb0 inet all ridentifier 401"]}, paths=False)

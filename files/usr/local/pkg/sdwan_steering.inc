@@ -370,7 +370,7 @@ function sdwan_steering_sticky_paths(array $gateways): bool {
 }
 
 function sdwan_steering_loaded_path_matches(string $rule, array $gateways): bool {
-	if (!str_starts_with($rule, 'pass in quick on ') ||
+	if (!preg_match('/^pass in (?:log(?: \([^)]*\))? )?quick on /', $rule) ||
 	    !preg_match('/\broute-to\s+(\{[^}]+\}\s+round-robin(?:\s+sticky-address)?|\([^()]+\))/', $rule, $route)) {
 		return false;
 	}
@@ -432,6 +432,7 @@ function sdwan_steering_resolve_hop(array $gateway): ?string {
 
 const SDWAN_RELOAD_MAX_ATTEMPTS = 3;
 const SDWAN_RELOAD_RETRY_INTERVAL = 30;
+const SDWAN_STARTUP_RETRY_WINDOW = 300;
 
 function sdwan_steering_runtime_signature(array $snapshot, array $inventory): string {
 	$hops = [];
@@ -483,6 +484,13 @@ function sdwan_steering_write_receipt(string $path, array $receipt): bool {
 	}
 }
 
+/* pfctl prints dummynet and queue modifiers after the tracker. Labels may
+ * contain administrator text, so look for the identifier outside quotes. */
+function sdwan_steering_rule_tracker(string $rule): ?string {
+	return preg_match('/"(?:[^"\\\\]|\\\\.)*"(*SKIP)(*F)|\bridentifier ([0-9]{1,10})(?=\s|$)/', $rule, $match)
+	    ? $match[1] : null;
+}
+
 /* A restarted observer withdraws the interrupted decision before sampling. A
  * loaded pass rule can survive its publisher and the expiration of its file. */
 function sdwan_steering_retire_on_start(): bool {
@@ -520,8 +528,7 @@ function sdwan_steering_retire_on_start(): bool {
 				return false;
 			}
 			foreach ($rules as $rule) {
-				if (str_starts_with($rule, 'pass ') && preg_match('/\bridentifier ([0-9]+)\s*$/D', $rule, $id) &&
-				    isset($trackers[$id[1]])) {
+				if (str_starts_with($rule, 'pass ') && isset($trackers[sdwan_steering_rule_tracker($rule)])) {
 					return false;
 				}
 			}
@@ -533,7 +540,8 @@ function sdwan_steering_retire_on_start(): bool {
 		$signature = sdwan_config_revision(['startup', array_keys($trackers)]);
 		$receipt = sdwan_steering_read_receipt($path);
 		$now = time();
-		if (($receipt['signature'] ?? null) !== $signature || $receipt['requested_at'] > $now) {
+		if (($receipt['signature'] ?? null) !== $signature || $receipt['requested_at'] > $now ||
+		    $now - $receipt['requested_at'] >= SDWAN_STARTUP_RETRY_WINDOW) {
 			$receipt = ['signature' => $signature, 'attempts' => 0, 'requested_at' => 0,
 			    'accepted' => false, 'confirmed' => false];
 		}
@@ -589,19 +597,19 @@ function sdwan_steering_pf_status(array $binding, array $state, array $inventory
 	}
 	$matched = [];
 	foreach ($lines as $line) {
-		if (!preg_match('/\bridentifier ([0-9]+)\s*$/D', $line, $identifier) ||
-		    !in_array($identifier[1], $binding['trackers'], true)) {
+		$identifier = sdwan_steering_rule_tracker($line);
+		if (!in_array($identifier, $binding['trackers'], true)) {
 			continue;
 		}
 		[$rule] = explode(' label "', $line, 2);
 		if ($target === null) {
-			if (!preg_match('/^block (?:drop |return\S* )?in quick on /', $rule)) {
+			if (!preg_match('/^block (?:drop |return\S*(?: \([^)]*\))? )?in (?:log(?: \([^)]*\))? )?quick on /', $rule)) {
 				return 'pending';
 			}
 		} elseif (!sdwan_steering_loaded_path_matches($rule, $gateways)) {
 			return 'pending';
 		}
-		$matched[$identifier[1]] = true;
+		$matched[$identifier] = true;
 	}
 	if (count($matched) !== count($binding['trackers'])) {
 		return 'pending';
@@ -631,8 +639,9 @@ function sdwan_steering_state_ids(iterable $lines, array $trackers, string $devi
 			$finish($record);
 			$record = [];
 		}
-		if (preg_match('/\bridentifier\s+([0-9]{1,10})\b/', $line, $tracker)) {
-			$record['tracker'] = $tracker[1];
+		$tracker = sdwan_steering_rule_tracker($line);
+		if ($tracker !== null) {
+			$record['tracker'] = $tracker;
 		}
 		if (preg_match('/\bid:\s*([a-f0-9]{1,16})\s+creatorid:\s*([a-f0-9]{1,8})\b/i', $line, $id)) {
 			$record['id'] = $id[1] . '/' . $id[2];

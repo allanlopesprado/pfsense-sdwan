@@ -25,7 +25,7 @@ if ($upgrade) {
 		$result = sdwan_release_upgrade($target);
 		$severity = $result === 'success' ? 'success' : 'warning';
 		$message = match ($result) {
-			'success' => sprintf(gettext('SD-WAN %s was installed and the observer is running.'), $target['version']),
+			'success' => sprintf(gettext('SD-WAN %s was installed. Check Status for a current observation.'), $target['version']),
 			'invalid' => gettext('The upgrade request is invalid or this firewall is incompatible with the package.'),
 			'busy' => gettext('An SD-WAN upgrade is already in progress. Reload this page in a moment.'),
 			'not_newer' => gettext('This release is no longer newer than the installed package. Check GitHub again.'),
