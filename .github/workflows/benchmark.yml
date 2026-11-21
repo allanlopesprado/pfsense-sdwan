@@ -1,0 +1,66 @@
+name: Forwarding benchmark
+
+on:
+  push:
+    branches: ['codex/sdwan-benchmark-*']
+    paths:
+      - '.github/workflows/benchmark.yml'
+      - 'tests/lab/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  freebsd:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Check out the pinned pfSense filter source
+        uses: actions/checkout@v4
+        with:
+          repository: pfsense/pfsense
+          ref: 9363ac5b8651a1c7a333180425ce7719070f95f9
+          path: pfsense-core-fixture
+          sparse-checkout: src/etc/inc
+          persist-credentials: false
+      - name: Configure the Ubuntu dependency mirror
+        run: |
+          bash .github/scripts/ubuntu-archive.sh
+          mkdir -p benchmark-results
+          git rev-parse HEAD > benchmark-results/source-commit.txt
+      - name: Compare the same application flows in FreeBSD PF
+        uses: vmactions/freebsd-vm@4441bea20b31bfa77329a5af583199362489567e # v1.4.9
+        with:
+          release: "15.1"
+          usesh: true
+          copyback: true
+          prepare: |
+            env ASSUME_ALWAYS_YES=yes pkg bootstrap
+            pkg install -y php84 php84-filter php84-mbstring php84-ctype python3 dpinger git
+          run: |
+            set -eu
+            mkdir -p benchmark-results
+            uname -a > benchmark-results/freebsd-version.txt
+            status=0
+            SDWAN_ERP_ONLY=1 SDWAN_NATIVE_CORE="$PWD/pfsense-core-fixture" \
+              SDWAN_BENCHMARK_DIR="$PWD/benchmark-results/data" \
+              sh tests/lab/freebsd-dataplane.sh || status=$?
+            printf '%s\n' "$status" > benchmark-results/exit-code
+      - name: Verify completion and summarize samples
+        run: |
+          test "$(cat benchmark-results/exit-code)" = 0
+          python3 tests/lab/benchmark_report.py benchmark-results/data
+          test -s benchmark-results/data/report.md
+          cat benchmark-results/data/report.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Preserve transaction data and PF evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sdwan-forwarding-benchmark
+          path: benchmark-results/
+          if-no-files-found: error
+          retention-days: 60

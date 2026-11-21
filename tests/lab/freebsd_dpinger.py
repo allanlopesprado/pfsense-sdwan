@@ -14,6 +14,7 @@ import time
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from core_adapter import render_harness, test_config
 from daemon_integration import fixture, php, stage
+from freebsd_benchmark import run_benchmark
 
 
 def jexec(node, *args):
@@ -31,7 +32,7 @@ def stop(process):
 
 
 def verify_erp(work, core, rules_dir, client, lan, firewall, peer, remote_a, remote_b,
-               upstream, standby_probe, config, expect_snapshot, cleanup):
+               upstream, standby_probe, config, expect_snapshot, cleanup, benchmark=None):
     """Observe isolated endpoint loss and load the filter generator's output."""
     adapter = test_config(work, "inet", 2, False)
     config["filter/rule"] = adapter["filter/rule"][:2]
@@ -79,7 +80,9 @@ def verify_erp(work, core, rules_dir, client, lan, firewall, peer, remote_a, rem
     config["gateways/sdwan_bindings/item"] = [binding]
     config_path.write_text(json.dumps(config))
 
-    def load_policy():
+    def load_policy(verify_native=False):
+        if verify_native:
+            assert "$GWG" in render("rollback"), "ERP baseline did not use the native gateway group"
         generated = json.loads(render("render-pair"))
         rules = work / "erp-firewall.pf"
         rules.write_text("\n".join([
@@ -89,6 +92,7 @@ def verify_erp(work, core, rules_dir, client, lan, firewall, peer, remote_a, rem
         ]) + "\n")
         jexec(firewall, "pfctl", "-nf", str(rules))
         jexec(firewall, "pfctl", "-f", str(rules))
+        return time.monotonic_ns()
 
     def set_service_loss(*devices):
         # Keep the independent backup service, UDP DNS and ICMP flowing.
@@ -119,6 +123,11 @@ def verify_erp(work, core, rules_dir, client, lan, firewall, peer, remote_a, rem
             if (!is_string($reply) || !sdwan_probe_dns_answer($reply, $id, $question) ||
                 !str_ends_with($reply, inet_pton("192.0.2.42"))) { exit(1); }
         ''', str(work / "sdwan_probe.inc"), upstream)
+
+    if benchmark is not None:
+        run_benchmark(benchmark, work, config, binding, client, firewall, peer, remote_a,
+                      load_policy, set_service_loss, check_dns)
+        return
 
     def packets(node, label):
         result = subprocess.run(["jexec", node, "pfctl", "-s", "labels"],
@@ -233,7 +242,7 @@ def verify_erp(work, core, rules_dir, client, lan, firewall, peer, remote_a, rem
     print("ok - rollback restored native gateway-group forwarding; NAT was preserved and DNS stayed reachable", flush=True)
 
 
-def run(firewall, peer, remote_a, remote_b, remote_c, restore, erp=None):
+def run(firewall, peer, remote_a, remote_b, remote_c, restore, erp=None, benchmark=None):
     if platform.system() != "FreeBSD":
         raise RuntimeError("Run only in the disposable FreeBSD VNET topology")
     subprocess.run(["jail", "-m", "name=" + firewall, "allow.raw_sockets"], check=True, timeout=10)
@@ -320,7 +329,7 @@ def run(firewall, peer, remote_a, remote_b, remote_c, restore, erp=None):
 
         # Visit every availability combination, change one link at a time,
         # and finish with all links recovered.
-        for mask in (0, 1, 3, 2, 6, 7, 5, 4, 0):
+        for mask in (() if benchmark is not None else (0, 1, 3, 2, 6, 7, 5, 4, 0)):
             failed = {name for index, (name, _, _, _) in enumerate(peers) if mask & (1 << index)}
             expected = [100 if name in failed else 0 for name, _, _, _ in peers]
             choices = [next((name for name, loss in zip("abc"[:count], expected) if loss == 0), None)
@@ -336,28 +345,29 @@ def run(firewall, peer, remote_a, remote_b, remote_c, restore, erp=None):
 
         config_path = work / "fixture.json"
         next_hop_config = config_path.read_text()
-        socket_path = str(work / "upstream-a.sock")
-        start_monitor("GW_A", source_a, upstream, socket_path, "upstream-a.pid")
-        config["gateways/gateway_item"][0]["monitor"] = upstream
-        config["processes"]["GW_A"].update(socket=socket_path, targetip=upstream)
-        upstream_config = json.dumps(config)
-        config_path.write_text(upstream_config)
-        expect_snapshot([0, 0, 0], ["a", "a", "a"])
-        assert upstream_transaction(), "The upstream echo service did not respond before the outage"
+        if benchmark is None:
+            socket_path = str(work / "upstream-a.sock")
+            start_monitor("GW_A", source_a, upstream, socket_path, "upstream-a.pid")
+            config["gateways/gateway_item"][0]["monitor"] = upstream
+            config["processes"]["GW_A"].update(socket=socket_path, targetip=upstream)
+            upstream_config = json.dumps(config)
+            config_path.write_text(upstream_config)
+            expect_snapshot([0, 0, 0], ["a", "a", "a"])
+            assert upstream_transaction(), "The upstream echo service did not respond before the outage"
 
-        config_path.write_text(next_hop_config)
-        apply_loss(set(), upstream_failed=True)
-        assert not upstream_transaction(), "The upstream echo service remained reachable during the outage"
-        expect_snapshot([0, 0, 0], ["a", "a", "a"])
-        print("ok - the application failed while the preferred WAN's immediate next hop stayed eligible", flush=True)
+            config_path.write_text(next_hop_config)
+            apply_loss(set(), upstream_failed=True)
+            assert not upstream_transaction(), "The upstream echo service remained reachable during the outage"
+            expect_snapshot([0, 0, 0], ["a", "a", "a"])
+            print("ok - the application failed while the preferred WAN's immediate next hop stayed eligible", flush=True)
 
-        config_path.write_text(upstream_config)
-        expect_snapshot([100, 0, 0], [None, "b", "b"])
-        print("ok - a farther Monitor IP detected the outage and the policy selected the healthy backup", flush=True)
-        apply_loss(set())
-        expect_snapshot([0, 0, 0], ["a", "a", "a"])
-        assert upstream_transaction(), "The upstream application failed to recover"
-        print("ok - the upstream application and probe both recovered", flush=True)
+            config_path.write_text(upstream_config)
+            expect_snapshot([100, 0, 0], [None, "b", "b"])
+            print("ok - a farther Monitor IP detected the outage and the policy selected the healthy backup", flush=True)
+            apply_loss(set())
+            expect_snapshot([0, 0, 0], ["a", "a", "a"])
+            assert upstream_transaction(), "The upstream application failed to recover"
+            print("ok - the upstream application and probe both recovered", flush=True)
 
 
         # Keep every gateway responsive while the DNS application on WAN A fails.
@@ -405,17 +415,18 @@ with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as server:
             time.sleep(.1)
         assert ready.exists() and server.poll() is None, "The isolated DNS server did not start"
 
-        healthy = {"a": "Passed", "b": "Passed"}
-        expect_snapshot([0, 0, 0], ["a", "a", "a"], healthy)
-        dns_status.write_text("unavailable")
-        expect_snapshot([0, 0, 0], [None, "b", "b"], {"a": "DNS check failed", "b": "Passed"})
-        print("ok - a DNS application outage selected the TCP-verified backup while all WAN monitors stayed up", flush=True)
-        dns_status.write_text("available")
-        expect_snapshot([0, 0, 0], ["a", "a", "a"], healthy)
-        print("ok - DNS service recovery restored the primary path", flush=True)
+        if benchmark is None:
+            healthy = {"a": "Passed", "b": "Passed"}
+            expect_snapshot([0, 0, 0], ["a", "a", "a"], healthy)
+            dns_status.write_text("unavailable")
+            expect_snapshot([0, 0, 0], [None, "b", "b"], {"a": "DNS check failed", "b": "Passed"})
+            print("ok - a DNS application outage selected the TCP-verified backup while all WAN monitors stayed up", flush=True)
+            dns_status.write_text("available")
+            expect_snapshot([0, 0, 0], ["a", "a", "a"], healthy)
+            print("ok - DNS service recovery restored the primary path", flush=True)
         if erp:
             verify_erp(work, core, rules_dir, client, lan, firewall, peer, remote_a, remote_b,
-                       upstream, backup, config, expect_snapshot, cleanup)
+                       upstream, backup, config, expect_snapshot, cleanup, benchmark)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
@@ -427,4 +438,8 @@ if __name__ == "__main__":
     parser.add_argument("restore", type=Path)
     parser.add_argument("--erp", nargs=4, metavar=("CORE", "RULES_DIR", "CLIENT", "LAN"),
                         help="exercise ERP-only failure with the pinned native filter tuple in VNET")
-    run(**vars(parser.parse_args()))
+    parser.add_argument("--benchmark", type=Path, help="save a paired campaign in this output directory")
+    args = parser.parse_args()
+    if args.benchmark is not None and args.erp is None:
+        parser.error("--benchmark requires --erp")
+    run(**vars(args))

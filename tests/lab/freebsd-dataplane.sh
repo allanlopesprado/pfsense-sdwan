@@ -120,9 +120,12 @@ load_rules() {
 load_rules
 if [ "${SDWAN_ERP_ONLY:-0}" = 1 ]; then
     echo 'Testing ERP-only loss in a fresh VNET topology'
+    set -- --erp "${SDWAN_NATIVE_CORE:?The ERP test needs native pfSense sources}" "$work" "$client" "$lan"
+    if [ -n "${SDWAN_BENCHMARK_DIR:-}" ]; then
+        set -- "$@" --benchmark "$SDWAN_BENCHMARK_DIR"
+    fi
     python3 -B "$repo/tests/lab/freebsd_dpinger.py" "$firewall" "$remote" \
-        "$remote_a" "$remote_b" "$remote_c" "$work/remote.pf" \
-        --erp "${SDWAN_NATIVE_CORE:?The ERP test needs native pfSense sources}" "$work" "$client" "$lan"
+        "$remote_a" "$remote_b" "$remote_c" "$work/remote.pf" "$@"
     exit 0
 fi
 baseline() {
