@@ -3,9 +3,39 @@ on:
   push:
     branches-ignore: ['build/**']
   pull_request:
+  schedule:
+    - cron: '23 5 * * *'
+  workflow_dispatch:
 permissions:
   contents: read
 jobs:
+  divergence-audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Run divergence checks with a recorded seed
+        run: python3 tests/audit/run.py --seed "$GITHUB_RUN_ID" --output "$RUNNER_TEMP/sdwan-audit"
+      - name: Add results to the workflow summary
+        if: always()
+        run: |
+          report="$RUNNER_TEMP/sdwan-audit"
+          if [ -f "$report/audit.md" ]; then
+            cat "$report/audit.md" >> "$GITHUB_STEP_SUMMARY"
+            known=$(jq -r .counts.known "$report/audit.json")
+            if [ "$known" -gt 0 ]; then
+              echo "::warning title=Known SD-WAN discrepancies::$known still reproduced. See the run summary."
+            fi
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sdwan-divergence-audit
+          path: ${{ runner.temp }}/sdwan-audit/
+          if-no-files-found: error
+          retention-days: 30
   ikev2:
     uses: ./.github/workflows/ikev2.yml
   homologation:
