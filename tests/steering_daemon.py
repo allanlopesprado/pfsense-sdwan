@@ -83,7 +83,18 @@ def run(binary, load_filter_extension):
         config["booting"] = True
         assert observe()["steering"]["G"]["gateway"] is None and not receipt.exists()
         config["booting"] = False
-        assert observe(fails=True)["steering"]["G"]["gateway"] is None and not receipt.exists()
+        assert observe(fails=True)["steering"]["G"]["gateway"] is None
+
+        def read_receipt():
+            return json.loads(receipt.read_text())
+
+        def retry_due():
+            previous = read_receipt()
+            previous["requested_at"] = int(time.time()) - 60
+            receipt.write_text(json.dumps(previous))
+            return previous
+
+        assert read_receipt()["attempts"] == 1 and not read_receipt()["accepted"]
 
         def reply(listener, response, delay):
             connection, _ = listener.accept()
@@ -108,62 +119,82 @@ def run(binary, load_filter_extension):
                 result = observe(fails)
                 assert event.result() == result, "event fired before snapshot publication"
 
-            for response, delay in [(b"ERROR\n", 0), (None, 0), (None, 0.75)]:
-                exchange(response, fails=True, delay=delay)
-                assert not receipt.exists()
-            exchange(b"OK\n")
-            original = receipt.read_text()
-            signature, _, at = original.rpartition(":")
-            assert signature.startswith("ack:") and int(at) <= int(time.time())
-            observe()  # Even a missing rule gets time for the queue to drain.
-            assert receipt.read_text() == original
-            receipt.write_text(signature)  # Acknowledgement from before PF verification.
-            exchange(b"OK\n")
-            assert receipt.read_text().rpartition(":")[0] == signature
-            snapshot.unlink()
-            exchange(b"OK\n")
-            assert receipt.read_text().rpartition(":")[0] == signature
+            bad_rule = 'pass in quick on igb0 inet all ridentifier 301'
+            block_rule = 'block drop in quick on igb0 inet all ridentifier 301'
+            config["fixture_pf_rules"] = [bad_rule]
 
-            overdue = f"{signature}:{int(time.time()) - 60}"
-            receipt.write_text(overdue)
-            observe()  # PF is unavailable. Do not poll the reload queue in a loop.
-            assert receipt.read_text() == overdue
-            config["fixture_pf_rules"] = ['block drop in quick on igb0 inet all ridentifier 301']
+            # Refusal and EOF consume attempts even without an acknowledgement.
+            for response in [b"ERROR\n", None]:
+                retry_due()
+                exchange(response, fails=True)
+            exhausted = retry_due()
+            assert exhausted["attempts"] == 3 and not exhausted["accepted"]
             observe()
-            assert receipt.read_text() == overdue
-            config["fixture_pf_rules"] = ['pass in quick on igb0 inet all ridentifier 301']
+            assert read_receipt() == exhausted
+            events = json.loads((work / "snapshot.json.events").read_text())
+            assert "filter_divergent" in events["filter_event_at"]
+
+            # A native reload can repair the rules independently. The observer
+            # confirms PF and renews the budget without requesting another reload.
+            config["fixture_pf_rules"] = [block_rule]
+            observe()
+            confirmed = read_receipt()
+            assert confirmed["confirmed"] and confirmed["attempts"] == 0
+
+            # A later divergence starts a new bounded recovery cycle.
+            config["fixture_pf_rules"] = [bad_rule]
+            exchange(None, fails=True, delay=0.75)
+            assert read_receipt()["attempts"] == 1
+            retry_due()
+            exchange(b"OK\n")
+            accepted = read_receipt()
+            assert accepted["accepted"] and not accepted["confirmed"] and accepted["attempts"] == 2
+            observe()
+            assert read_receipt() == accepted
+
+            # Acknowledged, unresolved reloads also stop after three attempts.
+            retry_due()
+            exchange(b"OK\n")
+            overdue = retry_due()
+            assert overdue["attempts"] == 3 and not overdue["confirmed"]
+            del config["fixture_pf_rules"]
+            observe()
+            assert read_receipt() == overdue
+            config["fixture_pf_rules"] = [bad_rule]
             config["booting"] = True
             observe()
-            assert receipt.read_text() == overdue
+            assert read_receipt() == overdue
             config["booting"] = False
-            exchange(b"ERROR\n", fails=True)
-            assert receipt.read_text() == overdue
-            exchange(b"OK\n")
-            current_receipt = receipt.read_text()
-            assert current_receipt != overdue
-            observe()  # The acknowledged retry was recent, so it is not requeued yet.
-            assert receipt.read_text() == current_receipt
-            config["fixture_pf_rules"] = ['block drop in quick on igb0 inet all ridentifier 301']
+            observe()
+            assert read_receipt() == overdue
 
-            # A revision can change without changing the selected route.
+            config["fixture_pf_rules"] = [block_rule]
+            observe()
+            assert read_receipt()["confirmed"] and read_receipt()["attempts"] == 0
+
+            # Config revision changes are new decisions even if the route is unchanged.
+            old_signature = read_receipt()["signature"]
             config["installedpackages/sdwan"]["slas"]["item"].append(
                 {"name": "unused", "latency_ms": "99", "loss_pct": "1"})
-            exchange(b"ERROR\n", fails=True)
-            assert receipt.read_text() == current_receipt
             exchange(b"OK\n")
-            new_signature = receipt.read_text().rpartition(":")[0]
-            assert new_signature != signature
-            assert new_signature.rsplit(":", 1)[1] == signature.rsplit(":", 1)[1]
+            assert read_receipt()["signature"] != old_signature and read_receipt()["attempts"] == 1
+            observe()
+            assert read_receipt()["confirmed"]
+
+            receipt.write_text("ack:legacy-receipt")
+            exchange(b"OK\n")
+            assert read_receipt()["attempts"] == 1
 
             config["gateways/sdwan_bindings"] = {"item": []}
             config["gateways/sdwan_bindings/item"] = []
             exchange(None, fails=True)
             assert receipt.exists()
+            retry_due()
             exchange(b"OK\n")
             assert not receipt.exists() and not observe().get("steering")
-        print("ok - stock and boot stay passive; reloads recover from refusal, timeout, EOF and rejected acknowledgement")
-        print("ok - overdue or mismatched loaded rules are reconciled without touching disabled or unavailable PF")
-        print("ok - acknowledged requests are deduplicated; rejected revisions and unbinding retry")
+        print("ok - stock and boot stay passive; rejected and acknowledged requests have a bounded retry budget")
+        print("ok - PF confirmation resets the budget; divergent rules and expired receipts are reported")
+        print("ok - duplicate reloads, unavailable PF and legacy receipts are handled without modifying configuration")
 
 
 if __name__ == "__main__":

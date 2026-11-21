@@ -164,13 +164,18 @@ verify(sdwan_steering_pf_status($edited_binding, $runtime, $inventory, $loaded) 
     'active PF verifies expected tracker and exact next hop');
 verify(sdwan_steering_pf_status($edited_binding, $runtime, $inventory, [str_replace('192.0.2.1', '192.0.2.2', $loaded[0])]) === 'pending' &&
     sdwan_steering_pf_status($edited_binding, $runtime, $inventory, [$loaded[0] . '0']) === 'pending' &&
-    sdwan_steering_pf_status($edited_binding, [], $inventory, $loaded) === 'pending',
+    sdwan_steering_pf_status($edited_binding, [], $inventory, $loaded) === 'pending' &&
+    sdwan_steering_pf_status($edited_binding, $runtime, $inventory, [str_replace('in quick', 'out quick', $loaded[0])]) === 'pending',
     'wrong next hop, wrong tracker and stale samples are never shown as applied');
 $dynamic = ['A' => ['device' => 'igb0', 'address' => 'dynamic', 'family' => 'inet', 'interface' => 'wan']];
 $current['fixture/dynamic/wan'] = '192.0.2.1';
 verify(sdwan_steering_pf_status($edited_binding, $runtime, $dynamic, $loaded) === 'applied',
     'active PF verifies a resolved dynamic next hop');
+$publication = ['config_revision' => 'test', 'gateway_inventory_revision' => 'test', 'steering' => ['G' => $runtime]];
+$before_renewal = sdwan_steering_runtime_signature($publication, $dynamic);
 $current['fixture/dynamic/wan'] = '192.0.2.2';
+verify(sdwan_steering_runtime_signature($publication, $dynamic) !== $before_renewal,
+    'renewing a live next hop grants a new reconciliation budget without changing the stored gateway');
 verify(sdwan_steering_pf_status($edited_binding, $runtime, $dynamic, $loaded) === 'pending',
     'a renewed dynamic gateway requires the new next hop in PF');
 unset($current['fixture/dynamic/wan']);

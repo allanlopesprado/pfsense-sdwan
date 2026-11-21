@@ -50,11 +50,17 @@ function sdwan_log_plan(array $state, string $kind, array $snapshot, string $cau
 		}
 		return [$state, $entries];
 	}
-	if ($kind === 'filter_pending') {
-		$last = $state['filter_pending_at'] ?? null;
-		if ($last === null || $now < $last || $now - $last >= 300) {
-			$entries[] = [LOG_WARNING, 'The active filter differs from the SD-WAN decision. Requesting a native reload.'];
-			$state['filter_pending_at'] = $now;
+	if (in_array($kind, ['filter_requested', 'filter_applied', 'filter_divergent'], true)) {
+		$last = $state['filter_event_at'][$kind] ?? null;
+		$interval = $kind === 'filter_divergent' ? 300 : 30;
+		if ($last === null || $now < $last || $now - $last >= $interval) {
+			$message = match ($kind) {
+				'filter_requested' => 'Native filter reload requested. Waiting for PF confirmation.',
+				'filter_applied' => 'Active PF rules confirmed the current forwarding decision.',
+				'filter_divergent' => 'Persistent PF divergence. Automatic reload attempts for this decision have stopped.',
+			};
+			$entries[] = [$kind === 'filter_divergent' ? LOG_ERR : LOG_NOTICE, $message];
+			$state['filter_event_at'][$kind] = $now;
 		}
 		return [$state, $entries];
 	}

@@ -98,11 +98,29 @@ $target = $binding !== null && ($steering['revision'] ?? null) === sdwan_config_
 $pf_labels = [
 	'applied' => gettext('Applied to new connections'),
 	'blocked' => gettext('Blocked by the active filter'),
-	'pending' => gettext('Waiting for a matching filter rule'),
+	'pending' => gettext('Active filter differs from the current decision'),
+	'requested' => gettext('Reload requested. Waiting for PF confirmation'),
+	'divergent' => gettext('Persistent divergence. Automatic retries exhausted'),
+	'expired' => gettext('No current observation. Inspect the observer before relying on the active rules'),
 	'unavailable' => gettext('Filter verification unavailable'),
 ];
-$filter_status = $binding === null ? null : sdwan_steering_pf_status($binding, $steering, sdwan_gateways(),
+$inventory = sdwan_gateways();
+$filter_status = $binding === null ? null : sdwan_steering_pf_status($binding, $steering, $inventory,
     $supported ? sdwan_steering_pf_rules() : null);
+if ($binding !== null && $supported && $sample === null) {
+	$filter_status = 'expired';
+} elseif ($filter_status === 'pending' && isset($sample['steering'])) {
+	$receipt = sdwan_steering_read_receipt(SDWAN_SNAPSHOT_PATH . '.forwarded');
+	if (($receipt['signature'] ?? null) === sdwan_steering_runtime_signature($sample, $inventory) &&
+	    !$receipt['confirmed']) {
+		$age = time() - $receipt['requested_at'];
+		if ($age >= SDWAN_RELOAD_RETRY_INTERVAL && $receipt['attempts'] >= SDWAN_RELOAD_MAX_ATTEMPTS) {
+			$filter_status = 'divergent';
+		} elseif ($receipt['accepted'] && $age >= 0 && $age < SDWAN_RELOAD_RETRY_INTERVAL) {
+			$filter_status = 'requested';
+		}
+	}
+}
 $default_families = [];
 foreach (['defaultgw4' => 'IPv4', 'defaultgw6' => 'IPv6'] as $key => $family) {
 	if ($group !== null && config_get_path('gateways/' . $key) === $group_name) {

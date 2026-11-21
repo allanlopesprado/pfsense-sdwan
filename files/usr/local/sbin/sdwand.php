@@ -102,36 +102,54 @@ function sdwan_observe_once(): void {
 			// Show native gateways on the dashboard before any members are configured.
 			$snapshot['gateways'] = array_map('sdwan_member_sample', $observations);
 		}
-		$receipt = SDWAN_SNAPSHOT_PATH . '.forwarded';
-		$reload = false;
+		$receipt_path = SDWAN_SNAPSHOT_PATH . '.forwarded';
+		$receipt = null;
+		$action = null;
 		$invalid_bindings = false;
 		/* Stock systems without bindings never run the native adapter. */
-		if (config_get_path('gateways/sdwan_bindings/item', []) || is_file($receipt)) {
+		$bound = config_get_path('gateways/sdwan_bindings/item', []);
+		if ($bound || is_file($receipt_path)) {
 			require_once('/usr/local/pkg/sdwan_steering.inc');
 			if (sdwan_steering_supported()) {
 				$prior = sdwan_current_snapshot($config, $inventory);
 				try {
+					$bindings = sdwan_steering_bindings();
 					$snapshot['steering'] = sdwan_steering_observations($config, $snapshot, $prior['steering'] ?? []);
 				} catch (UnexpectedValueException $e) {
 					/* Unreadable bindings produce no pass decisions. */
 					$invalid_bindings = true;
+					$bindings = [];
 					$snapshot['steering'] = [];
 				}
-				$signature = 'ack:' . $snapshot['config_revision'] . ':' . sdwan_steering_signature($snapshot['steering']);
-				$ack = is_file($receipt) ? file_get_contents($receipt) : false;
-				$ack_time = is_string($ack) &&
-				    preg_match('/\\A' . preg_quote($signature, '/') . ':([0-9]{1,12})\\z/', $ack, $match)
-				    ? (int)$match[1] : null;
-				$now = time();
-				$reload = $prior === null || $ack_time === null || $ack_time > $now;
-				// A queue acknowledgement does not prove the new rules were loaded.
-				if (!$reload && $snapshot['steering'] && $now - $ack_time >= SDWAN_MAX_SNAPSHOT_AGE &&
-				    !is_platform_booting() && ($rules = sdwan_steering_pf_rules()) !== null) {
-					foreach (sdwan_steering_bindings() as $group => $binding) {
-						if (sdwan_steering_pf_status($binding, $snapshot['steering'][$group], $inventory, $rules) === 'pending') {
-							$reload = true;
-							sdwan_log_event('filter_pending');
-							break;
+				if (!is_platform_booting()) {
+					$signature = sdwan_steering_runtime_signature($snapshot, $inventory);
+					$previous = sdwan_steering_read_receipt($receipt_path);
+					$now = time();
+					$same = ($previous['signature'] ?? null) === $signature && $previous['requested_at'] <= $now;
+					$receipt = $same ? $previous : [
+						'signature' => $signature, 'attempts' => 0, 'requested_at' => 0,
+						'accepted' => false, 'confirmed' => false,
+					];
+					$rules = $same && $bindings ? sdwan_steering_pf_rules() : null;
+					$matches = $rules !== null;
+					foreach ($bindings as $group => $binding) {
+						$status = sdwan_steering_pf_status($binding, $snapshot['steering'][$group] ?? [], $inventory, $rules);
+						$matches = $matches && in_array($status, ['applied', 'blocked'], true);
+					}
+					if ($matches && !$receipt['confirmed']) {
+						$receipt['attempts'] = 0;
+						$receipt['confirmed'] = true;
+						$action = 'filter_applied';
+					} elseif (!$matches && ($rules !== null || !$receipt['accepted'])) {
+						$cooldown = !$receipt['confirmed'] && $now - $receipt['requested_at'] < SDWAN_RELOAD_RETRY_INTERVAL;
+						if (!$cooldown && $receipt['attempts'] >= SDWAN_RELOAD_MAX_ATTEMPTS) {
+							$action = 'filter_divergent';
+						} elseif (!$cooldown) {
+							$receipt['attempts']++;
+							$receipt['requested_at'] = $now;
+							$receipt['accepted'] = false;
+							$receipt['confirmed'] = false;
+							$action = 'filter_requested';
 						}
 					}
 				}
@@ -152,20 +170,28 @@ function sdwan_observe_once(): void {
 				unlink($temp);
 			}
 		}
-		if ($reload && !is_platform_booting()) {
-			/* Publish before enqueueing. A rejected request or a crash before
-			 * the receipt leaves the next observation free to retry. */
+		if ($action === 'filter_requested') {
+			/* Reserve the attempt before enqueueing, even on refusal or crash.
+			 * A fresh decision or a verified PF match resets the retry budget. */
+			if (!sdwan_steering_write_receipt($receipt_path, $receipt)) {
+				throw new RuntimeException('Cannot record the filter reload request');
+			}
 			if (!sdwan_steering_request_reload()) {
 				throw new RuntimeException('pfSense did not accept the filter reload request');
 			}
-			if (config_get_path('gateways/sdwan_bindings/item', [])) {
-				$ack = $signature . ':' . time();
-				if (file_put_contents($receipt, $ack, LOCK_EX) !== strlen($ack)) {
+			$receipt['accepted'] = true;
+			if ($bound) {
+				if (!sdwan_steering_write_receipt($receipt_path, $receipt)) {
 					throw new RuntimeException('Cannot record the filter reload request');
 				}
-			} elseif (is_file($receipt)) {
-				unlink($receipt);
+			} elseif (is_file($receipt_path)) {
+				unlink($receipt_path);
 			}
+		} elseif ($action === 'filter_applied' && !sdwan_steering_write_receipt($receipt_path, $receipt)) {
+			throw new RuntimeException('Cannot record the filter reload request');
+		}
+		if ($action !== null) {
+			sdwan_log_event($action);
 		}
 		if ($invalid_bindings) {
 			sdwan_log_event('error', [], 'bindings');

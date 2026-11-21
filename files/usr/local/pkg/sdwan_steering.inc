@@ -364,13 +364,20 @@ function sdwan_steering_observations(array $config, array $snapshot, array $prev
 	return $states;
 }
 
+function sdwan_steering_sticky_paths(array $gateways): bool {
+	return count($gateways) > 1 && function_exists('config_path_enabled') &&
+	    config_path_enabled('system', 'lb_use_sticky');
+}
+
 function sdwan_steering_loaded_path_matches(string $rule, array $gateways): bool {
-	if (!str_starts_with($rule, 'pass ') ||
-	    !preg_match('/\broute-to\s+(\{[^}]+\}\s+round-robin|\([^()]+\))/', $rule, $route)) {
+	if (!str_starts_with($rule, 'pass in quick on ') ||
+	    !preg_match('/\broute-to\s+(\{[^}]+\}\s+round-robin(?:\s+sticky-address)?|\([^()]+\))/', $rule, $route)) {
 		return false;
 	}
 	preg_match_all('/\(\s*([^\s()]+)\s+([^\s()]+)\s*\)/', $route[1], $paths, PREG_SET_ORDER);
-	if (!$paths || (count($gateways) > 1 && !str_ends_with($route[1], 'round-robin'))) {
+	$balanced = count($gateways) > 1;
+	if (!$paths || $balanced !== str_starts_with($route[1], '{') ||
+	    sdwan_steering_sticky_paths($gateways) !== str_ends_with($route[1], 'sticky-address')) {
 		return false;
 	}
 	$seen = [];
@@ -403,6 +410,79 @@ function sdwan_steering_pf_rules(): ?array {
 	return $status === 0 && preg_match('/^Status:\s+Enabled(?:\s|$)/', $lines[0] ?? '') ? $lines : null;
 }
 
+/* Use the native hop current at verification time, including after renewal. */
+function sdwan_steering_resolve_hop(array $gateway): ?string {
+	if (($gateway['address'] ?? '') !== 'dynamic') {
+		return $gateway['address'] ?? null;
+	}
+	$lookup = match ($gateway['family'] ?? null) {
+		'inet' => 'get_interface_gateway',
+		'inet6' => 'get_interface_gateway_v6',
+		default => null,
+	};
+	if ($lookup === null || !isset($gateway['interface'])) {
+		return null;
+	}
+	if (!function_exists($lookup)) {
+		require_once('gwlb.inc');
+	}
+	$address = $lookup($gateway['interface']);
+	return is_string($address) ? $address : null;
+}
+
+const SDWAN_RELOAD_MAX_ATTEMPTS = 3;
+const SDWAN_RELOAD_RETRY_INTERVAL = 30;
+
+function sdwan_steering_runtime_signature(array $snapshot, array $inventory): string {
+	$hops = [];
+	$sticky = false;
+	foreach ($snapshot['steering'] as $state) {
+		$pool = $state['pool'] ?? array_filter([$state['gateway']]);
+		$sticky = $sticky || sdwan_steering_sticky_paths($pool);
+		foreach ($pool as $name) {
+			if (isset($inventory[$name])) {
+				$hops[$name] = sdwan_steering_resolve_hop($inventory[$name]);
+			}
+		}
+	}
+	ksort($hops, SORT_STRING);
+	return sdwan_config_revision([
+	    $snapshot['config_revision'], $snapshot['gateway_inventory_revision'],
+	    sdwan_steering_signature($snapshot['steering']), $hops, $sticky,
+	]);
+}
+
+/* An old-format acknowledgement or a damaged receipt cannot confirm PF. */
+function sdwan_steering_read_receipt(string $path): array {
+	$raw = @file_get_contents($path, false, null, 0, 1024);
+	$data = is_string($raw) ? json_decode($raw, true) : null;
+	if (!is_array($data) || !is_string($data['signature'] ?? null) ||
+	    !preg_match('/\A[a-f0-9]{64}\z/', $data['signature']) ||
+	    !is_int($data['attempts'] ?? null) || $data['attempts'] < 0 ||
+	    $data['attempts'] > SDWAN_RELOAD_MAX_ATTEMPTS ||
+	    !is_int($data['requested_at'] ?? null) || $data['requested_at'] < 0 ||
+	    !is_bool($data['accepted'] ?? null) || !is_bool($data['confirmed'] ?? null)) {
+		return [];
+	}
+	return $data;
+}
+
+function sdwan_steering_write_receipt(string $path, array $receipt): bool {
+	$data = json_encode($receipt, JSON_THROW_ON_ERROR);
+	$temp = @tempnam(dirname($path), '.sdwan-reload-');
+	if ($temp === false) {
+		return false;
+	}
+	try {
+		return @file_put_contents($temp, $data) === strlen($data) &&
+		    @chmod($temp, 0644) && @rename($temp, $path);
+	} finally {
+		if (file_exists($temp)) {
+			@unlink($temp);
+		}
+	}
+}
+
 function sdwan_steering_pf_status(array $binding, array $state, array $inventory, ?array $lines): string {
 	if ($lines === null) {
 		return 'unavailable';
@@ -422,22 +502,9 @@ function sdwan_steering_pf_status(array $binding, array $state, array $inventory
 			return 'pending';
 		}
 		$gateway = $inventory[$name];
-		if ($gateway['address'] === 'dynamic') {
-			$lookup = match ($gateway['family'] ?? null) {
-				'inet' => 'get_interface_gateway',
-				'inet6' => 'get_interface_gateway_v6',
-				default => null,
-			};
-			if ($lookup === null || !isset($gateway['interface'])) {
-				return 'pending';
-			}
-			if (!function_exists($lookup)) {
-				require_once('gwlb.inc');
-			}
-			$gateway['address'] = $lookup($gateway['interface']);
-			if (!is_string($gateway['address'])) {
-				return 'pending';
-			}
+		$gateway['address'] = sdwan_steering_resolve_hop($gateway);
+		if ($gateway['address'] === null) {
+			return 'pending';
 		}
 		$gateways[$gateway['device']] = $gateway;
 	}
@@ -452,7 +519,7 @@ function sdwan_steering_pf_status(array $binding, array $state, array $inventory
 		}
 		[$rule] = explode(' label "', $line, 2);
 		if ($target === null) {
-			if (!str_starts_with($rule, 'block ')) {
+			if (!preg_match('/^block (?:drop |return\S* )?in quick on /', $rule)) {
 				return 'pending';
 			}
 		} elseif (!sdwan_steering_loaded_path_matches($rule, $gateways)) {
