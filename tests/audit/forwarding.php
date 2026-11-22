@@ -17,6 +17,18 @@ function find_interface_ipv6_ll(string $device, bool $flush): ?string {
 	return $device === 'em0' ? 'fe80::b' : null;
 }
 
+function get_interface_ipv6(string $interface): ?string {
+	return $interface === 'lan' ? '2001:db8:51::1' : null;
+}
+
+function get_interface_subnetv6(string $interface): ?string {
+	return $interface === 'lan' ? '64' : null;
+}
+
+function merge_ipv6_delegated_prefix(?string $address, string $suffix, ?string $prefix): ?string {
+	return $address === '2001:db8:51::1' && $suffix === '::da7a' && $prefix === '64' ? '2001:db8:51::da7a' : null;
+}
+
 function config_get_path(string $path, mixed $default = null): mixed {
 	return $default;
 }
@@ -187,6 +199,13 @@ $inventory6 = ['WAN2' => ['interface' => 'opt1', 'family' => 'inet6', 'address' 
 $scope6 = static fn(string $zone): string => str_replace(
 	['(em2 198.18.20.2) inet', 'from 192.168.1.10'], ["(em2 fe80::20%{$zone}) inet6", 'from 2001:db8::10'], $pass);
 $guard6 = str_replace('inet proto tcp from 192.168.1.10', 'inet6 proto tcp from 2001:db8::10', $guard);
+$delegated_pairs = $rule_pairs;
+$delegated_pairs['771292101']['scope'] = ['device' => 'em1', 'interface' => 'lan', 'family' => 'inet6',
+	'protocols' => ['tcp'], 'source' => ['address' => '::da7a'], 'destination' => ['any' => '', 'port' => '18080']];
+$delegated = static fn(string $address): string => sdwan_steering_pf_status($binding, $state, $inventory6,
+	str_replace('from 2001:db8::10', "from {$address}", [$scope6('em2'), $guard6]), $delegated_pairs);
+$rows[] = audit_case('pf_delegated_host_suffix_uses_live_ingress_prefix', 'applied', $delegated('2001:db8:51::da7a'), 'pending');
+$rows[] = audit_case('pf_delegated_host_suffix_with_previous_prefix', 'pending', $delegated('2001:db8:50::da7a'));
 $rows[] = audit_case('ipv6_link_local_scope', 'applied',
 	sdwan_steering_pf_status($binding, $state, $inventory6, [$scope6('em2'), $guard6], $rule_pairs));
 $rows[] = audit_case('ipv6_link_local_wrong_scope', 'pending',

@@ -395,7 +395,7 @@ function sdwan_preflight_native_rules(array $native, string $group, string $fami
 		$rule_pairs[$tracker] = ['guard' => (string)$guard_id, 'action' => $guard['type'],
 		    'explicit_tcp_flags' => !empty($rule['tcpflags2']),
 		    'state_policy' => !empty($rule['statepolicy']) ? $rule['statepolicy'] : ($native['statepolicy'] ?? null),
-		    'scope' => ['device' => $device, 'family' => $family, 'protocols' => $protocols,
+		    'scope' => ['device' => $device, 'interface' => $ingress, 'family' => $family, 'protocols' => $protocols,
 		        'source' => $rule['source'], 'destination' => $rule['destination']]];
 		unset($rule['created'], $rule['updated'], $rule['descr']);
 		$rule['tracker'] = $tracker;

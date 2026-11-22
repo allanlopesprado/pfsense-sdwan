@@ -685,6 +685,20 @@ function sdwan_steering_scope_matches(array $actual, array $expected): bool {
 	foreach (['source', 'destination'] as $field) {
 		$loaded = sdwan_steering_scope_endpoint($actual[$field]);
 		$configured = sdwan_steering_scope_endpoint($expected[$field]);
+		if ($expected['family'] === 'inet6' && str_starts_with($configured['address'] ?? '', '::')) {
+			$interface = $expected['interface'] ?? '';
+			if ($interface === '' || !function_exists('merge_ipv6_delegated_prefix') ||
+			    !function_exists('get_interface_ipv6') || !function_exists('get_interface_subnetv6')) {
+				return false;
+			}
+			/* The native generator expands an IPv6 host suffix using the ingress prefix. */
+			$address = merge_ipv6_delegated_prefix(get_interface_ipv6($interface),
+			    $configured['address'], get_interface_subnetv6($interface));
+			if (!is_string($address) || $address === '') {
+				return false;
+			}
+			$configured['address'] = $address;
+		}
 		$ingress = $configured['network'] ?? '';
 		if (!sdwan_preflight_endpoint($loaded, $expected['family'], $ingress) ||
 		    !sdwan_preflight_endpoint_covers($configured, $loaded) ||
