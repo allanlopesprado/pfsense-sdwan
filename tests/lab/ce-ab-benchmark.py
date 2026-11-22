@@ -141,12 +141,27 @@ def client(flow, interval, output):
         while True:
             time.sleep(max(0, next_start - time.monotonic_ns()) / NS)
             start = time.monotonic_ns()
+            wall_start = time.time_ns()
             sequence += 1
             marker = f"{flow}-{start}-{sequence}".encode("ascii")
             reply = transaction(TARGETS[flow], marker, min(.9, interval * .8))
             end = time.monotonic_ns()
-            stream.write(json.dumps({"start_ns": start, "end_ns": end, "sequence": sequence, **reply}) + "\n")
+            stream.write(json.dumps({"start_ns": start, "end_ns": end, "wall_start_ns": wall_start,
+                                     "sequence": sequence, **reply}) + "\n")
             next_start = max(next_start + step, end)
+
+
+def capture_erp(ce, cleanup, output):
+    for link in range(3):
+        interface = f"sw-out{link}"
+        report = cleanup.enter_context((output / f"{interface}-capture.log").open("x"))
+        capture = subprocess.Popen(["tcpdump", "-Z", "root", "-p", "-ni", interface, "-s", "96", "-U", "-C", "2", "-W", "2",
+                                    "-w", str(output / f"{interface}-erp.pcap"),
+                                    f"host {TARGETS['erp']} and tcp port 7"], stderr=report)
+        cleanup.callback(ce.stop, capture)
+        time.sleep(.1)
+        if capture.poll() is not None:
+            raise RuntimeError(f"ERP capture could not start on {interface}")
 
 
 class Health(http.server.BaseHTTPRequestHandler):
@@ -470,6 +485,8 @@ def main():
     parser.add_argument("--recovery-seconds", type=float, default=65)
     parser.add_argument("--sample-seconds", type=float, default=60)
     parser.add_argument("--soak-hours", type=float, default=0)
+    parser.add_argument("--soak-mode", choices=("native", "sdwan"), default="sdwan")
+    parser.add_argument("--capture-erp", action="store_true", help="capture only lab ERP TCP on LAN and both WANs")
     parser.add_argument("--fault-interval-seconds", type=float, default=1800)
     parser.add_argument("--recovery-hold-seconds", type=int, choices=range(301), metavar="0..300")
     options = parser.parse_args()
@@ -487,6 +504,8 @@ def main():
 
     def scenario(qemu, cleanup, _provider):
         experiment = Experiment(ce, qemu, cleanup, options)
+        if options.capture_erp:
+            capture_erp(ce, cleanup, options.output)
         for pair in range(options.pairs):
             experiment.pair = pair + 1
             for mode in (("native", "sdwan") if pair % 2 == 0 else ("sdwan", "native")):
@@ -494,7 +513,7 @@ def main():
                 experiment.cycle()
         if options.soak_hours:
             experiment.pair = None
-            experiment.activate("sdwan")
+            experiment.activate(options.soak_mode)
             experiment.soak()
         experiment.summarize()
 
