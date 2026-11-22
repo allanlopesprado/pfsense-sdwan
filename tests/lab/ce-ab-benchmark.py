@@ -151,17 +151,23 @@ class Health(http.server.BaseHTTPRequestHandler):
         if self.path != "/healthz":
             self.send_error(404)
             return
+        source_file = self.server.unready_source
+        try:
+            is_unready = source_file is not None and source_file.read_text(encoding="ascii").strip() == self.client_address[0]
+        except FileNotFoundError:
+            is_unready = False
+        body = b"no" if is_unready else b"ok"
         self.send_response(200)
-        self.send_header("Content-Length", "2")
+        self.send_header("Content-Length", str(len(body)))
         self.end_headers()
-        self.wfile.write(b"ok")
+        self.wfile.write(body)
 
     def log_message(self, *_args):
         pass
 
 
 def serve_probes(cert, key, dns_hosts=("192.0.2.164", "192.0.2.165"),
-                 https_hosts=("192.0.2.166", "192.0.2.167")):
+                 https_hosts=("192.0.2.166", "192.0.2.167"), unready_source=None):
     ce = appliance_module()
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     context.load_cert_chain(cert, key)
@@ -171,6 +177,7 @@ def serve_probes(cert, key, dns_hosts=("192.0.2.164", "192.0.2.165"),
             threading.Thread(target=server.serve_forever, daemon=True).start()
         for host in https_hosts:
             server = stack.enter_context(http.server.ThreadingHTTPServer((host, 443), Health))
+            server.unready_source = unready_source
             server.socket = context.wrap_socket(server.socket, server_side=True)
             threading.Thread(target=server.serve_forever, daemon=True).start()
         print("ready", flush=True)
@@ -179,6 +186,7 @@ def serve_probes(cert, key, dns_hosts=("192.0.2.164", "192.0.2.165"),
 
 def setup_probes(ce, qemu, cleanup, *, shared_host=None):
     temp = Path(cleanup.enter_context(tempfile.TemporaryDirectory(prefix="sdwan-ab-")))
+    unready_source = temp / "unready-source"
     ca, ca_key, req, leaf, key, ext = [temp / name for name in ("ca.pem", "ca.key", "tls.csr", "tls.pem", "tls.key", "tls.ext")]
     ext.write_text(f"subjectAltName=DNS:{TLS_NAME}\nextendedKeyUsage=serverAuth\n", encoding="ascii")
     for args in (
@@ -191,7 +199,7 @@ def setup_probes(ce, qemu, cleanup, *, shared_host=None):
         subprocess.run(["openssl", *args], check=True, timeout=15, capture_output=True)
     command = [sys.executable, SCRIPT, "serve-probes", leaf, key]
     if shared_host is not None:
-        command.append(shared_host)
+        command.extend([shared_host, unready_source])
     server = subprocess.Popen(ce.in_ns("sdwan-peer", *command),
                               stdout=subprocess.PIPE, text=True)
     cleanup.callback(server.stdout.close)
@@ -207,6 +215,7 @@ scan=$(/usr/local/bin/php -r 'echo PHP_CONFIG_FILE_SCAN_DIR;')
 test -d "$scan"
 printf '%s\\n' 'curl.cainfo={cert_path}' >"$scan/99-sdwan-benchmark.ini"
 /usr/local/bin/php -r 'exit(ini_get("curl.cainfo") === "{cert_path}" ? 0 : 1);'""")
+    return unready_source
 
 
 def setup_package(ce, qemu, recovery_hold_seconds):
@@ -442,9 +451,9 @@ def main():
         return
     if sys.argv[1:2] == ["serve-probes"]:
         cert, key = Path(sys.argv[2]), Path(sys.argv[3])
-        if len(sys.argv) == 5:
+        if len(sys.argv) == 6:
             host = (sys.argv[4],)
-            serve_probes(cert, key, host, host)
+            serve_probes(cert, key, host, host, Path(sys.argv[5]))
         else:
             serve_probes(cert, key)
         return
