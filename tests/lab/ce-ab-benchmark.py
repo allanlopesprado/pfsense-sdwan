@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """Measure LAN application replies on the isolated two-WAN CE appliance."""
 import argparse
+from collections import defaultdict
 from contextlib import ExitStack
 import csv
 import http.server
 import importlib.util
+from itertools import groupby
 import json
 import math
 from pathlib import Path
@@ -36,38 +38,75 @@ def percentile(values, fraction):
     return sorted(values)[math.ceil(len(values) * fraction) - 1] if values else None
 
 
-def phase_stats(rows, start_ns, end_ns, expected):
-    scoped = [row for row in rows if start_ns <= row["start_ns"] < end_ns]
-    replies = [row for row in scoped if row["status"] == "ok" and row["end_ns"] < end_ns]
-    timed = [row for row in scoped if row["end_ns"] < end_ns]
-    on_expected = [row for row in replies if row["source"] == expected]
+def phase_stats(rows, start_ns, end_ns, expected, aggregate_latencies=None):
     tail_start = end_ns - min(5 * NS, (end_ns - start_ns) // 2)
-    tail = [row for row in timed if row["start_ns"] >= tail_start]
-    tail_bad = [row for row in tail if (row.get("source") if row["status"] == "ok" else None) != expected]
+    attempts = boundary = tail_attempts = tail_mismatches = 0
+    first_reply = first_expected = None
     sources = {}
+    latencies = []
     unexpected_runs = 0
     last_source = expected
-    for row in replies:
+    for row in rows:
+        if not start_ns <= row["start_ns"] < end_ns:
+            continue
+        if row["end_ns"] >= end_ns:
+            boundary += 1
+            continue
+        attempts += 1
+        replied = row["status"] == "ok"
+        if row["start_ns"] >= tail_start:
+            tail_attempts += 1
+            tail_mismatches += (row["source"] if replied else None) != expected
+        if not replied:
+            continue
         source = row["source"]
+        elapsed = round((row["end_ns"] - start_ns) / 1e6, 3)
+        if first_reply is None:
+            first_reply = elapsed
+        if source == expected and first_expected is None:
+            first_expected = elapsed
+        latencies.append(round((row["end_ns"] - row["start_ns"]) / 1e6, 3))
         sources[source] = sources.get(source, 0) + 1
         if source != expected and source != last_source:
             unexpected_runs += 1
         last_source = source
+    if aggregate_latencies is not None:
+        aggregate_latencies.extend(latencies)
+    replies = len(latencies)
+    loss = attempts - replies
     return {
-        "attempts": len(timed),
-        "successful_replies": len(replies),
-        "lost_or_invalid": len(timed) - len(replies),
-        "excluded_boundary_attempts": len(scoped) - len(timed),
-        "loss_pct": 100 * (len(timed) - len(replies)) / len(timed) if timed else None,
-        "reply_p95_ms": percentile([round((r["end_ns"] - r["start_ns"]) / 1e6, 3) for r in replies], .95),
-        "first_reply_ms": round((replies[0]["end_ns"] - start_ns) / 1e6, 3) if replies else None,
-        "first_expected_source_ms": round((on_expected[0]["end_ns"] - start_ns) / 1e6, 3) if on_expected else None,
+        "attempts": attempts,
+        "successful_replies": replies,
+        "lost_or_invalid": loss,
+        "excluded_boundary_attempts": boundary,
+        "loss_pct": 100 * loss / attempts if attempts else None,
+        "reply_p95_ms": percentile(latencies, .95),
+        "first_reply_ms": first_reply,
+        "first_expected_source_ms": first_expected,
         "sources": sources,
-        "unexpected_source_replies": len(replies) - len(on_expected),
+        "unexpected_source_replies": replies - sources.get(expected, 0),
         "unexpected_source_runs": unexpected_runs,
-        "tail_attempts": len(tail),
-        "tail_mismatches": len(tail_bad),
+        "tail_attempts": tail_attempts,
+        "tail_mismatches": tail_mismatches,
     }
+
+
+def by_phase(rows, phases):
+    """Yield groups from a monotonic client stream without retaining raw attempts."""
+    cursor = 0
+
+    def locate(row):
+        nonlocal cursor
+        started = row["start_ns"]
+        while cursor < len(phases) and started >= phases[cursor]["end_ns"]:
+            cursor += 1
+        if cursor < len(phases) and started >= phases[cursor]["start_ns"]:
+            return cursor
+        return None
+
+    for index, group in groupby(rows, key=locate):
+        if index is not None:
+            yield index, group
 
 
 def transaction(target, marker, timeout):
@@ -253,7 +292,8 @@ class Experiment:
 
     def resource_sample(self):
         worker = self.ce.worker_pid(self.qemu)
-        load = self.ce.command(self.qemu, f"ps -p {worker} -o pid=,pcpu=,rss=")
+        # FreeBSD interprets everything after the first '=' as that header.
+        load = self.ce.command(self.qemu, f"LC_ALL=C ps -p {worker} -o pid= -o pcpu= -o rss=")
         pid, cpu, rss = load.split()
         self.resources.write(json.dumps({"at_ns": time.monotonic_ns(), "mode": self.mode, "pid": int(pid),
                                          "cpu_pct_ps": float(cpu), "rss_kib": int(rss)}) + "\n")
@@ -315,15 +355,23 @@ class Experiment:
     def summarize(self):
         for child in self.clients.values():
             self.ce.stop(child)
-        rows = {}
+        latencies = defaultdict(list)
+        observations = {}
         for flow in TARGETS:
             with (self.output / f"{flow}.ndjson").open(encoding="utf-8") as stream:
-                rows[flow] = [json.loads(line) for line in stream if line.endswith("\n")]
+                rows = (json.loads(line) for line in stream if line.endswith("\n"))
+                for index, samples in by_phase(rows, self.phases):
+                    phase = self.phases[index]
+                    key = phase["mode"], phase["phase"], flow
+                    observations[index, flow] = phase_stats(samples, phase["start_ns"], phase["end_ns"],
+                                                           phase["expected"][flow], latencies[key])
         headings = ("pair", "mode", "phase", "flow", "expected", "duration_seconds")
         all_metrics = []
-        for phase in self.phases:
+        for index, phase in enumerate(self.phases):
             for flow, expected in phase["expected"].items():
-                stats = phase_stats(rows[flow], phase["start_ns"], phase["end_ns"], expected)
+                stats = observations.get((index, flow))
+                if stats is None:
+                    stats = phase_stats((), phase["start_ns"], phase["end_ns"], expected)
                 all_metrics.append(dict(zip(headings, (phase["pair"], phase["mode"], phase["phase"], flow, expected,
                                                        (phase["end_ns"] - phase["start_ns"]) / NS))) | stats)
         if not all_metrics:
@@ -339,16 +387,10 @@ class Experiment:
             recoveries = [row["first_expected_source_ms"] for row in selected if row["first_expected_source_ms"] is not None]
             attempts = sum(row["attempts"] for row in selected)
             losses = sum(row["lost_or_invalid"] for row in selected)
-            all_replies = []
-            for transition in self.phases:
-                if (transition["mode"], transition["phase"]) == (mode, phase):
-                    all_replies.extend(round((row["end_ns"] - row["start_ns"]) / 1e6, 3) for row in rows[flow]
-                                       if row["status"] == "ok" and transition["start_ns"] <= row["start_ns"]
-                                       and row["end_ns"] < transition["end_ns"])
             aggregates.append({"mode": mode, "phase": phase, "flow": flow, "runs": len(selected),
                                "attempts": attempts, "lost_or_invalid": losses,
                                "loss_pct": 100 * losses / attempts if attempts else None,
-                               "reply_p95_ms": percentile(all_replies, .95),
+                               "reply_p95_ms": percentile(latencies[mode, phase, flow], .95),
                                "first_expected_source_p95_ms": percentile(recoveries, .95),
                                "censored": len(selected) - len(recoveries)})
         steady = [row for row in all_metrics if row["phase"] in ("baseline", "soak_healthy")]
