@@ -100,6 +100,24 @@ if ($action === 'probe') {
 
 require_once('config.inc');
 require_once('/usr/local/pkg/sdwan_steering.inc');
+if ($action === 'floating_erp_block') {
+    $mode = $argv[2] ?? '';
+    if (!in_array($mode, ['on', 'off'], true)) {
+        throw new InvalidArgumentException('Unknown Floating acceptance mode');
+    }
+    $rules = config_get_path('filter/rule', []);
+    $rules = array_values(array_filter($rules, static fn($rule) => (string)($rule['tracker'] ?? '') !== '41006'));
+    if ($mode === 'on') {
+        // Append in config order. The native compiler places Floating rules first.
+        $rules[] = ['type' => 'block', 'floating' => 'yes', 'quick' => 'yes', 'direction' => 'in',
+            'ipprotocol' => 'inet', 'interface' => 'lan', 'protocol' => 'tcp', 'tracker' => '41006',
+            'descr' => 'Disposable Floating ERP block', 'source' => ['address' => '192.0.2.11'],
+            'destination' => ['address' => '192.0.2.162', 'port' => '7']];
+    }
+    config_set_path('filter/rule', $rules);
+    write_config('Toggle the disposable Floating ERP block');
+    exit;
+}
 if ($action === 'renew_wan2') {
     require_once('interfaces.inc');
     require_once('pfsense-utils.inc');

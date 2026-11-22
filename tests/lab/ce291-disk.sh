@@ -14,7 +14,11 @@ set -- "$out"/ce-candidate-package/*.pkg
 test "$#" -eq 1
 test -f "$1"
 candidate=$1
-rollback="$out/dist/pfSense-pkg-SDWAN-0.4.27.pkg"
+candidate_version=${candidate##*/}
+candidate_version=${candidate_version#pfSense-pkg-SDWAN-}
+candidate_version=${candidate_version%.pkg}
+previous=$(sh "$out/tools/previous-dist-package.sh" "$candidate_version")
+rollback="$out/$previous"
 for package in "$candidate" "$rollback"; do
     test "$(sha256 -q "$package")" = "$(awk 'NR == 1 {print $1}' "$package.sha256")"
 done
@@ -69,7 +73,7 @@ cp "$out/tests/lab/ce291-guest.php" "$root/root/sdwan-lab/"
 cp "$out"/lab-overlay/src/etc/inc/filter*.inc "$root/root/sdwan-lab/"
 cp "$candidate" "$root/root/sdwan-lab/candidate.pkg"
 sha256 -q "$candidate" > "$root/root/sdwan-lab/candidate.sha256"
-cp "$rollback" "$root/root/sdwan-lab/"
+cp "$rollback" "$root/root/sdwan-lab/rollback.pkg"
 test -s "$root/boot/gptboot"
 test -s "$root/boot/kernel/kernel"
 gpart bootcode -b "$root/boot/pmbr" -p "$root/boot/gptboot" -i 1 "$device"

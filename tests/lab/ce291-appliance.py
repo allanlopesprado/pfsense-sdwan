@@ -307,7 +307,7 @@ def diagnostics(qemu):
     raw = command(qemu, """date +%s
         ls -l /var/run/sdwan-observer* /var/run/dpinger*.sock || :
         cat /var/run/sdwan-observer.json || :
-        pfctl -sr 2>/dev/null | grep -E 'ridentifier 4100[1-5]$' || :
+        pfctl -sr 2>/dev/null | grep -E 'ridentifier 4100[1-6]$' || :
         grep -iE 'sdwan|check_reload_status|dpinger' /var/log/system.log | tail -22 || :
         php -r '
             require "config.inc";
@@ -343,6 +343,24 @@ def assert_rules(rules, choices, wan2_hop=None):
 
 def route_and_nat(qemu):
     return command(qemu, """route -n get default | awk '/gateway:|interface:/'"""), command(qemu, "pfctl -sn 2>/dev/null")
+
+
+def verify_floating_rule(qemu, primary, certificate):
+    try:
+        command(qemu, f"php {LAB}/ce291-guest.php floating_erp_block on; /etc/rc.filter_configure_sync")
+        rules = command(qemu, "pfctl -P -sr 2>/dev/null | awk '/ridentifier (41001|41003|41006)$/'").splitlines()
+        assert [line.split()[-1] for line in rules] == ["41006", "41001", "41003"], rules
+        assert re.match(r"^block (?:drop )?in quick on vtnet1\b", rules[0]), rules[0]
+        print(f"Floating ERP block PF {rules[0]}", flush=True)
+        state = observations(qemu)
+        assert state["pf"] == {"G": "pending", "B": "applied"}, state
+        tcp_pair("Floating blocks ERP only", (None, A))
+        management("Floating blocks ERP only", certificate)
+    finally:
+        command(qemu, f"php {LAB}/ce291-guest.php floating_erp_block off; /etc/rc.filter_configure_sync")
+    wait_paths(qemu, "after Floating block removal", primary)
+    tcp_pair("after Floating block removal", (A, A))
+    print("NATIVE_FLOATING_QUICK_PRECEDENCE_OK", flush=True)
 
 
 def held_connection(target, cleanup):
@@ -575,12 +593,15 @@ def verify_native_dhcp(qemu, cleanup, provider, certificate):
 
 def acceptance(qemu, cleanup, provider):
     package = f"{LAB}/candidate.pkg"
+    rollback = f"{LAB}/rollback.pkg"
     digest = command(qemu, f"sha256 -q {package}")
     assert re.fullmatch(r"[0-9a-f]{64}", digest), digest
     assert digest == command(qemu, f"cat {LAB}/candidate.sha256")
     version = command(qemu, f"pkg query -F {package} '%v'")
     assert re.fullmatch(r"\d+\.\d+\.\d+", version), version
-    assert command(qemu, f"pkg version -t {version} 0.4.27") == ">"
+    previous_version = command(qemu, f"pkg query -F {rollback} '%v'")
+    assert re.fullmatch(r"\d+\.\d+\.\d+", previous_version), previous_version
+    assert command(qemu, f"pkg version -t {version} {previous_version}") == ">"
     print(f"CANDIDATE_PACKAGE version={version} sha256={digest}", flush=True)
     rv = command(qemu, f"pkg add {package}", timeout=180)
     print(rv.splitlines()[-6:], flush=True)
@@ -589,8 +610,8 @@ def acceptance(qemu, cleanup, provider):
     assert "ABI=0" in command(qemu, f"php {LAB}/ce291-guest.php mode")
     print("PACKAGE_INSTALLED_WITH_NATIVE_HOOKS; STOCK_MODE_OBSERVATION", flush=True)
 
-    command(qemu, f"pkg add -f {LAB}/pfSense-pkg-SDWAN-0.4.27.pkg", timeout=180)
-    assert command(qemu, "pkg query '%v' pfSense-pkg-SDWAN") == "0.4.27"
+    command(qemu, f"pkg add -f {rollback}", timeout=180)
+    assert command(qemu, "pkg query '%v' pfSense-pkg-SDWAN") == previous_version
     command(qemu, f"php {LAB}/ce291-guest.php settings")
     config_hash = "php -r 'require \"config.inc\";echo hash(\"sha256\", serialize(config_get_path(\"installedpackages/sdwan\")));'"
     saved = command(qemu, config_hash)
@@ -611,6 +632,7 @@ def acceptance(qemu, cleanup, provider):
     command(qemu, f"php {LAB}/ce291-guest.php bind")
     wait_paths(qemu, "baseline", primary)
     tcp_pair("baseline", (A, A))
+    verify_floating_rule(qemu, primary, certificate)
     same_target_probes(qemu)
     vti_no_sa(qemu)
     verify_unapplied_reload(qemu, primary, certificate)
@@ -705,8 +727,8 @@ def acceptance(qemu, cleanup, provider):
     assert route_and_nat(qemu) == reference
     tcp_pair("native rollback", (A, A))
     management("native rollback", certificate)
-    command(qemu, f"pkg add -f {LAB}/pfSense-pkg-SDWAN-0.4.27.pkg", timeout=180)
-    assert command(qemu, "pkg query '%v' pfSense-pkg-SDWAN") == "0.4.27"
+    command(qemu, f"pkg add -f {rollback}", timeout=180)
+    assert command(qemu, "pkg query '%v' pfSense-pkg-SDWAN") == previous_version
     command(qemu, "pkg check -s pfSense-pkg-SDWAN; /usr/local/etc/rc.d/sdwand.sh status")
     tcp_pair("package rollback", (A, A))
     for stream in rollback_sessions:
