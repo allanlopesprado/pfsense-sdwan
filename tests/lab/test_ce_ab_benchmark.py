@@ -1,5 +1,8 @@
 import importlib.util
+from io import StringIO
+import json
 from pathlib import Path
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -42,9 +45,42 @@ class ApplicationBenchmarkTest(unittest.TestCase):
         self.assertEqual(measured["tail_attempts"], 2)
         self.assertEqual(measured["tail_mismatches"], 1)
 
+    def test_streaming_skips_gaps_and_preserves_boundary_counts(self):
+        phases = [{"start_ns": start * 1_000_000, "end_ns": end * 1_000_000}
+                  for start, end in [(100, 200), (300, 400), (500, 600)]]
+        rows = (record(start, end, "peer") for start, end in [(50, 100), (100, 111), (175, 200),
+                                                               (200, 215), (500, 535), (600, 650)])
+        result = {}
+        latencies = []
+        for index, samples in benchmark.by_phase(rows, phases):
+            phase = phases[index]
+            result[index] = benchmark.phase_stats(samples, phase["start_ns"], phase["end_ns"], "peer", latencies)
+        self.assertEqual(set(result), {0, 2})
+        self.assertEqual(result[0]["excluded_boundary_attempts"], 1)
+        self.assertEqual(result[0]["attempts"], 1)
+        self.assertEqual(result[2]["attempts"], 1)
+        self.assertEqual(latencies, [11, 35])
+
     def test_timeout_is_recorded(self):
         with patch.object(benchmark.socket, "create_connection", side_effect=TimeoutError):
             self.assertEqual(benchmark.transaction("192.0.2.162", b"marker", .1), {"status": "timeout"})
+
+    def test_freebsd_resource_query_uses_one_header_assignment_per_option(self):
+        class Fixture:
+            def worker_pid(self, _qemu):
+                return 42680
+
+            def command(self, _qemu, command):
+                self.command_text = command
+                return " 42680    0.1  41650\n"
+
+        fixture = Fixture()
+        storage = StringIO()
+        experiment = SimpleNamespace(ce=fixture, qemu=None, mode="sdwan", resources=storage)
+        benchmark.Experiment.resource_sample(experiment)
+        self.assertEqual(fixture.command_text, "LC_ALL=C ps -p 42680 -o pid= -o pcpu= -o rss=")
+        row = json.loads(storage.getvalue())
+        self.assertEqual((row["pid"], row["cpu_pct_ps"], row["rss_kib"]), (42680, .1, 41650))
 
 
 if __name__ == "__main__":
