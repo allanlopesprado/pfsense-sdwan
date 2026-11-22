@@ -56,8 +56,7 @@ function sdwan_probe_route_matches(string $output, string $device, string $next_
 	return preg_match('/^\s*interface:\s*(\S+)\s*$/m', $output, $route_device) &&
 	    $route_device[1] === $device &&
 	    preg_match('/^\s*gateway:\s*(\S+)\s*$/m', $output, $route_gateway) &&
-	    ($expected = @inet_pton(explode('%', $next_hop, 2)[0])) !== false &&
-	    @inet_pton(explode('%', $route_gateway[1], 2)[0]) === $expected;
+	    sdwan_next_hop_matches($route_gateway[1], $next_hop, $device);
 }
 
 function sdwan_probe_dns_question(string $name): string {

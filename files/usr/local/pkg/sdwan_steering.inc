@@ -383,9 +383,7 @@ function sdwan_steering_loaded_path_matches(string $rule, array $gateways): bool
 	$seen = [];
 	foreach ($paths as [, $device, $address]) {
 		$gateway = $gateways[$device] ?? null;
-		$next = @inet_pton(explode('%', $address, 2)[0]);
-		if ($gateway === null || $next === false ||
-		    $next !== @inet_pton(explode('%', $gateway['address'], 2)[0])) {
+		if ($gateway === null || !sdwan_next_hop_matches($address, $gateway['address'], $device)) {
 			return false;
 		}
 		$seen[$device] = ($seen[$device] ?? 0) + 1;
@@ -625,16 +623,12 @@ function sdwan_steering_pf_status(array $binding, array $state, array $inventory
 /* The native state dump includes the originating rule identifier as well as
  * the next hop. Rule ordinals are transient across filter reloads. */
 function sdwan_steering_state_ids(iterable $lines, array $trackers, string $device, string $address): array {
-	$target = @inet_pton(explode('%', $address, 2)[0]);
 	$ids = [];
-	if ($target === false) {
-		return $ids;
-	}
 	$record = [];
-	$finish = static function (array $state) use ($trackers, $device, $target, &$ids): void {
+	$finish = static function (array $state) use ($trackers, $device, $address, &$ids): void {
 		if (count($ids) < 64 && isset($state['tracker'], $state['id'], $state['hop']) &&
 		    in_array($state['tracker'], $trackers, true) && $state['hop'][1] === $device &&
-		    @inet_pton(explode('%', $state['hop'][0], 2)[0]) === $target) {
+		    sdwan_next_hop_matches($state['hop'][0], $address, $device)) {
 			$ids[$state['id']] = true;
 		}
 	};

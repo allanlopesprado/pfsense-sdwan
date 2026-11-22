@@ -100,6 +100,9 @@ $rows[] = audit_case('guard_missing', 'pending', $status($state, [$pass]), 'appl
 $rows[] = audit_case('guard_before_pass', 'pending', $status($state, [$guard, $pass]), 'applied');
 $rows[] = audit_case('guard_wrong_port', 'pending',
 	$status($state, [$pass, str_replace('port = 18080', 'port = 18081', $guard)]), 'applied');
+$earlier_pass = 'pass in quick on em1 inet from 192.168.1.0/24 to any keep state ridentifier 771292099';
+$rows[] = audit_case('earlier_quick_pass_shadows_policy', 'pending',
+	$status($state, [$earlier_pass, $pass, $guard]), 'applied');
 $rows[] = audit_case('block_wrong_ingress', 'pending',
 	$status($blocked_state, [str_replace('on em1', 'on em3', $block), $guard]), 'blocked');
 $rows[] = audit_case('block_wrong_scope', 'pending',
@@ -130,6 +133,19 @@ $rows[] = audit_case('ipv6_link_local_scope', 'applied',
 	sdwan_steering_pf_status($binding, $state, $inventory6, [$scope6('em2'), $guard6]));
 $rows[] = audit_case('ipv6_link_local_wrong_scope', 'pending',
 	sdwan_steering_pf_status($binding, $state, $inventory6, [$scope6('em0'), $guard6]), 'applied');
+$rows[] = audit_case('ipv6_link_local_scope_inferred_from_device', 'applied',
+	sdwan_steering_pf_status($binding, $state, $inventory6, [str_replace('%em2', '', $scope6('em2')), $guard6]));
+$state6 = [
+	'all tcp 2001:db8::1:443 <- 2001:db8::10:51000 ESTABLISHED:ESTABLISHED',
+	'   id: 000000010000000a creatorid: 12345678',
+	'   ridentifier 771292101',
+	'   route-to: fe80::20%em2@em2',
+];
+$rows[] = audit_case('reconnect_ipv6_state_scope_matches', '000000010000000a/12345678',
+	implode(',', sdwan_steering_state_ids($state6, $binding['trackers'], 'em2', 'fe80::20%em2')));
+$state6[3] = '   route-to: fe80::20%em0@em2';
+$rows[] = audit_case('reconnect_ipv6_state_scope_conflicts', '',
+	implode(',', sdwan_steering_state_ids($state6, $binding['trackers'], 'em2', 'fe80::20%em2')));
 $rows[] = audit_case('renderer_rejects_wrong_ipv6_scope', true,
 	filter_sdwan_gateway_route(['interface' => 'em2', 'ipprotocol' => 'inet6'], 'fe80::20%em0') === null);
 
@@ -163,6 +179,14 @@ foreach ([1, 30, 30, 30, 30, 30, 30, 11] as $index => $weight) {
 
 $approved = sdwan_steering_preflight($settings, 'office', 'LAB_SD', $native);
 $rows[] = audit_case('preflight_at_384_hops', true, $approved['errors'] === []);
+$shadowed = $native;
+$preceding = array_replace($native_pass, ['tracker' => '771292099', 'source' => ['address' => '192.0.2.0/24']]);
+unset($preceding['gateway']);
+array_unshift($shadowed['rules'], $preceding);
+$shadowed_check = sdwan_steering_preflight($settings, 'office', 'LAB_SD', $shadowed);
+$rows[] = audit_case('preflight_earlier_pass_shadows_policy', true,
+	$shadowed_check['errors'] !== [] ||
+	    ($shadowed_check['binding']['rules_revision'] ?? null) !== $approved['binding']['rules_revision'], false);
 $rows[] = audit_case('renders_384_hops', 384, substr_count(filter_sdwan_pool_route($native_routes), '('));
 foreach ([386 => 12, 422 => 30] as $hops => $weight) {
 	$native['gateways']['GW7']['weight'] = $weight;

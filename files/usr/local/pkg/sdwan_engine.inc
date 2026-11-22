@@ -21,6 +21,14 @@ function sdwan_monitor_address(string $value, string $family, string $device, bo
 	return $scope === null ? $address : null;
 }
 
+/* Unscoped link-local output can inherit the separately verified device.
+ * An explicit zone must agree with that device on both sides. */
+function sdwan_next_hop_matches(string $observed, string $expected, string $device): bool {
+	$family = str_contains($expected, ':') ? 'inet6' : 'inet';
+	$next_hop = sdwan_monitor_address($expected, $family, $device, true);
+	return $next_hop !== null && sdwan_monitor_address($observed, $family, $device, true) === $next_hop;
+}
+
 function sdwan_gateway_monitor(array $gateway): ?string {
 	$family = $gateway['family'];
 	$interface = $gateway['interface'];

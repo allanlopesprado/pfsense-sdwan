@@ -169,7 +169,7 @@ jobs:
             SDWAN_ERP_ONLY=1 SDWAN_NATIVE_CORE="$PWD/lab-core" sh tests/lab/freebsd-dataplane.sh
   publish:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main' && startsWith(github.event.head_commit.message, 'Release ')
-    needs: [offline, freebsd, ikev2, homologation]
+    needs: [divergence-audit, offline, freebsd, ikev2, homologation]
     runs-on: ubuntu-24.04
     concurrency:
       group: sdwan-publish

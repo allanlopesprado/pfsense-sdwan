@@ -184,6 +184,15 @@ fixture_append($result, 'probe_default_route_is_not_host_route', 'rejected',
     sdwan_probe_route_matches($notPinned, 'em0', '192.0.2.1') ? 'matching' : 'rejected');
 fixture_append($result, 'probe_other_egress_is_not_same_path', 'rejected',
     sdwan_probe_route_matches($movedRoute, 'em0', '192.0.2.1') ? 'matching' : 'rejected');
+$linkLocalRoute = str_replace('192.0.2.1', 'fe80::1%em0', $pinnedRoute);
+fixture_append($result, 'probe_ipv6_correct_next_hop_zone', 'matching',
+    sdwan_probe_route_matches($linkLocalRoute, 'em0', 'fe80::1%em0') ? 'matching' : 'rejected');
+fixture_append($result, 'probe_ipv6_conflicting_next_hop_zone', 'rejected',
+    sdwan_probe_route_matches(str_replace('%em0', '%em1', $linkLocalRoute), 'em0', 'fe80::1%em0') ? 'matching' : 'rejected');
+fixture_append($result, 'probe_ipv6_infers_omitted_zone_from_device', 'matching',
+    sdwan_probe_route_matches(str_replace('%em0', '', $linkLocalRoute), 'em0', 'fe80::1%em0') ? 'matching' : 'rejected');
+fixture_append($result, 'probe_ipv6_global_next_hop_has_no_zone', 'rejected',
+    sdwan_probe_route_matches(str_replace('fe80::1', '2001:db8::1', $linkLocalRoute), 'em0', '2001:db8::1') ? 'matching' : 'rejected');
 $current['staticroutes/route'][] = ['network' => '203.0.113.78/32', 'gateway' => 'B'];
 fixture_append($result, 'unrelated_route_change_control', 'current/A', fixture_decision($settings, $wire, $rule));
 $current['staticroutes/route'][0]['gateway'] = 'B';
