@@ -1,19 +1,59 @@
 #!/bin/sh
 [ -z "${PKG_ROOTDIR#/}" ] || exit 0
-case "$2" in
+[ "${PKG_CHROOTED:-}" != true ] || exit 0
+# The new post-install hook restarts the observer and refreshes registration.
+[ -z "${PKG_UPGRADE:-}" ] || exit 0
+
+register_removal() {
+	if [ -f /var/run/php-fpm.pid ]; then
+		/usr/local/bin/php -f /etc/rc.packages %%PORTNAME%% "$1"
+	else
+		# rc.packages defers when PHP-FPM is down, but its removal API is CLI-safe.
+		# shellcheck disable=SC2016
+		/usr/local/bin/php -r '
+			require_once("config.inc");
+			require_once("functions.inc");
+			require_once("filter.inc");
+			require_once("shaper.inc");
+			require_once("captiveportal.inc");
+			require_once("pkg-utils.inc");
+			require_once("pfsense-utils.inc");
+			$pkg_interface = "console";
+			$package = $argv[1];
+			pkg_remove_prefix($package);
+			delete_package_xml($package, strtolower($argv[2]));
+		' -- %%PORTNAME%% "$1"
+	fi
+}
+
+case "${2:-}" in
 DEINSTALL)
-	# Also stop during removal with an unavailable PHP-FPM service.
+	# Avoid a second invalidation when native package cleanup stops the service.
+	export SDWAN_PACKAGE_REMOVING=1
 	if [ -x /usr/local/etc/rc.d/sdwand.sh ]; then
-		SDWAN_PACKAGE_REMOVING=1 /usr/local/etc/rc.d/sdwand.sh stop >/dev/null 2>&1 || :
+		if ! /usr/local/etc/rc.d/sdwand.sh stop >/dev/null 2>&1 &&
+		    /usr/local/etc/rc.d/sdwand.sh status >/dev/null 2>&1; then
+			echo 'SD-WAN observer is still running. Stop it and retry removal.' >&2
+			exit 1
+		fi
+	elif [ -f /var/run/sdwand.pid ]; then
+		echo 'SD-WAN observer status cannot be checked. Restore the service script before removal.' >&2
+		exit 1
 	fi
 	if [ -f /usr/local/pkg/sdwan_invalidate.inc ]; then
 		/usr/local/bin/php -f /usr/local/pkg/sdwan_invalidate.inc || exit 1
-	else
-		rm -f /var/run/sdwan-observer.json /var/run/sdwan-observer.json.forwarded
+	elif [ -f /var/run/sdwan-observer.json.forwarded ] || [ -f /var/run/sdwan-filter-commit.json ]; then
+		echo 'SD-WAN forwarding withdrawal cannot be checked. Restore the package helper before removal.' >&2
+		exit 1
 	fi
-	rm -f /var/run/sdwan-observer.json.events || exit 1
+	register_removal "$2"
 	;;
-POST-DEINSTALL) ;;
+POST-DEINSTALL)
+	register_removal "$2" || exit 1
+	# The observer is stopped, PF withdrawal was checked, and the package is gone.
+	rm -f /var/run/sdwand.pid /var/run/sdwan-filter-commit.json \
+		/var/run/sdwan-observer.json /var/run/sdwan-observer.json.forwarded \
+		/var/run/sdwan-observer.json.events /var/run/sdwan-observer.json.lock
+	;;
 *) exit 0 ;;
 esac
-exec /usr/local/bin/php -f /etc/rc.packages %%PORTNAME%% "$2"

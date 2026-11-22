@@ -3,6 +3,7 @@
 import json
 import os
 from pathlib import Path
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -59,37 +60,77 @@ function update_status($message) {
                 raise AssertionError(f"Unexpected {action} result for exit {action_exit}: {result.stdout}")
 
 
-def check_shell_hooks(tmp):
+def check_shell_hooks(tmp, php):
     log = tmp / "calls"
     helper = tmp / "invalidate.inc"
     state = tmp / "sdwan-observer.json"
     log_state = tmp / "sdwan-observer.json.events"
+    receipt = tmp / "sdwan-observer.json.forwarded"
+    lock = tmp / "sdwan-observer.json.lock"
+    commit = tmp / "sdwan-filter-commit.json"
+    pid = tmp / "sdwand.pid"
     fpm_pid = tmp / "php-fpm.pid"
     service = tmp / "rc.d" / "sdwand.sh"
     service.parent.mkdir()
-    service.write_text('#!/bin/sh\nprintf "service %s\\n" "$1" >> "$CALLS"\n')
+    service.write_text('''#!/bin/sh
+printf 'service %s\\n' "$1" >> "$CALLS"
+test "$SDWAN_PACKAGE_REMOVING" = 1 || exit 64
+if [ "$1" = stop ]; then
+    exit "$STOP_RESULT"
+fi
+exit "$STATUS_RESULT"
+''')
     service.chmod(0o755)
     registry = tmp / "php"
-    registry.write_text('#!/bin/sh\nprintf "%s\\n" "$*" >> "$CALLS"\n')
+    registry.write_text('''#!/bin/sh
+if [ "$1" = -r ]; then
+    exec "$PHP_TEST" -d "include_path=$NATIVE_PHP" "$@"
+fi
+printf '%s\\n' "$*" >> "$CALLS"
+if [ "$2" = "$INVALIDATE_HELPER" ]; then
+    exit "$WITHDRAWAL_RESULT"
+fi
+''')
     registry.chmod(0o755)
+    native_php = tmp / "native"
+    native_php.mkdir()
+    for name in ("config", "functions", "filter", "shaper", "captiveportal", "pfsense-utils"):
+        (native_php / f"{name}.inc").write_text("<?php\n")
+    (native_php / "pkg-utils.inc").write_text('''<?php
+function pkg_remove_prefix(&$name) {
+    $name = substr($name, strlen('pfSense-pkg-'));
+}
+function delete_package_xml($name, $phase) {
+    if ($GLOBALS['pkg_interface'] !== 'console') { exit(64); }
+    file_put_contents(getenv('CALLS'), "offline $name $phase\\n", FILE_APPEND);
+}
+''')
     for phase in ("install", "deinstall"):
         contents = (FILES / f"pkg-{phase}.in").read_text()
         # Model the same absolute paths under a temporary root. No system tools are changed.
         for source, target in [
-            ("%%PORTNAME%%", "pfSense-pkg-SDWAN"),
             ("/usr/local/etc/rc.d/sdwand.sh", str(service)),
             ("/usr/local/bin/php", str(registry)),
             ("/usr/local/pkg/sdwan_invalidate.inc", str(helper)),
             ("/var/run/sdwan-observer.json", str(state)),
+            ("/var/run/sdwan-filter-commit.json", str(commit)),
+            ("/var/run/sdwand.pid", str(pid)),
             ("/var/run/php-fpm.pid", str(fpm_pid)),
         ]:
-            contents = contents.replace(source, target)
+            contents = contents.replace(source, shlex.quote(Path(target).as_posix()))
+        contents = contents.replace("%%PORTNAME%%", "pfSense-pkg-SDWAN")
         (tmp / phase).write_text(contents)
 
-    def run(phase, when, root="/"):
-        env = dict(os.environ, PKG_ROOTDIR=root, CALLS=str(log))
-        return subprocess.run(["sh", str(tmp / phase), "pfSense-pkg-SDWAN", when],
-                              env=env, check=True, text=True, capture_output=True)
+    def run(phase, when, root="/", code=0, **overrides):
+        env = dict(os.environ, PKG_ROOTDIR=root, CALLS=log.as_posix(), PHP_TEST=Path(php).as_posix(),
+                   NATIVE_PHP=native_php.as_posix(), INVALIDATE_HELPER=helper.as_posix(),
+                   PKG_CHROOTED="", PKG_UPGRADE="", STOP_RESULT="0", STATUS_RESULT="1", WITHDRAWAL_RESULT="0")
+        env.update(overrides)
+        result = subprocess.run(["sh", (tmp / phase).as_posix(), "pfSense-pkg-SDWAN", when],
+                                env=env, text=True, capture_output=True)
+        if result.returncode != code:
+            raise AssertionError(f"Unexpected {phase} {when} result: {result}")
+        return result
 
     def calls():
         return log.read_text().splitlines() if log.exists() else []
@@ -99,6 +140,9 @@ def check_shell_hooks(tmp):
     for phase, when in [("install", "POST-INSTALL"), ("deinstall", "DEINSTALL"),
                         ("deinstall", "POST-DEINSTALL")]:
         run(phase, when, root="/staging/image")
+        run(phase, when, PKG_CHROOTED="true")
+    run("deinstall", "DEINSTALL", PKG_UPGRADE="true")
+    run("deinstall", "POST-DEINSTALL", PKG_UPGRADE="true")
     run("install", "PRE-INSTALL")
     if calls() or not state.exists() or not log_state.exists():
         raise AssertionError("A staged install or unsupported phase touched the host")
@@ -107,11 +151,11 @@ def check_shell_hooks(tmp):
     if calls() or "rc.packages pfSense-pkg-SDWAN POST-INSTALL" not in deferred.stderr:
         raise AssertionError("Missing PHP-FPM must defer registration and show how to resume")
     fpm_pid.touch()
-    run("install", "POST-INSTALL")
+    run("install", "POST-INSTALL", PKG_UPGRADE="true")
     run("deinstall", "DEINSTALL")
+    run("deinstall", "POST-DEINSTALL")
     if state.exists() or log_state.exists():
         raise AssertionError("Runtime measurement or event suppression state survived removal")
-    run("deinstall", "POST-DEINSTALL")
     expected = ["-f /etc/rc.packages pfSense-pkg-SDWAN POST-INSTALL", "service stop",
                 "-f /etc/rc.packages pfSense-pkg-SDWAN DEINSTALL",
                 "-f /etc/rc.packages pfSense-pkg-SDWAN POST-DEINSTALL"]
@@ -120,18 +164,34 @@ def check_shell_hooks(tmp):
 
     # The installed helper invalidates runtime decisions even if the service is down.
     helper.touch()
-    log_state.touch()
-    run("deinstall", "DEINSTALL")
-    if log_state.exists():
-        raise AssertionError("Event suppression state survived removal with the helper installed")
-    if calls()[-3:] != ["service stop", "-f " + str(helper), expected[2]]:
+    for artifact in (state, receipt, lock, log_state, pid, commit):
+        artifact.touch()
+    still_running = run("deinstall", "DEINSTALL", code=1, STOP_RESULT="1", STATUS_RESULT="0")
+    assert "observer is still running" in still_running.stderr
+    assert calls()[-2:] == ["service stop", "service status"] and receipt.exists()
+    run("deinstall", "DEINSTALL", code=1, WITHDRAWAL_RESULT="1")
+    assert calls()[-2:] == ["service stop", "-f " + helper.as_posix()]
+    assert receipt.exists() and lock.exists() and commit.exists()
+    run("deinstall", "DEINSTALL", STOP_RESULT="1")
+    if calls()[-4:] != ["service stop", "service status", "-f " + helper.as_posix(), expected[2]]:
         raise AssertionError("Removal did not invoke invalidation before unregistering")
+    assert receipt.exists() and lock.exists()
+    run("deinstall", "POST-DEINSTALL")
+    assert not any(artifact.exists() for artifact in (state, receipt, lock, log_state, pid, commit))
     helper.unlink()
+    receipt.touch()
+    no_helper = run("deinstall", "DEINSTALL", code=1)
+    assert "withdrawal cannot be checked" in no_helper.stderr and receipt.exists()
+    receipt.unlink()
     # Cleanup can be retried when the prior attempt already removed the service.
     service.unlink()
     run("deinstall", "DEINSTALL")
     if calls()[-1] != expected[2]:
         raise AssertionError("Removal recovery failed")
+    fpm_pid.unlink()
+    run("deinstall", "DEINSTALL")
+    run("deinstall", "POST-DEINSTALL")
+    assert calls()[-2:] == ["offline SDWAN deinstall", "offline SDWAN post-deinstall"]
 
 
 def check_invalidation(tmp, php):
@@ -219,6 +279,6 @@ if __name__ == "__main__":
     php = sys.argv[1] if len(sys.argv) > 1 else "php"
     check_install_xml(php)
     with tempfile.TemporaryDirectory(prefix="sdwan-lifecycle-") as root:
-        check_shell_hooks(Path(root))
+        check_shell_hooks(Path(root), php)
         check_invalidation(Path(root), php)
     print("ok - package hooks, worker startup/replacement, staged roots and removal retry")

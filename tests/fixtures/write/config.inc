@@ -1,10 +1,16 @@
 <?php
 /* This in-memory pfSense fixture distinguishes a pending edit from a durable write. */
-function try_lock($name, $timeout) {
-	global $busy;
-	return $busy ? null : tmpfile();
+if (!defined('SDWAN_LOCK_DIRECTORY')) {
+	$lock_dir = sys_get_temp_dir() . '/sdwan-locks-' . bin2hex(random_bytes(8));
+	mkdir($lock_dir, 0700);
+	define('SDWAN_LOCK_DIRECTORY', $lock_dir);
+	register_shutdown_function(static function () use ($lock_dir) {
+		foreach (glob($lock_dir . '/*.lock') as $path) {
+			unlink($path);
+		}
+		rmdir($lock_dir);
+	});
 }
-function unlock($handle) { fclose($handle); }
 function config_read_file($backup, $cache) {
 	global $current, $disk;
 	$current = $disk;

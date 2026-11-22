@@ -16,14 +16,15 @@ $disk = $current = [
 ];
 $native = $disk;
 $writes = 0;
-$fail = $busy = false;
+$fail = false;
 $initial = sdwan_get_config();
 $revision = sdwan_config_revision($initial);
 $edited = $initial;
 $edited['members'][] = ['name' => 'link', 'gateway' => 'GW', 'cost' => '10'];
-$busy = true;
+$held = sdwan_lock('sdwan-settings', 0);
+verify(is_resource($held) && sdwan_lock('sdwan-settings', 0) === null, 'a held runtime lock excludes other writers');
 verify(sdwan_save_config($edited, $revision) !== [] && $disk === $native, 'busy configuration lock preserves the durable configuration');
-$busy = false;
+sdwan_unlock($held);
 $fail = true;
 verify(sdwan_save_config($edited, $revision) !== [] && $disk === $native && $current === $disk, 'failed write rolls back the in-memory edit');
 $fail = false;

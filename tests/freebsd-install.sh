@@ -45,6 +45,8 @@ for baseline in 0.2.0 0.3.0 0.4.0 0.4.1 0.4.2 0.4.3 0.4.4 0.4.5 0.4.6 0.4.7 0.4.
     run_pkg add -I "$PWD/dist/$package-$baseline.pkg"
     test "$(run_pkg query '%v' "$package")" = "$baseline"
     if [ "${baseline%.*}" = 0.4 ]; then
+        # The argument is PHP source and its variables are evaluated by PHP.
+        # shellcheck disable=SC2016
         php -n -r '
             require $argv[1];
             $release = sdwan_release_parse(file_get_contents($argv[2]));
@@ -113,7 +115,7 @@ sed -e "s|/var/run/sdwand.pid|$root/sdwand.pid|" \
     -e "s|/usr/local/bin/php -f /usr/local/pkg/sdwan_invalidate.inc|/usr/bin/touch $root/invalidated|" \
     "$dbroot/usr/local/etc/rc.d/sdwand.sh" > "$root/sdwand.sh"
 wait_for_child() {
-    for attempt in 1 2 3 4 5 6 7 8 9 10 11 12; do
+    for _ in 1 2 3 4 5 6 7 8 9 10 11 12; do
         if [ -s "$root/child.pid" ] && [ -s "$root/sdwand.pid" ]; then
             current=$(cat "$root/child.pid")
             parent=$(cat "$root/sdwand.pid")

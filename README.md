@@ -19,8 +19,8 @@ An experimental package for monitoring links, comparing gateways against SLAs, a
 
 | Environment | Use |
 | --- | --- |
-| **Stock pfSense CE 2.9.1 or 2.9.2** | Gateway monitoring, SLA evaluation, and path recommendations. |
-| **pfSense CE 2.9.1 or 2.9.2 with the matching lab core** | Policy-based forwarding experiments with the [core adapter](core/README.md) and a dedicated native gateway group. |
+| **Stock pfSense CE 2.9.1 and 2.9.2** | Gateway monitoring, SLA evaluation, and path recommendations. |
+| **pfSense CE 2.9.1 and 2.9.2 with their matching lab cores** | Policy-based forwarding experiments with the [core adapter](core/README.md) and a dedicated native gateway group. |
 
 <a id="como-instalar-pelo-diagnostics--command-prompt"></a>
 
@@ -63,4 +63,4 @@ On CE 2.9.2, upgrade manually once from SD-WAN 0.4.27 or earlier. Version 0.4.28
 - [IPsec, CARP, NAT, and routing integration](docs/INTEGRATION.md)
 - [FortiOS interoperability](docs/FORTIOS.md)
 
-Run `sh tests/run.sh` with PHP CLI 8.2+, Python 3, and a POSIX shell. After installation, run [`verify-appliance.sh`](tools/verify-appliance.sh) with the expected version to check the package, WebGUI registration, service, and current sample.
+Run `sh tests/run.sh` from a full Git checkout with PHP CLI 8.2+, Python 3, a POSIX shell, ShellCheck and xmllint. After installation, run [`verify-appliance.sh`](tools/verify-appliance.sh) with the expected version to check the package, WebGUI registration, service, and current sample.

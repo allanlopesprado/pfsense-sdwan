@@ -1,10 +1,10 @@
-# Acceptance testing on pfSense CE 2.9.1
+# Acceptance testing on pfSense CE 2.9.1 and 2.9.2
 
 The experimental distribution includes an observer and a lab forwarding integration. Record the package and core revisions separately. Use a stock clone to validate observation and native forwarding. To test the effect of path selection, use a lab image that includes the core integration. [IPsec, CARP, NAT, states, and routing integration](INTEGRATION.md)
 
 ## Topology and evidence
 
-Use a CE 2.9.1 clone with an independent console. For HA, include two pfSense nodes, a peer on another network, two virtual WANs that can be degraded independently, a client LAN, and a synchronization network. Use lab addresses and certificates. Record the Git revision, package version, architecture, peer version, actual interface names, dpinger settings, and each SLA limit. Keep a local configuration backup and take node snapshots before installing.
+Use a CE clone with an independent console. Run the procedure separately on 2.9.1 and 2.9.2. For HA, include two pfSense nodes, a peer on another network, two virtual WANs that can be degraded independently, a client LAN, and a synchronization network. Use lab addresses and certificates. Record the Git revision, package version, architecture, peer version, actual interface names, dpinger settings, and each SLA limit. Keep a local configuration backup and take node snapshots before installing.
 
 One monitored gateway is enough to observe an SLA. To compare alternatives, configure two or more same-family gateways with targets that represent the same service and known return routes. For a VTI, identify its transport. For HA, assign the VTI interfaces independently in the same order on both nodes. Bind Phase 1 to the WAN VIP that corresponds to the tunnel. Test a connection over the active path and record the result before installing.
 
@@ -60,6 +60,12 @@ pkg info -l pfSense-pkg-SDWAN
 ```
 
 Check the version with `pkg query '%n-%v' pfSense-pkg-SDWAN` and open **Services → SD-WAN**. In **Updates**, verify the installed version and click **Check GitHub** to compare it with the public project index. **System → Package Manager** uses the product repository and may omit packages installed directly from files. Netgate reviews additions to its catalog. Record the original output for any registration, ABI, dependency, checksum, or menu error. [Package catalog](https://docs.netgate.com/pfsense/en/latest/packages/manager.html) · [Submitting ports](https://docs.netgate.com/pfsense/en/latest/development/develop-packages.html)
+
+## WebGUI updates and signatures
+
+**Services → SD-WAN → Updates** accepts a newer release after comparing the SHA-256 in the public index against the matching published GitHub release asset. The package is downloaded from the tagged revision over HTTPS and verified against that digest. Before installing, the updater creates a local archive of the installed package. If `pkg add` fails or the installed version or files fail verification, it tries to restore the local archive. If the new package files are intact and a current observer sample is still pending, use the verification action again after the observer runs.
+
+For Minisign verification, install the `minisign` executable at `/usr/local/bin/minisign` and place a trusted public key obtained independently at `/conf/sdwan-minisign.pub`. Publish the detached signature as a release asset named exactly like the package with `.minisig` appended, for example `pfSense-pkg-SDWAN-0.4.28.pkg.minisig`. When the local key and a published signature are both present, the upgrade stops if verification fails. Releases without a signature and appliances without a configured key continue to use HTTPS and SHA-256 verification.
 
 ## Removal and rollback
 
@@ -135,7 +141,7 @@ For VPN tests, keep the same protected network. Compare a verified 64 KiB transf
 
 For access tests, DHCP renewal keeps the lease, and a new lease changes the address and next hop. PPPoE establishes a session, loses the link, and negotiates a new address pair. The PHP test passes both observed pairs to the monitor matcher. On CE, repeat with dpinger active and record the new process's source address, installed gateway, first accepted sample, and first successful transaction. In the IPv6-PD test, Kea delegates the prefix, the router advertises a /64 on the LAN, and the IPv6 client reaches the destination using that prefix. After withdrawal, the old path fails and the client resumes using the new prefix. Repeat on CE with the native access client and Router Advertisement service. [Kea prefix delegation](https://kea.readthedocs.io/en/kea-2.3.3/arm/dhcp6-srv.html#subnet-and-prefix-delegation-pools)
 
-For HA and interoperability, use two CE 2.9.1 clones with independent consoles and isolated WAN A, WAN B, LAN, and synchronization segments. Prepare a reference peer and a FortiGate licensed for the chosen proposals. In each pairing, record VIP ownership, PF states, IKE and CHILD_SA negotiation, and the first application transaction during the same failure. Use **a management session independent of the interrupted path**. Record XMLRPC synchronization, dynamic routing, and restoration of the lab image snapshot. [Official CE installer](https://docs.netgate.com/pfsense/en/latest/install/download-installer-image.html) · [FortiGate-VM evaluation license limits](https://docs.fortinet.com/document/fortigate/7.2.10/administration-guide/441460) · [IPsec in HA](https://docs.netgate.com/pfsense/en/latest/highavailability/ipsec.html)
+For HA and interoperability, use two clones of the same target CE revision with independent consoles and isolated WAN A, WAN B, LAN, and synchronization segments. Prepare a reference peer and a FortiGate licensed for the chosen proposals. In each pairing, record VIP ownership, PF states, IKE and CHILD_SA negotiation, and the first application transaction during the same failure. Use **a management session independent of the interrupted path**. Record XMLRPC synchronization, dynamic routing, and restoration of the lab image snapshot. [Official CE installer](https://docs.netgate.com/pfsense/en/latest/install/download-installer-image.html) · [FortiGate-VM evaluation license limits](https://docs.fortinet.com/document/fortigate/7.2.10/administration-guide/441460) · [IPsec in HA](https://docs.netgate.com/pfsense/en/latest/highavailability/ipsec.html)
 
 ## Sources
 

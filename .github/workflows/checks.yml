@@ -46,13 +46,18 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - name: Check port, PHP syntax and offline behavior
+          fetch-depth: 0
+      - name: Install source lint tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libxml2-utils shellcheck
+      - name: Check package metadata, source syntax and offline behavior
         env:
           REQUIRE_NATIVE_SOCKET_TEST: "1"
-          SOURCE_BRANCH: ${{ github.event_name != 'pull_request' && github.ref_type == 'branch' && github.ref != 'refs/heads/main' }}
+          VERIFY_RELEASE_PAYLOAD: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && startsWith(github.event.head_commit.message, 'Release ') }}
         run: |
-          if [ "$SOURCE_BRANCH" = 'true' ]; then
-            sh tests/run.sh --source-only
+          if [ "$VERIFY_RELEASE_PAYLOAD" = 'true' ]; then
+            sh tests/run.sh --archive-parity
           else
             sh tests/run.sh
           fi
@@ -163,7 +168,7 @@ jobs:
             set -eu
             python3 -B tests/steering_daemon.py php --load-filter-extension
             sh tests/freebsd-install.sh
-            sh tests/lab/freebsd-system-log.sh "$PWD/lab-syslog/syslog.inc" ${{ github.event_name != 'pull_request' && github.ref_type == 'branch' && github.ref != 'refs/heads/main' && '--source-only' || '' }}
+            sh tests/lab/freebsd-system-log.sh "$PWD/lab-syslog/syslog.inc" --source-only
             sh tests/lab/freebsd-carp.sh
             SDWAN_REAL_DPINGER=1 SDWAN_RENDERED_RULES="$PWD/lab-rendered" sh tests/lab/freebsd-dataplane.sh
             SDWAN_ERP_ONLY=1 SDWAN_NATIVE_CORE="$PWD/lab-core" sh tests/lab/freebsd-dataplane.sh

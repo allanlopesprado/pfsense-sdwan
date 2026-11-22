@@ -119,7 +119,7 @@ route_added=yes
 test "$(interface_to "$fw" "$target")" = "$fw_vti"
 test "$(interface_to "$peer" "$inner_a")" = "$peer_vti"
 ready=no
-for attempt in 1 2 3; do
+for _ in 1 2 3; do
     if jexec "$fw" ping -n -c 1 -t 2 -S "$inner_a" "$target" >"$work/esp-probe.out" 2>&1; then
         ready=yes
         break

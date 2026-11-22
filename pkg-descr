@@ -1,4 +1,5 @@
-Monitor gateway health and compare SD-WAN policies in the pfSense CE WebGUI.
+Monitor gateway health and compare SD-WAN policies in the
+pfSense CE 2.9.1 and 2.9.2 WebGUI.
 On stock pfSense the package provides observation and forwarding previews.
 An opt-in lab integration can steer new connections matching selected native
 rules on a firewall built with the corresponding filter adapter.

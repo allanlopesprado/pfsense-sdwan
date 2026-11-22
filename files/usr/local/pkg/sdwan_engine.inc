@@ -149,27 +149,46 @@ function sdwan_policy_probe_requirements(array $policy, array $member, array $ov
 	return $requirements;
 }
 
+function sdwan_metric(mixed $value, float $maximum = PHP_FLOAT_MAX): ?float {
+	if (!is_numeric($value)) {
+		return null;
+	}
+	$number = (float)$value;
+	return is_finite($number) && $number >= 0 && $number <= $maximum ? $number : null;
+}
+
 function sdwan_candidate_reason(?array $member, ?array $sample, ?array $sla, ?array $requirements = null): string {
 	if ($member === null || $sample === null) {
 		return 'Member is not configured';
 	}
-	if ($sla === null || !is_numeric($sla['latency_ms'] ?? null) || !is_numeric($sla['loss_pct'] ?? null)) {
+	$latency_limit = sdwan_metric($sla['latency_ms'] ?? null, 600000);
+	$loss_limit = sdwan_metric($sla['loss_pct'] ?? null, 100);
+	$uses_variation = $sla !== null && array_key_exists('rttsd_ms', $sla);
+	$variation_limit = sdwan_metric($sla['rttsd_ms'] ?? null, 600000);
+	if ($latency_limit === null || $latency_limit === 0.0 || $loss_limit === null ||
+	    ($uses_variation && $variation_limit === null)) {
 		return 'SLA is missing or invalid';
 	}
-	if ($sample['status'] === 'down') {
+	$status = $sample['status'] ?? null;
+	if ($status === 'down') {
 		return 'Gateway is down';
 	}
-	if ($sample['status'] === 'unknown') {
+	$latency = sdwan_metric($sample['rtt_ms'] ?? null);
+	$loss = sdwan_metric($sample['loss_pct'] ?? null, 100);
+	if (!in_array($status, ['online', 'degraded'], true) || $latency === null || $loss === null) {
 		return 'No valid gateway measurement';
 	}
-	if ($sample['rtt_ms'] > (float)$sla['latency_ms']) {
+	if ($loss === 100.0) {
+		return 'Gateway is down';
+	}
+	if ($latency > $latency_limit) {
 		return 'RTT exceeds the SLA';
 	}
-	if (isset($sla['rttsd_ms']) && (!is_numeric($sample['rttsd_ms'] ?? null) ||
-	    $sample['rttsd_ms'] > (float)$sla['rttsd_ms'])) {
+	$variation = sdwan_metric($sample['rttsd_ms'] ?? null);
+	if ($variation_limit !== null && ($variation === null || $variation > $variation_limit)) {
 		return 'RTT standard deviation exceeds the SLA or is unavailable';
 	}
-	if ($sample['loss_pct'] > (float)$sla['loss_pct']) {
+	if ($loss > $loss_limit) {
 		return 'Loss exceeds the SLA';
 	}
 	return sdwan_service_reason($sample['checks'] ?? [], $requirements);
@@ -195,7 +214,8 @@ function sdwan_service_reason(array $checks, ?array $requirements): string {
 }
 
 function sdwan_is_wan_quality_breach(string $reason, array $sample, array $sla): bool {
-	return in_array($reason, SDWAN_QUALITY_BREACHES, true) && (!isset($sla['rttsd_ms']) || $sample['rttsd_ms'] !== null);
+	return in_array($reason, SDWAN_QUALITY_BREACHES, true) &&
+	    (!isset($sla['rttsd_ms']) || sdwan_metric($sample['rttsd_ms'] ?? null) !== null);
 }
 
 function sdwan_path_status(int $configured, int $eligible): string {
@@ -264,7 +284,11 @@ function sdwan_evaluate(array $config, array $gateways, int $now, array $invento
 			}
 			switch ($policy['strategy']) {
 				case 'cost':
-					$rank = is_numeric($member['cost'] ?? null) ? (float)$member['cost'] : INF;
+					$rank = sdwan_metric($member['cost'] ?? null);
+					if ($rank === null) {
+						$candidates[$name] = 'Member cost is missing or invalid';
+						continue 2;
+					}
 					break;
 				case 'balance':
 					$rank = 0;

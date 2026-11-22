@@ -15,7 +15,8 @@ function sdwan_probe_target($value): ?array {
 	} elseif (preg_match('~\A(https|dns)://([A-Za-z0-9.-]+)(/[^ \x00-\x20\x7f#]*)? ([A-Fa-f0-9:.]+)\z~D', $value, $parts)) {
 		[, $protocol, $host, $path, $address] = $parts;
 		if (strlen($host) > 253 || !preg_match('/\A(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?\z/iD', $host) ||
-		    ($protocol === 'dns' && $path !== '')) {
+		    ($protocol === 'dns' && $path !== '') ||
+		    ($protocol === 'https' && !sdwan_probe_https_path_valid($path))) {
 			return null;
 		}
 		$target = ['protocol' => $protocol, 'host' => strtolower($host), 'path' => $path ?: '/'];
@@ -30,10 +31,23 @@ function sdwan_probe_target($value): ?array {
 	if ($ipv6 ? ($packed === inet_pton('::') || $packed === inet_pton('::1') || ord($packed[0]) === 255 ||
 	    str_starts_with($packed, str_repeat("\0", 10) . "\xff\xff") ||
 	    (ord($packed[0]) === 254 && (ord($packed[1]) & 192) === 128)) :
-	    (ord($packed[0]) === 0 || ord($packed[0]) === 127 || ord($packed[0]) >= 224)) {
+	    (ord($packed[0]) === 0 || ord($packed[0]) === 127 || ord($packed[0]) >= 224 ||
+	    (ord($packed[0]) === 169 && ord($packed[1]) === 254))) {
 		return null;
 	}
 	return $target + ['address' => inet_ntop($packed), 'family' => $ipv6 ? 'inet6' : 'inet'];
+}
+
+function sdwan_probe_https_path_valid(string $value): bool {
+	if (preg_match('~[^\x21-\x7e]|%(?![0-9a-f]{2})~i', $value) ||
+	    str_contains($value, '\\') || preg_match('~[\x00-\x1f\x7f]~', rawurldecode($value))) {
+		return false;
+	}
+	[$path] = explode('?', $value, 2);
+	/* Reject encoded separators and double encoding before checking segments. */
+	return !str_starts_with($path, '//') &&
+	    !preg_match('~%(?:25|2f|3f|23|5c)~i', $path) &&
+	    !preg_match('~(?:^|/)\.{1,2}(?:/|;|$)~', rawurldecode($path));
 }
 
 /* A writable asynchronous socket can signal either a connection or a refusal. */
@@ -165,7 +179,8 @@ function sdwan_probe_remaining_us(int $deadline): int {
 function sdwan_probe_path(array $target, array $gateway, ?int $deadline = null): ?array {
 	$family = $target['family'];
 	if (($deadline !== null && hrtime(true) >= $deadline) ||
-	    $family !== $gateway['family'] || !function_exists('exec') ||
+	    !in_array($family, ['inet', 'inet6'], true) || $family !== ($gateway['family'] ?? null) ||
+	    !function_exists('exec') ||
 	    !is_executable('/sbin/route') || !is_executable('/bin/timeout')) {
 		return null;
 	}
@@ -256,7 +271,13 @@ function sdwan_probe_collect_ready(array &$jobs, array &$results, $curl, int $de
 				continue;
 			}
 			$status = curl_getinfo($job['curl'], CURLINFO_RESPONSE_CODE);
-			$replied = $done['result'] === CURLE_OK && $status >= 200 && $status < 300;
+			$peer = curl_getinfo($job['curl'], CURLINFO_PRIMARY_IP);
+			$source = curl_getinfo($job['curl'], CURLINFO_LOCAL_IP);
+			$replied = $done['result'] === CURLE_OK && $status >= 200 && $status < 300 &&
+			    is_string($peer) && filter_var($peer, FILTER_VALIDATE_IP) !== false &&
+			    inet_pton($peer) === inet_pton($job['target']['address']) &&
+			    is_string($source) && filter_var($source, FILTER_VALIDATE_IP) !== false &&
+			    inet_pton($source) === inet_pton($job['path']['source']);
 			$results[$job['member']][$job['field']] = sdwan_probe_result($job, $replied, 'HTTPS check failed', $deadline);
 			curl_multi_remove_handle($curl, $job['curl']);
 			unset($jobs[$index]);
@@ -343,12 +364,14 @@ function sdwan_probe_observe(array $members, array $inventory, array $observatio
 				$jobs[] = $job + ['socket' => $socket, 'id' => $id, 'question' => $question];
 			} elseif ($curl !== null && $remaining >= 1000) {
 				$host = $target['host'];
-				$handle = curl_init('https://' . $host . $target['path']);
+				$handle = curl_init('https://' . $host . ':443' . $target['path']);
 				if ($handle === false) {
 					continue;
 				}
 				if (!curl_setopt_array($handle, [
-					CURLOPT_INTERFACE => $source, CURLOPT_RESOLVE => ["{$host}:443:{$destination}"],
+					CURLOPT_INTERFACE => $source,
+					CURLOPT_CONNECT_TO => ["{$host}:443:{$destination}:443"],
+					CURLOPT_FRESH_CONNECT => true, CURLOPT_FORBID_REUSE => true,
 					CURLOPT_PROXY => '', CURLOPT_FOLLOWLOCATION => false,
 					CURLOPT_SSL_VERIFYPEER => true, CURLOPT_SSL_VERIFYHOST => 2,
 					CURLOPT_CONNECTTIMEOUT_MS => min(900, intdiv($remaining, 1000)),

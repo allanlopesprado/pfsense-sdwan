@@ -4,6 +4,42 @@
 const SDWAN_CONFIG_PATH = 'installedpackages/sdwan';
 const SDWAN_CONFIG_VERSION = '1';
 
+function sdwan_lock(string $name, int $timeout) {
+	if (!in_array($name, ['sdwan-settings', 'sdwan-package-upgrade'], true)) {
+		throw new InvalidArgumentException('Unknown SD-WAN lock');
+	}
+	$directory = defined('SDWAN_LOCK_DIRECTORY') ? SDWAN_LOCK_DIRECTORY : '/var/run';
+	$path = $directory . '/' . $name . '.lock';
+	if (is_link($path) || (file_exists($path) && !is_file($path))) {
+		return null;
+	}
+	$mask = umask(0077);
+	try {
+		$lock = @fopen($path, 'c');
+	} finally {
+		umask($mask);
+	}
+	if ($lock === false) {
+		return null;
+	}
+	$deadline = hrtime(true) + $timeout * 1000000000;
+	do {
+		if (flock($lock, LOCK_EX | LOCK_NB)) {
+			return $lock;
+		}
+		if (hrtime(true) >= $deadline) {
+			break;
+		}
+		usleep(50000);
+	} while (true);
+	fclose($lock);
+	return null;
+}
+
+function sdwan_unlock($lock): void {
+	fclose($lock);
+}
+
 /* pfSense registers services by name and saves the list after this install hook. */
 function sdwan_remove_legacy_service(): void {
 	$path = 'installedpackages/service';
@@ -494,7 +530,7 @@ function sdwan_validate_config(array $config, ?array $gateways, array $previous 
 function sdwan_save_config(array $candidate, string $expected_revision, bool $allow_forwarding_changes = false): array {
 	require_once('config.inc');
 	/* Serialize competing WebGUI package edits; write_config() owns the XML lock. */
-	$lock = try_lock('sdwan-settings', 5);
+	$lock = sdwan_lock('sdwan-settings', 5);
 	if (!is_resource($lock)) {
 		return ['SD-WAN settings are busy. Reload the page and try again.'];
 	}
@@ -542,6 +578,6 @@ function sdwan_save_config(array $candidate, string $expected_revision, bool $al
 		}
 		return [];
 	} finally {
-		unlock($lock);
+		sdwan_unlock($lock);
 	}
 }

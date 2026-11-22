@@ -110,9 +110,12 @@ for scenario in rfc3164-default rfc5424-default rfc5424-warning; do
     if [ "$round" -eq 3 ]; then
         jexec "$node" pkill -CONT -F /var/run/lab.pid syslogd
     fi
-    wait_for_count "$work/var/log/fixture-input.log" 'SD-WAN ' 12 &&
-        wait_for_count "$work/var/log/fixture-input.log" native-ident-control 1 &&
-        wait_for_count "$work/var/log/system.log" 'SD-WAN ' "$general_count" || { diagnostics; exit 1; }
+    if ! wait_for_count "$work/var/log/fixture-input.log" 'SD-WAN ' 12 ||
+        ! wait_for_count "$work/var/log/fixture-input.log" native-ident-control 1 ||
+        ! wait_for_count "$work/var/log/system.log" 'SD-WAN ' "$general_count"; then
+        diagnostics
+        exit 1
+    fi
     # Each control uses a separate external logger(1) connection and must
     # independently succeed after the complete package burst was received.
     jexec "$node" /usr/bin/logger -t sdwan -p daemon.info 'below-default'

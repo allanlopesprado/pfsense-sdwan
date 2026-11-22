@@ -258,7 +258,7 @@ function sdwan_steering_edit(string $group, ?string $policy, string $expected_re
 	if ($policy !== null && !sdwan_steering_supported()) {
 		return ['Forwarding requires a supported native pfSense steering integration.'];
 	}
-	$lock = try_lock('sdwan-settings', 5);
+	$lock = sdwan_lock('sdwan-settings', 5);
 	if (!is_resource($lock)) {
 		return ['SD-WAN settings are busy. Reload the page and try again.'];
 	}
@@ -339,7 +339,7 @@ function sdwan_steering_edit(string $group, ?string $policy, string $expected_re
 		if (is_resource($observation_lock)) {
 			fclose($observation_lock);
 		}
-		unlock($lock);
+		sdwan_unlock($lock);
 	}
 	$label = sdwan_log_label($group);
 	sdwan_log_emit(LOG_NOTICE, $policy === null ? "Group {$label}: forwarding binding removed." :
@@ -362,7 +362,8 @@ function sdwan_steering_step(array $previous, array $eligible, ?string $best, in
 	} else {
 		$candidate = $best;
 		$since = ($previous['candidate'] ?? null) === $best &&
-		    is_int($previous['since'] ?? null) && $previous['since'] <= $now ? $previous['since'] : $now;
+		    is_int($previous['since'] ?? null) && $previous['since'] >= 0 &&
+		    $previous['since'] <= $now ? $previous['since'] : $now;
 		$chosen = $incumbent;
 		if ($now - $since >= $hold) {
 			$chosen = $best;
@@ -1068,7 +1069,7 @@ function sdwan_steering_state_ids(iterable $lines, array $trackers, string $devi
 }
 
 function sdwan_steering_reconnect(string $group, string $gateway, string $revision): array {
-	$lock = try_lock('sdwan-settings', 5);
+	$lock = sdwan_lock('sdwan-settings', 5);
 	if (!is_resource($lock)) {
 		return ['errors' => ['SD-WAN settings are busy. Review the current policy and try again.']];
 	}
@@ -1127,7 +1128,7 @@ function sdwan_steering_reconnect(string $group, string $gateway, string $revisi
 		}
 		return ['errors' => [], 'count' => $count];
 	} finally {
-		unlock($lock);
+		sdwan_unlock($lock);
 	}
 }
 

@@ -2,6 +2,8 @@
 
 Versions are listed newest first, in numeric order. The [dist directory](dist/) contains the lab packages and their checksums. The current distribution is available from [GitHub Releases](https://github.com/allanlopesprado/pfsense-sdwan/releases/latest).
 
+**Unreleased** · Harden service probes, validate SLA measurements and PF pool weights, recover failed package updates, and verify package metadata and source in CI.
+
 | Version | Main changes | Notes |
 | --- | --- | --- |
 | 0.4.28 | Enable CE 2.9.2 updates and verify PF reconciliation, supervised recovery, sticky pools, and VTI transports. | [Notes](docs/releases/v0.4.28.md) |

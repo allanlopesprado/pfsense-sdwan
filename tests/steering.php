@@ -186,6 +186,17 @@ verify($both_recovering['pool'] === ['B'] && $both_recovering['recovering'] === 
     'weighted recovery timers start independently and do not alter the effective rules while waiting');
 $first_readmitted = sdwan_steering_state($weighted, $weighted_binding, $all_recovered, $both_recovering, 106);
 $both_readmitted = sdwan_steering_state($weighted, $weighted_binding, $all_recovered, $first_readmitted, 108);
+$outage = $weighted_result('Gateway is down', 'Gateway is down', 'Gateway is down');
+$withdrawn = sdwan_steering_state($weighted, $weighted_binding, $outage, $both_recovering, 104, true);
+verify($withdrawn['gateway'] === null && $withdrawn['pool'] === [] && !isset($withdrawn['recovering']),
+    'total outage clears the weighted pool and its recovery timers immediately');
+$candidate = sdwan_steering_step(['gateway' => 'B', 'candidate' => 'A', 'since' => -10], ['A', 'B'], 'A', 100, 5);
+$lost = sdwan_steering_step($candidate, ['B'], 'B', 101, 5);
+$back = sdwan_steering_step($lost, ['A', 'B'], 'A', 104, 5);
+verify($candidate === ['gateway' => 'B', 'candidate' => 'A', 'since' => 100] &&
+    $lost === ['gateway' => 'B', 'candidate' => null, 'since' => null] &&
+    $back === ['gateway' => 'B', 'candidate' => 'A', 'since' => 104],
+    'a flapping member restarts recovery and a bogus timer cannot advance failback');
 verify(sdwan_steering_state($weighted, $weighted_binding, $all_recovered, $both_recovering, 105) === $both_recovering &&
     $first_readmitted['pool'] === ['A', 'B'] && $first_readmitted['recovering'] === ['C' => 103] &&
     sdwan_steering_state($weighted, $weighted_binding, $all_recovered, $first_readmitted, 107) === $first_readmitted &&

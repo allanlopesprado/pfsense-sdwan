@@ -134,10 +134,10 @@ baseline >"$work/baseline"
 
 steer() {
     case "$1" in
-        a) outbound=$wan_a; next_hop=198.51.100.2; rule=path-a ;;
-        b) outbound=$wan_b; next_hop=203.0.113.2; rule=path-b ;;
-        c) outbound=$wan_c; next_hop=192.0.2.130; rule=path-c ;;
-        none) outbound=''; rule=no-member ;;
+        a) outbound=$wan_a; next_hop=198.51.100.2; rule='path-a' ;;
+        b) outbound=$wan_b; next_hop=203.0.113.2; rule='path-b' ;;
+        c) outbound=$wan_c; next_hop=192.0.2.130; rule='path-c' ;;
+        none) outbound=''; rule='no-member' ;;
         *) return 1 ;;
     esac
     : >"$work/selected.pf"
@@ -147,7 +147,7 @@ steer() {
         # its tracker, labels, flags and order. Substitute only device names.
         ruleset="$SDWAN_RENDERED_RULES/${2:-}$rule.pf"
         test -s "$ruleset"
-        sed -e 's/\$LABLAN/'"$lan"'/g' -e "s/labwana/$wan_a/g" -e "s/labwanb/$wan_b/g" -e "s/labwanc/$wan_c/g" \
+        sed -e "s/[\$]LABLAN/$lan/g" -e "s/labwana/$wan_a/g" -e "s/labwanb/$wan_b/g" -e "s/labwanc/$wan_c/g" \
             "$ruleset" >>"$work/selected.pf"
     elif [ -n "$outbound" ]; then
         printf 'pass in quick on %s route-to (%s %s) inet proto tcp from 192.0.2.11 to 192.0.2.162 port 7 keep state label "path-%s"\n' \
@@ -197,6 +197,8 @@ if [ -n "${SDWAN_RENDERED_RULES:-}" ]; then
     verify_pf() {
         node=$1
         shift
+        # The argument is PHP source and its variables are evaluated by PHP.
+        # shellcheck disable=SC2016
         jexec "$node" /usr/local/bin/php -n -d extension=filter -r '
             function get_real_interface($interface, $family, $realv6iface, $flush) { return $interface; }
             require $argv[1] . "/files/usr/local/pkg/sdwan_steering.inc";
@@ -249,14 +251,14 @@ fi
 # transaction on this same socket must retain its A translation and state.
 (
     printf 'held-before\n'
-    for index in 1 2 3 4 5 6 7 8 9 10; do
+    for _ in 1 2 3 4 5 6 7 8 9 10; do
         [ ! -e "$work/send-next" ] || break
         sleep 1
     done
     printf 'held-after\n'
 ) | jexec "$client" nc -n -N -w 15 192.0.2.162 7 >"$work/held" &
 held_pid=$!
-for index in 1 2 3 4 5; do
+for _ in 1 2 3 4 5; do
     grep -Fqx '198.51.100.1 held-before' "$work/held" && break
     sleep 1
 done
@@ -277,7 +279,7 @@ if [ -n "${SDWAN_RENDERED_RULES:-}" ]; then
         scope=$1
         (
             printf '%s-before\n' "$scope"
-            for tick in $(jot 24); do
+            for _ in $(jot 24); do
                 [ ! -f "$work/reconnect-release" ] || break
                 sleep 1
             done
@@ -288,7 +290,7 @@ if [ -n "${SDWAN_RENDERED_RULES:-}" ]; then
     scoped_pid=$!
     hold_request control 192.0.2.163 >"$work/control-reconnect" &
     control_pid=$!
-    for tick in $(jot 5); do
+    for _ in $(jot 5); do
         if grep -Fqx '198.51.100.1 scoped-before' "$work/scoped" &&
            grep -Fqx '198.51.100.1 control-before' "$work/control-reconnect"; then break; fi
         sleep 1
@@ -310,6 +312,8 @@ if [ -n "${SDWAN_RENDERED_RULES:-}" ]; then
         mv "$work/states-identifiers" "$work/states-reconnect"
     fi
     steer b
+    # The argument is PHP source and its variables are evaluated by PHP.
+    # shellcheck disable=SC2016
     php -r '
         require $argv[1];
         foreach (sdwan_steering_state_ids(file($argv[2]), ["41001"], $argv[3], "198.51.100.2") as $id) {
@@ -408,7 +412,7 @@ if [ -n "${SDWAN_RENDERED_RULES:-}" ]; then
     steer a triple-
     expect_roundtrip 192.0.2.162 198.51.100.1 three-wan-recovered
     weighted_rule() {
-        sed -e 's/\$LABLAN/'"$lan"'/g' -e "s/labwana/$wan_a/g" -e "s/labwanb/$wan_b/g" \
+        sed -e "s/[\$]LABLAN/$lan/g" -e "s/labwana/$wan_a/g" -e "s/labwanb/$wan_b/g" \
             "$SDWAN_RENDERED_RULES/weighted-$1.pf" >"$work/selected.pf"
         load_rules
     }
@@ -496,7 +500,7 @@ EOF
         test -s "$ruleset"
         {
             printf 'set state-policy if-bound\nblock all\npass quick inet6 proto icmp6 no state\n'
-            sed -e 's/\$LABLAN/'"$lan"'/g' -e "s/labwana/$wan_a/g" -e "s/labwanb/$wan_b/g" -e "s/labwanc/$wan_c/g" \
+            sed -e "s/[\$]LABLAN/$lan/g" -e "s/labwana/$wan_a/g" -e "s/labwanb/$wan_b/g" -e "s/labwanc/$wan_c/g" \
                 "$ruleset"
             printf 'pass in quick on %s inet6 proto tcp from 2001:db8:10::11 to 2001:db8:40::/64 port 7\n' "$lan"
             printf 'pass out inet6 all\n'

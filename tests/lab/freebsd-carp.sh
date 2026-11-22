@@ -318,7 +318,7 @@ create_vti() {
 }
 first_vti=$(create_vti "$first" "$wan_vip" "$remote_ip" "$inner_cluster" "$inner_peer")
 second_vti=$(create_vti "$second" "$wan_vip" "$remote_ip" "$inner_cluster" "$inner_peer")
-peer_vti=$(create_vti "$remote" "$remote_ip" "$wan_vip" "$inner_peer" "$inner_cluster")
+(create_vti "$remote" "$remote_ip" "$wan_vip" "$inner_peer" "$inner_cluster") >/dev/null
 jexec "$remote" ifconfig lo0 inet "$protected/32" alias
 jexec "$remote" route -n add -net 192.0.2.0/29 "$inner_cluster"
 

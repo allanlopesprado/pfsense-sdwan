@@ -55,7 +55,7 @@ request() {
     test "$result" = sdwan-netmap
 }
 ready() {
-    for attempt in 1 2 3 4 5 6; do
+    for _ in 1 2 3 4 5 6; do
         if request allowed; then return 0; fi
         sleep 1
     done
@@ -87,7 +87,7 @@ suricata -c "$suricata_config" --include "$work/inspection.yaml" \
     --netmap -S "$work/inspection.rules" -l "$work" -k none --init-errors-fatal \
     --set stream.inline=yes --set unix-command.enabled=no > "$work/suricata-console.log" 2>&1 &
 suricata_pid=$!
-for attempt in 1 2 3 4 5 6 7 8 9 10; do
+for _ in 1 2 3 4 5 6 7 8 9 10; do
     if ! kill -0 "$suricata_pid" 2>/dev/null; then cat "$work/suricata-console.log" >&2; exit 1; fi
     if grep -q 'engine started' "$work/suricata-console.log"; then break; fi
     sleep 1

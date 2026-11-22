@@ -8,28 +8,34 @@ function check(bool $test): void {
 	}
 }
 
-function try_lock($name, $timeout) {
+function sdwan_lock($name, $timeout) {
 	check($name === 'sdwan-package-upgrade' && $timeout === 1);
 	return tmpfile();
 }
 
-function unlock($lock): void {
+function sdwan_unlock($lock): void {
 	fclose($lock);
 }
 
 function pkg_exec($command, &$stdout, &$stderr): int {
-	global $arg_root, $pkg_adds;
+	global $arg_root, $pkg_adds, $pkg_rollbacks, $fail_after_native_add;
 	check($arg_root !== null);
 	$stderr = '';
+	$inject_failure = false;
 	if (str_starts_with($command, 'add ')) {
-		$pkg_adds++;
+		if (str_starts_with($command, 'add -f ')) {
+			$pkg_rollbacks++;
+		} else {
+			$pkg_adds++;
+			$inject_failure = $fail_after_native_add;
+		}
 		$command = 'add -I ' . substr($command, 4); // Suppress pfSense hooks in the isolated FreeBSD root.
 	}
 	$native = '/usr/local/sbin/pkg-static -r ' . escapeshellarg($arg_root) .
 	    ' -o ABI=FreeBSD:16:amd64 -o OSVERSION=1600018 ';
 	exec($native . $command, $lines, $rc);
 	$stdout = implode("\n", $lines);
-	return $rc;
+	return $inject_failure && $rc === 0 ? 1 : $rc;
 }
 
 function pkg_version_compare($a, $b): string {
@@ -53,6 +59,8 @@ $release_requests = [];
 $target = ['version' => $version, 'sha256' => hash('sha256', $archive)];
 $release = $target + ['maturity' => 'experimental'];
 $pkg_adds = 0;
+$pkg_rollbacks = 0;
+$fail_after_native_add = false;
 
 
 check(sdwan_release_check() === $release);
@@ -69,11 +77,15 @@ if ($arg_root !== null) {
 	check(sdwan_release_upgrade($target) === 'checksum' && $pkg_adds === 0);
 	check(sdwan_release_installed() === $baseline);
 	$release_http = $index_http;
-	check(sdwan_release_upgrade($target) === 'verify' && $pkg_adds === 1);
+	$fail_after_native_add = true;
+	check(sdwan_release_upgrade($target) === 'rolled_back' && $pkg_adds === 1 && $pkg_rollbacks === 1);
+	check(sdwan_release_installed() === $baseline && sdwan_release_files_intact($baseline));
+	$fail_after_native_add = false;
+	check(sdwan_release_upgrade($target) === 'verify' && $pkg_adds === 2 && $pkg_rollbacks === 1);
 	check(sdwan_release_installed() === $version);
 	$release_requests = [];
-	check(sdwan_release_upgrade($target) === 'verify' && $pkg_adds === 1 && $release_requests === []);
-	echo "ok - bad downloads preserve the package, the verified archive installs once, and readiness retry stays local\n";
+	check(sdwan_release_upgrade($target) === 'verify' && $pkg_adds === 2 && $release_requests === []);
+	echo "ok - bad downloads preserve the package, a failed add restores its archive, and readiness retry stays local\n";
 	exit;
 }
 
@@ -101,4 +113,16 @@ foreach ([['state', 'new'], ['digest', 'sha256:' . str_repeat('0', 64)], ['size'
 	check(sdwan_release_asset_size($release) === null);
 }
 check(sdwan_release_asset_size(['version' => '../wrong', 'sha256' => $target['sha256']]) === null);
-echo "ok - fixed GitHub destinations, TLS, proxy, bounded transfers and published asset metadata\n";
+$synthetic = 'signature fixture';
+$release_http = fixture_attach_release_signature($index_http, $version, $synthetic);
+[$signature_url, $signature_cdn] = array_slice(array_keys($release_http), -2);
+$signature = sdwan_release_assets($release)['signature'];
+check($signature === ['size' => strlen($synthetic), 'sha256' => hash('sha256', $synthetic)]);
+$signature_name = "pfSense-pkg-SDWAN-{$version}.pkg.minisig";
+check(sdwan_release_signature_download($version, $signature_name, $signature) === $synthetic);
+$release_http[$signature_cdn]['body'] = str_repeat('x', strlen($synthetic));
+check(sdwan_release_signature_download($version, $signature_name, $signature) === null);
+$release_requests = [];
+$release_http[$signature_url]['redirect'] = 'https://other.example.net/signature';
+check(sdwan_release_signature_download($version, $signature_name, $signature) === null && $release_requests === [$signature_url]);
+echo "ok - fixed GitHub destinations, TLS, proxy, bounded transfers, independent metadata and signature transport\n";

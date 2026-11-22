@@ -35,7 +35,9 @@ function sdwan_ui_tabs(string $current): void {
 }
 
 function sdwan_ui_scalar(array $source, string $key): string {
-	return isset($source[$key]) && is_string($source[$key]) ? trim($source[$key]) : '';
+	$value = $source[$key] ?? null;
+	return is_string($value) && strlen($value) <= 512 && !preg_match('/[\x00-\x1f\x7f]/', $value) ?
+	    trim($value) : '';
 }
 
 /* Native Form_Select compares values loosely. Keep "1" and "01" distinct. */

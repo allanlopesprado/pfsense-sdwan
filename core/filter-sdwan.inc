@@ -43,11 +43,17 @@ function filter_sdwan_gateway_route(array $gateway, mixed $address): ?array {
 }
 
 function filter_sdwan_pool_route(array $paths, bool $sticky = false): ?string {
-	if (count($paths) === 1) {
-		return reset($paths)['route'];
-	}
 	if (!$paths) {
 		return null;
+	}
+	foreach ($paths as $path) {
+		if (!is_string($path['hop'] ?? null) || !is_string($path['route'] ?? null) ||
+		    !is_int($path['weight'] ?? null) || $path['weight'] < 1 || $path['weight'] > 30) {
+			return null;
+		}
+	}
+	if (count($paths) === 1) {
+		return reset($paths)['route'];
 	}
 	$weights = array_column($paths, 'weight');
 	$multiplier = min($weights) === 1 && max($weights) > 1 ? 2 : 1;

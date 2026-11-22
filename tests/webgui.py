@@ -455,7 +455,16 @@ def run(php, classes, screenshot_dir=None):
         failed = request("updates", post=action, corrupt_release=True)
         assert "failed SHA-256 verification" in failed and "UPGRADES=0" in failed
         failed = request("updates", post=action, install_failure=True)
-        assert "could not install the update" in failed and "UPGRADES=1" in failed
+        assert "the previous SD-WAN package was restored" in failed
+        assert "UPGRADES=1" in failed and "ROLLBACKS=1" in failed
+        failed = request("updates", post=action, broken_upgrade=True)
+        assert "the previous SD-WAN package was restored" in failed
+        assert "UPGRADES=1" in failed and "ROLLBACKS=1" in failed
+        failed = request("updates", post=action, install_failure=True, rollback_failure=True)
+        assert "automatic rollback failed" in failed and "ROLLBACKS=1" in failed
+        blocked = request("updates", post=action, backup_failure=True)
+        assert "could not be prepared for rollback" in blocked
+        assert "UPGRADES=0" in blocked and "ROLLBACKS=0" in blocked
         failed = request("updates", post=action, service_failure=True)
         assert "observer readiness could not be verified" in failed and "UPGRADES=1" in failed
         assert 'name="verify_installation"' in failed and 'name="upgrade_release"' not in failed

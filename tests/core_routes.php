@@ -39,3 +39,10 @@ if (filter_sdwan_pool_route([$a, $b]) !== $pool ||
 	throw new RuntimeException('Unexpected weighted, sticky, single-gateway or empty route pool');
 }
 echo "ok - weighted pool preserves the configured ratio and sticky option; one hop or no hop is unchanged\n";
+foreach ([null, 0, -1, 31] as $invalid_weight) {
+	$invalid = array_replace($b, ['weight' => $invalid_weight]);
+	if (filter_sdwan_pool_route([$invalid]) !== null || filter_sdwan_pool_route([$a, $invalid]) !== null) {
+		throw new RuntimeException('Malformed pool weight created a route');
+	}
+}
+echo "ok - null and out-of-range weights fail closed before pool arithmetic\n";

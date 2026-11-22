@@ -41,13 +41,21 @@ if ($submit) {
 			'unpublished' => gettext('The GitHub release asset could not be verified. Check GitHub again later.'),
 			'download' => gettext('The package download did not complete. Check connectivity to GitHub and retry.'),
 			'checksum' => gettext('The downloaded package failed SHA-256 verification. Check GitHub again before retrying.'),
+			'signature' => gettext('The published Minisign signature could not be verified with the local signing key. The update was stopped.'),
 			'storage' => gettext('The firewall could not stage the package. Check available space in /tmp.'),
 			'manifest' => gettext('The downloaded package identity does not match the selected SD-WAN release.'),
-			'install' => gettext('The package manager could not install the update. Check System Logs before retrying.'),
+			'backup' => gettext('The installed SD-WAN package could not be prepared for rollback. Check package integrity and available space in /tmp.'),
+			'rolled_back' => gettext('The update failed and the previous SD-WAN package was restored. Check Status > Services and System Logs.'),
+			'rollback_changed' => gettext('The installed SD-WAN version changed during the update. Review the installed package and System Logs.'),
+			'rollback_failed' => gettext('The update and automatic rollback failed. System Logs contains the path to the local recovery archive.'),
 			default => gettext('The package manager returned success, but the installed version, files or observer could not be verified. Check System Logs.'),
 		};
-		if ($upgrade && !$verify && in_array($result, ['success', 'install', 'verify', 'verify_files'], true)) {
-			sdwan_log_emit($result === 'success' ? LOG_NOTICE : LOG_WARNING,
+		if ($upgrade && !$verify && in_array($result, ['success', 'signature', 'backup', 'rolled_back',
+		    'rollback_changed', 'rollback_failed', 'verify', 'verify_files'], true)) {
+			$priority = match ($result) {
+				'success' => LOG_NOTICE, 'rollback_failed' => LOG_ERR, default => LOG_WARNING,
+			};
+			sdwan_log_emit($priority,
 			    'Package upgrade to ' . $target['version'] . ': ' . $result . '.');
 		}
 	}
@@ -56,7 +64,7 @@ if ($submit) {
 $installed = sdwan_release_installed();
 $release = !$submit && $check ? sdwan_release_check() : null;
 $available = false;
-$verify_available = $installed === $target['version'] && in_array($result, ['install', 'verify', 'verify_files'], true);
+$verify_available = $installed === $target['version'] && in_array($result, ['verify', 'verify_files'], true);
 if (!$submit && $check && $release === null) {
 	$message = gettext('Could not verify release information from GitHub. Check network access, DNS, the proxy and the firewall clock, then retry.');
 } elseif ($message === null && $installed === null) {

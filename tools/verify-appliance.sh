@@ -17,6 +17,8 @@ printf 'pfSense %s · %s %s · %s\n' "$(cat /etc/version)" "$package" "$installe
 pkg check -s "$package"
 /usr/local/etc/rc.d/sdwand.sh status
 
+# The single-quoted argument is PHP source.
+# shellcheck disable=SC2016
 /usr/local/bin/php -r '
 require_once("config.inc");
 require_once("/usr/local/pkg/sdwan.inc");

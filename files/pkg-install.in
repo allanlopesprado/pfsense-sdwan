@@ -1,7 +1,8 @@
 #!/bin/sh
-[ "$2" = "POST-INSTALL" ] || exit 0
+[ "${2:-}" = "POST-INSTALL" ] || exit 0
 # Only the live firewall should register the WebGUI and run package services.
 [ -z "${PKG_ROOTDIR#/}" ] || exit 0
+[ "${PKG_CHROOTED:-}" != true ] || exit 0
 if [ ! -f /var/run/php-fpm.pid ]; then
 	echo 'SD-WAN WebGUI registration was deferred. After PHP-FPM is running, execute:' >&2
 	echo '/usr/local/bin/php -f /etc/rc.packages %%PORTNAME%% POST-INSTALL' >&2

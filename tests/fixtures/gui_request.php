@@ -33,15 +33,28 @@ set_error_handler(function ($severity, $message, $file) use ($classes) {
 });
 $installed_release = $request['installed_release'] ?? '0.4.7';
 $upgrade_calls = 0;
+$rollback_calls = 0;
 function pkg_exec($query, &$stdout, &$stderr) {
-	global $installed_release, $upgrade_calls, $request, $config;
+	global $installed_release, $upgrade_calls, $rollback_calls, $request, $config;
 	$stderr = '';
 	if ($query === 'query %v pfSense-pkg-SDWAN') {
 		$stdout = $installed_release;
 	} elseif ($query === 'config ABI') {
 		$stdout = $request['abi'] ?? 'FreeBSD:16:amd64';
+	} elseif (preg_match('~^create -q -o ([\'"])(.+)\\1 pfSense-pkg-SDWAN$~', $query, $arguments)) {
+		if (!empty($request['backup_failure'])) {
+			return 1;
+		}
+		file_put_contents($arguments[2] . "/pfSense-pkg-SDWAN-{$installed_release}.pkg", 'previous package fixture');
 	} elseif (str_starts_with($query, 'query -F ')) {
-		$stdout = 'pfSense-pkg-SDWAN 0.4.8 net/pfSense-pkg-SDWAN';
+		$archive_version = str_contains($query, 'pfSense-pkg-SDWAN-0.4.8.pkg') ? '0.4.8' : $installed_release;
+		$stdout = "pfSense-pkg-SDWAN {$archive_version} net/pfSense-pkg-SDWAN";
+	} elseif (str_starts_with($query, 'add -f ')) {
+		$rollback_calls++;
+		if (!empty($request['rollback_failure'])) {
+			return 1;
+		}
+		$installed_release = '0.4.7';
 	} elseif (str_starts_with($query, 'add ')) {
 		$upgrade_calls++;
 		if (!empty($request['install_failure'])) {
@@ -52,7 +65,8 @@ function pkg_exec($query, &$stdout, &$stderr) {
 			fixture_write_snapshot($request['snapshot'], $config);
 		}
 	} elseif ($query === 'check -s pfSense-pkg-SDWAN') {
-		return !empty($request['installed_checksum_failure']) ? 1 : 0;
+		return !empty($request['installed_checksum_failure']) ||
+		    (!empty($request['broken_upgrade']) && $installed_release === '0.4.8') ? 1 : 0;
 	} else {
 		throw new RuntimeException('Unexpected package command');
 	}
@@ -87,7 +101,8 @@ if ($page === 'updates') {
 	}
 	register_shutdown_function(static function () {
 		echo "\nUPGRADES=" . $GLOBALS['upgrade_calls'] . ' HTTP=' . http_response_code() .
-		    ' REQUESTS=' . count($GLOBALS['release_requests'] ?? []) . "\n";
+		    ' REQUESTS=' . count($GLOBALS['release_requests'] ?? []) .
+		    ' ROLLBACKS=' . $GLOBALS['rollback_calls'] . "\n";
 	});
 }
 function isAllowedPage($url) {
@@ -124,7 +139,7 @@ $disk = $current = $request['native'];
 $config = $request['config'];
 $disk[SDWAN_CONFIG_PATH] = $current[SDWAN_CONFIG_PATH] = sdwan_encode_config($config);
 $writes = 0;
-$busy = !empty($request['upgrade_busy']);
+$upgrade_lock = empty($request['upgrade_busy']) ? null : sdwan_lock('sdwan-package-upgrade', 0);
 $fail = false;
 $_GET = $request['get'] ?? [];
 $_POST = $request['post'] ?? [];
@@ -153,3 +168,6 @@ if ($_POST) {
 	});
 }
 include $web . '/sdwan/' . $page . '.php';
+if (is_resource($upgrade_lock)) {
+	sdwan_unlock($upgrade_lock);
+}

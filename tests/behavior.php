@@ -83,6 +83,21 @@ check('latency policy independently picks lowest RTT', selected($changed, $gatew
 $strict = $config;
 $strict['slas'][0]['loss_pct'] = '0';
 check('zero loss is a valid measured value', selected($strict, $gateways) === 'a');
+$null_measurements = ['status' => 'online', 'rtt_ms' => null, 'loss_pct' => null];
+$zero_latency = array_replace($config['slas'][0], ['latency_ms' => '0']);
+check('zero latency threshold and missing measurements fail closed without arithmetic errors',
+    sdwan_candidate_reason($config['members'][0], $null_measurements, $zero_latency) === 'SLA is missing or invalid' &&
+    sdwan_candidate_reason($config['members'][0], $null_measurements, $config['slas'][0]) === 'No valid gateway measurement');
+$no_cost = $config;
+$no_cost['members'][0]['cost'] = null;
+$only_one = sdwan_evaluate($no_cost, $gateways, 1700000000)['policies']['calls'];
+check('a missing cost cannot be counted as an eligible path',
+    $only_one['selected'] === 'b' && $only_one['eligible_count'] === 1);
+$all_down = sdwan_evaluate($config, array_map(static fn($sample) =>
+    array_replace($sample, ['loss' => '100%']), $gateways), 1700000000)['policies']['calls'];
+check('total gateway loss removes all recommendations',
+    $all_down['selected'] === null && $all_down['eligible_count'] === 0 &&
+    $all_down['path_status'] === 'no_eligible' && count(array_keys($all_down['candidates'], 'Gateway is down')) === 2);
 $degraded = $gateways;
 $degraded['GW_A']['loss'] = '2.1%';
 check('loss above SLA excludes cheaper path', selected($config, $degraded) === 'b');
@@ -227,6 +242,15 @@ check('service targets require a supported protocol and a concrete destination I
     sdwan_probe_target('https://admin@example.com 192.0.2.53') === null &&
     sdwan_probe_target('dns://example.com 127.0.0.1') === null &&
     sdwan_probe_target('dns://example.com ::ffff:127.0.0.1') === null);
+check('probe destinations and HTTPS paths preserve the explicit check boundary',
+    sdwan_probe_target('tcp://169.254.1.1:443') === null &&
+    sdwan_probe_target('dns://example.com fe80::1') === null &&
+    !sdwan_probe_https_path_valid('/health/../status') &&
+    !sdwan_probe_https_path_valid('/health/%2E/status') &&
+    !sdwan_probe_https_path_valid('/health/%2fstatus') &&
+    !sdwan_probe_https_path_valid('/health?token=%0a') &&
+    sdwan_probe_target('https://status.example/ready?group=backend%20api 10.0.0.2')['path'] ===
+        '/ready?group=backend%20api');
 check('TCP probes accept only a literal routed IP and a valid port',
     sdwan_probe_target('tcp://192.0.2.2:587') === ['protocol' => 'tcp', 'port' => 587, 'address' => '192.0.2.2', 'family' => 'inet'] &&
     sdwan_probe_target('tcp://[2001:db8::20]:8443')['family'] === 'inet6' &&

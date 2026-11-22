@@ -1,9 +1,25 @@
 <?php
 foreach (['CURLOPT_SSL_VERIFYPEER', 'CURLOPT_SSL_VERIFYHOST', 'CURLOPT_CAPATH', 'CURLOPT_FOLLOWLOCATION',
-    'CURLOPT_CONNECTTIMEOUT', 'CURLOPT_TIMEOUT', 'CURLOPT_USERAGENT', 'CURLOPT_WRITEFUNCTION', 'CURLINFO_HTTP_CODE'] as $id => $key) {
+    'CURLOPT_CONNECTTIMEOUT', 'CURLOPT_TIMEOUT', 'CURLOPT_USERAGENT', 'CURLOPT_WRITEFUNCTION',
+    'CURLINFO_HTTP_CODE', 'CURLINFO_REDIRECT_URL'] as $id => $key) {
 	if (!defined($key)) {
 		define($key, $id + 1);
 	}
+}
+
+function fixture_attach_release_signature(array $http, string $version, string $signature): array {
+	$repo = 'allanlopesprado/pfsense-sdwan';
+	$name = "pfSense-pkg-SDWAN-{$version}.pkg.minisig";
+	$api = "https://api.github.com/repos/{$repo}/releases/tags/v{$version}";
+	$metadata = json_decode($http[$api]['body'], true, 16, JSON_THROW_ON_ERROR);
+	$metadata['assets'][] = ['name' => $name, 'state' => 'uploaded',
+	    'digest' => 'sha256:' . hash('sha256', $signature), 'size' => strlen($signature)];
+	$http[$api]['body'] = json_encode($metadata, JSON_THROW_ON_ERROR);
+	$cdn = "https://release-assets.githubusercontent.com/{$name}";
+	$http["https://github.com/{$repo}/releases/download/v{$version}/{$name}"] =
+	    ['body' => '', 'status' => 302, 'redirect' => $cdn];
+	$http[$cdn] = ['body' => $signature];
+	return $http;
 }
 
 function fixture_release_http(string $version, string $archive): array {
@@ -61,7 +77,10 @@ if (function_exists('curl_init')) {
 		return $response['ok'] ?? true;
 	}
 
-	function curl_getinfo($handle, $key): int {
+	function curl_getinfo($handle, $key): int|string {
+		if ($key === CURLINFO_REDIRECT_URL) {
+			return $GLOBALS['release_http'][$handle->url]['redirect'] ?? '';
+		}
 		if ($key !== CURLINFO_HTTP_CODE) {
 			throw new RuntimeException('Unexpected cURL information request');
 		}
