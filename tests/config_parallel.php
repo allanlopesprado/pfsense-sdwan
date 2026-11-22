@@ -121,10 +121,6 @@ $lock = null;
 try {
 	parallel_write($store, ['config' => $native + [SDWAN_CONFIG_PATH => sdwan_encode_config($policy)], 'commits' => []]);
 	for ($wave = 1; $wave <= $waves; $wave++) {
-		$lock = sdwan_lock('sdwan-settings', 0);
-		if (!is_resource($lock)) {
-			throw new RuntimeException('Could not hold the package lock before launching the writers.');
-		}
 		$expected_revision = sdwan_config_revision($policy);
 		$ready_paths = [];
 		for ($worker = 1; $worker <= $workers; $worker++) {
@@ -146,6 +142,11 @@ try {
 			}
 			return true;
 		}, "all {$workers} workers to read the same revision");
+		/* Open the lock after spawning so children cannot inherit its descriptor. */
+		$lock = sdwan_lock('sdwan-settings', 0);
+		if (!is_resource($lock)) {
+			throw new RuntimeException('Could not hold the package lock before releasing the writers.');
+		}
 		if (!touch("{$directory}/start-{$wave}")) {
 			throw new RuntimeException('Could not release the worker start barrier.');
 		}
