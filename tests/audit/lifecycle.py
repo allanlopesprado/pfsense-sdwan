@@ -324,13 +324,22 @@ def snapshots(binary):
 
 UPGRADE_FIXTURE = r"""<?php
 require 'tests/fixtures/release_curl.php';
-$versionFile = tempnam(sys_get_temp_dir(), 'sdwan-version-');
-file_put_contents($versionFile, "2.9.2-RELEASE\n");
-register_shutdown_function(static function () use ($versionFile): void { unlink($versionFile); });
-$source = file_get_contents('files/usr/local/pkg/sdwan_release.inc');
-$source = str_replace("'/etc/version'", var_export($versionFile, true), $source, $changes);
-if ($changes !== 1) { throw new RuntimeException('Cannot isolate native version path'); }
-eval(substr($source, 5));
+$work = {{FIXTURE_DIR}};
+set_include_path($work);
+require $work . '/config.inc';
+require $work . '/sdwan.inc';
+require $work . '/sdwan_engine.inc';
+require $work . '/sdwan_release.inc';
+
+function publish_sample(int $when, bool $valid = true): void {
+    $config = sdwan_get_config();
+    $inventory = sdwan_gateways();
+    $snapshot = sdwan_evaluate($config, [], $when, $inventory);
+    $snapshot['config_revision'] = sdwan_config_revision($config);
+    $snapshot['gateway_inventory_revision'] = $valid ?
+        sdwan_gateway_inventory_revision($config, $inventory) : str_repeat('0', 64);
+    file_put_contents(SDWAN_SNAPSHOT_PATH, json_encode($snapshot, JSON_THROW_ON_ERROR));
+}
 
 function try_lock($name, $wait) {
     if ($name !== 'sdwan-package-upgrade' || $wait !== 1) { throw new RuntimeException('Unexpected lock'); }
@@ -351,15 +360,24 @@ function pkg_exec($command, &$stdout, &$stderr): int {
     } elseif (str_starts_with($command, 'add ')) {
         $GLOBALS['adds']++;
         $GLOBALS['version'] = '0.4.29';
-    } elseif ($command !== 'check -s pfSense-pkg-SDWAN') {
+        if ($GLOBALS['publishAfterInstall']) {
+            publish_sample(time());
+        }
+    } elseif ($command === 'check -s pfSense-pkg-SDWAN') {
+        return $GLOBALS['filesValid'] ? 0 : 1;
+    } else {
         throw new RuntimeException('Unexpected fixture command');
     }
     return 0;
 }
 function mwexec($command, $quiet): int {
-    // The supervisor status is the only active command in this fixture.
-    // There is no child process or valid observer snapshot.
-    return $GLOBALS['supervisorRunning'] && $command === '/usr/local/etc/rc.d/sdwand.sh status' ? 0 : 1;
+    if ($quiet && $command === '/usr/local/etc/rc.d/sdwand.sh status') {
+        return $GLOBALS['supervisorRunning'] ? 0 : 1;
+    }
+    if ($quiet && str_starts_with($command, '/bin/pgrep -P 501 -u 0 -fx ')) {
+        return $GLOBALS['workerRunning'] ? 0 : 1;
+    }
+    throw new RuntimeException('Unexpected service verification command');
 }
 
 $archive = 'synthetic verified package';
@@ -370,17 +388,48 @@ $version = '0.4.28';
 $adds = 0;
 $lockBusy = true;
 $supervisorRunning = false;
+$workerRunning = false;
+$filesValid = true;
+$publishAfterInstall = false;
 $locked = sdwan_release_upgrade($target);
 if ($adds !== 0 || $release_requests) { throw new RuntimeException('Concurrent request performed work'); }
 $lockBusy = false;
 $afterInstall = sdwan_release_upgrade($target);
 if ($adds !== 1 || $version !== '0.4.29') { throw new RuntimeException('The install fixture did not commit'); }
+$release_requests = [];
 $retry = sdwan_release_upgrade($target);
-if ($adds !== 1) { throw new RuntimeException('The same target installed twice'); }
-$version = '0.4.28';
 $supervisorRunning = true;
+publish_sample(time());
+$workerAbsentRetry = sdwan_release_upgrade($target, true);
+$workerRunning = true;
+publish_sample(time() - 31);
+$expired = sdwan_release_upgrade($target, true);
+publish_sample(time(), false);
+$changedSample = sdwan_release_upgrade($target, true);
+publish_sample(time());
+$verified = sdwan_release_upgrade($target, true);
+$filesValid = false;
+$corrupt = sdwan_release_upgrade($target, true);
+$filesValid = true;
+file_put_contents($work . '/supervisor.pid', 'missing');
+$invalidPid = sdwan_release_upgrade($target, true);
+file_put_contents($work . '/supervisor.pid', "501\n");
+$version = '0.4.30';
+$downgrade = sdwan_release_upgrade($target);
+$version = '0.4.28';
+$verifyAfterRollback = sdwan_release_upgrade($target, true);
+if ($adds !== 1 || $release_requests) { throw new RuntimeException('A local verification requested a download or install'); }
+$workerRunning = false;
 $supervisorOnly = sdwan_release_upgrade($target);
-echo json_encode([$locked, $afterInstall, $retry, $supervisorOnly], JSON_THROW_ON_ERROR);
+$workerRunning = true;
+$version = '0.4.28';
+publish_sample(time() - 5);
+$previousSample = sdwan_release_upgrade($target);
+$version = '0.4.28';
+$publishAfterInstall = true;
+$success = sdwan_release_upgrade($target);
+echo json_encode([$locked, $afterInstall, $retry, $supervisorOnly, $workerAbsentRetry, $expired,
+    $changedSample, $verified, $corrupt, $invalidPid, $downgrade, $verifyAfterRollback, $previousSample, $success], JSON_THROW_ON_ERROR);
 """
 
 
@@ -393,13 +442,33 @@ def run_php_fixture(binary, source):
 
 
 def upgrade(binary):
-    locked, after_install, retry, supervisor_only = run_php_fixture(binary, UPGRADE_FIXTURE)
-    return [
-        case("upgrade_lock", "busy", locked),
-        case("upgrade_verification_when_supervisor_down", "verify", after_install),
-        case("upgrade_retry_when_installed_but_unready", "verify", retry, "not_newer"),
-        case("upgrade_verification_when_worker_absent", "verify", supervisor_only, "success"),
+    with tempfile.TemporaryDirectory(prefix="sdwan-audit-upgrade-") as temporary:
+        work = Path(temporary)
+        stage(work)
+        (work / "pfsense-version").write_text("2.9.2-RELEASE\n")
+        (work / "supervisor.pid").write_text("501\n")
+        release = (PKG / "sdwan_release.inc").read_text()
+        for source, fixture_name in [("/etc/version", "pfsense-version"), ("/var/run/sdwand.pid", "supervisor.pid")]:
+            release = release.replace(source, (work / fixture_name).as_posix())
+        (work / "sdwan_release.inc").write_text(release)
+        observed = run_php_fixture(binary, UPGRADE_FIXTURE.replace("{{FIXTURE_DIR}}", json.dumps(work.as_posix())))
+    expected = [
+        ("upgrade_lock", "busy", None),
+        ("upgrade_verification_when_supervisor_down", "verify", None),
+        ("upgrade_retry_when_installed_but_unready", "verify", "not_newer"),
+        ("upgrade_verification_when_worker_absent", "verify", "success"),
+        ("upgrade_local_retry_when_worker_absent", "verify", None),
+        ("upgrade_local_retry_with_expired_sample", "verify", None),
+        ("upgrade_local_retry_after_gateway_change", "verify", None),
+        ("upgrade_local_retry_when_observer_recovers", "verified", None),
+        ("upgrade_local_retry_with_corrupt_installed_files", "verify_files", None),
+        ("upgrade_local_retry_with_invalid_supervisor_pid", "verify", None),
+        ("upgrade_rejects_downgrade", "not_newer", None),
+        ("upgrade_local_retry_after_rollback", "not_newer", None),
+        ("upgrade_does_not_confirm_pre_install_sample", "verify", None),
+        ("upgrade_verifies_fresh_post_install_sample", "success", None),
     ]
+    return [case(name, value, result, known) for (name, value, known), result in zip(expected, observed, strict=True)]
 
 
 def main():

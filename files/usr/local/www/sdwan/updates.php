@@ -11,24 +11,32 @@ $can_upgrade = isAllowedPage('/pkg_mgr_install.php');
 $is_post = ($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST';
 $check = $is_post && isset($_POST['check_release']);
 $upgrade = $is_post && isset($_POST['upgrade_release']);
+$verify = $is_post && isset($_POST['verify_installation']);
+$submit = $upgrade || $verify;
 $target = ['version' => sdwan_ui_scalar($_POST, 'target_version'), 'sha256' => sdwan_ui_scalar($_POST, 'target_sha256')];
 $result = null;
 $message = null;
 $severity = 'warning';
-if ($upgrade) {
+if ($submit) {
 	if (!$can_upgrade) {
 		http_response_code(403);
 		$message = gettext('Upgrading SD-WAN requires the Package Manager installation privilege.');
 	} else {
-		ignore_user_abort(true);
-		set_time_limit(0);
-		$result = sdwan_release_upgrade($target);
-		$severity = $result === 'success' ? 'success' : 'warning';
+		if (!$verify) {
+			ignore_user_abort(true);
+			set_time_limit(0);
+		}
+		$result = sdwan_release_upgrade($target, $verify);
+		$severity = in_array($result, ['success', 'verified'], true) ? 'success' : 'warning';
 		$message = match ($result) {
-			'success' => sprintf(gettext('SD-WAN %s was installed. Check Status for a current observation.'), $target['version']),
+			'success' => sprintf(gettext('SD-WAN %s was installed and the observer has a current sample.'), $target['version']),
+			'verified' => sprintf(gettext('SD-WAN %s is installed and the observer has a current sample.'), $target['version']),
+			'verify' => sprintf(gettext('SD-WAN %s is installed, but observer readiness could not be verified. Check Status > Services and System Logs, then verify the installation again.'), $target['version']),
+			'verify_files' => gettext('The installed SD-WAN version or files could not be verified. Check System Logs.'),
 			'invalid' => gettext('The upgrade request is invalid or this firewall is incompatible with the package.'),
 			'busy' => gettext('An SD-WAN upgrade is already in progress. Reload this page in a moment.'),
-			'not_newer' => gettext('This release is no longer newer than the installed package. Check GitHub again.'),
+			'not_newer' => $verify ? gettext('The installed version changed. Check the local package version before retrying.') :
+			    gettext('This release is no longer newer than the installed package. Check GitHub again.'),
 			'changed' => gettext('The installed or published version changed. Check GitHub again before upgrading.'),
 			'unpublished' => gettext('The GitHub release asset could not be verified. Check GitHub again later.'),
 			'download' => gettext('The package download did not complete. Check connectivity to GitHub and retry.'),
@@ -38,7 +46,7 @@ if ($upgrade) {
 			'install' => gettext('The package manager could not install the update. Check System Logs before retrying.'),
 			default => gettext('The package manager returned success, but the installed version, files or observer could not be verified. Check System Logs.'),
 		};
-		if (in_array($result, ['success', 'install', 'verify'], true)) {
+		if ($upgrade && !$verify && in_array($result, ['success', 'install', 'verify', 'verify_files'], true)) {
 			sdwan_log_emit($result === 'success' ? LOG_NOTICE : LOG_WARNING,
 			    'Package upgrade to ' . $target['version'] . ': ' . $result . '.');
 		}
@@ -46,9 +54,10 @@ if ($upgrade) {
 }
 
 $installed = sdwan_release_installed();
-$release = !$upgrade && $check ? sdwan_release_check() : null;
+$release = !$submit && $check ? sdwan_release_check() : null;
 $available = false;
-if (!$upgrade && $check && $release === null) {
+$verify_available = $installed === $target['version'] && in_array($result, ['install', 'verify', 'verify_files'], true);
+if (!$submit && $check && $release === null) {
 	$message = gettext('Could not verify release information from GitHub. Check network access, DNS, the proxy and the firewall clock, then retry.');
 } elseif ($message === null && $installed === null) {
 	$message = gettext('The installed SD-WAN version could not be read from the local package database.');
@@ -90,12 +99,18 @@ if ($release !== null) {
 }
 $form->add($section);
 $form->addGlobal(new Form_Button('check_release', gettext('Check GitHub'), null, 'fa-solid fa-search'))
-    ->addClass($available ? 'btn-default' : 'btn-primary');
+    ->addClass($available || $verify_available ? 'btn-default' : 'btn-primary');
+if ($available || $verify_available) {
+	$form_target = $available ? $release : $target;
+	$form->addGlobal(new Form_Input('target_version', '', 'hidden', $form_target['version']));
+	$form->addGlobal(new Form_Input('target_sha256', '', 'hidden', $form_target['sha256']));
+}
 if ($available) {
-	$form->addGlobal(new Form_Input('target_version', '', 'hidden', $release['version']));
-	$form->addGlobal(new Form_Input('target_sha256', '', 'hidden', $release['sha256']));
 	$form->addGlobal(new Form_Button('upgrade_release', sprintf(gettext('Upgrade to %s'), $release['version']),
 	    null, 'fa-solid fa-arrows-rotate'))->addClass('btn-success');
+} elseif ($verify_available) {
+	$form->addGlobal(new Form_Button('verify_installation', gettext('Verify Installation'),
+	    null, 'fa-solid fa-check'))->addClass('btn-primary');
 }
 print $form;
 if ($available): ?>

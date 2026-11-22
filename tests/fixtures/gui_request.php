@@ -34,7 +34,7 @@ set_error_handler(function ($severity, $message, $file) use ($classes) {
 $installed_release = $request['installed_release'] ?? '0.4.7';
 $upgrade_calls = 0;
 function pkg_exec($query, &$stdout, &$stderr) {
-	global $installed_release, $upgrade_calls, $request;
+	global $installed_release, $upgrade_calls, $request, $config;
 	$stderr = '';
 	if ($query === 'query %v pfSense-pkg-SDWAN') {
 		$stdout = $installed_release;
@@ -48,7 +48,12 @@ function pkg_exec($query, &$stdout, &$stderr) {
 			return 1;
 		}
 		$installed_release = '0.4.8';
-	} elseif ($query !== 'check -s pfSense-pkg-SDWAN') {
+		if (isset($request['snapshot'])) {
+			fixture_write_snapshot($request['snapshot'], $config);
+		}
+	} elseif ($query === 'check -s pfSense-pkg-SDWAN') {
+		return !empty($request['installed_checksum_failure']) ? 1 : 0;
+	} else {
 		throw new RuntimeException('Unexpected package command');
 	}
 	return 0;
@@ -59,10 +64,13 @@ function pkg_version_compare($installed, $version) {
 }
 
 function mwexec($command, $quiet) {
-	if ($command !== '/usr/local/etc/rc.d/sdwand.sh status' || !$quiet) {
-		throw new RuntimeException('Unexpected service command');
+	if ($quiet && $command === '/usr/local/etc/rc.d/sdwand.sh status') {
+		return !empty($GLOBALS['request']['service_failure']) ? 1 : 0;
 	}
-	return !empty($GLOBALS['request']['service_failure']) ? 1 : 0;
+	if ($quiet && str_starts_with($command, '/bin/pgrep -P 501 -u 0 -fx ')) {
+		return !empty($GLOBALS['request']['worker_failure']) ? 1 : 0;
+	}
+	throw new RuntimeException('Unexpected service command');
 }
 
 if ($page === 'updates') {
@@ -77,7 +85,8 @@ if ($page === 'updates') {
 		$release_http[array_key_last($release_http)]['body'] = str_repeat('x', strlen($archive));
 	}
 	register_shutdown_function(static function () {
-		echo "\nUPGRADES=" . $GLOBALS['upgrade_calls'] . ' HTTP=' . http_response_code() . "\n";
+		echo "\nUPGRADES=" . $GLOBALS['upgrade_calls'] . ' HTTP=' . http_response_code() .
+		    ' REQUESTS=' . count($GLOBALS['release_requests'] ?? []) . "\n";
 	});
 }
 function isAllowedPage($url) {
@@ -120,13 +129,16 @@ $_GET = $request['get'] ?? [];
 $_POST = $request['post'] ?? [];
 $_SERVER['REQUEST_URI'] = '/sdwan/' . $page . '.php';
 $_SERVER['REQUEST_METHOD'] = $_POST ? 'POST' : 'GET';
-if (isset($request['snapshot'])) {
-	$snapshot = $request['snapshot'] + [
+function fixture_write_snapshot(array $snapshot, array $config): void {
+	$snapshot += [
 		'generated_at' => time(),
 		'config_revision' => sdwan_config_revision($config),
 		'gateway_inventory_revision' => sdwan_gateway_inventory_revision($config, sdwan_gateways()),
 	];
-	file_put_contents($web . '/observer.json', json_encode($snapshot));
+	file_put_contents($GLOBALS['web'] . '/observer.json', json_encode($snapshot));
+}
+if (isset($request['snapshot'])) {
+	fixture_write_snapshot($request['snapshot'], $config);
 }
 if ($_POST) {
 	$_POST['revision'] ??= sdwan_config_revision($config);

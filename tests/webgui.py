@@ -196,8 +196,11 @@ def run(php, classes, screenshot_dir=None):
         for ui in (root / "sdwan/ui.inc.php", root / "sdwan/forwarding.php", root / "sdwan/updates.php"):
             ui.write_text(ui.read_text().replace("'/usr/local/pkg/", "__DIR__ . '/../"))
         version = root / "pfsense-version"
+        supervisor = root / "sdwand.pid"
+        supervisor.write_text("501\n")
         release = root / "sdwan_release.inc"
-        release.write_text(release.read_text().replace("'/etc/version'", repr(str(version))))
+        release.write_text(release.read_text().replace("'/etc/version'", repr(str(version))).replace(
+            "'/var/run/sdwand.pid'", repr(str(supervisor))))
         engine = root / "sdwan_engine.inc"
         engine.write_text(engine.read_text().replace("'/var/run/sdwan-observer.json'", "__DIR__ . '/observer.json'"))
         upstream = (classes.parent / "guiconfig.inc").read_text()
@@ -239,6 +242,7 @@ def run(php, classes, screenshot_dir=None):
 
         def request(page, *, platform_version="2.9.1-RELEASE", **params):
             version.write_text(platform_version + "\n")
+            (root / "observer.json").unlink(missing_ok=True)
             data = {"native": native, "config": config, **params}
             result = subprocess.run([php, "-d", "disable_functions=curl_init,curl_setopt_array,curl_exec,curl_getinfo",
                                      str(ROOT / "tests/fixtures/gui_request.php"), str(root), str(classes), page], input=json.dumps(data), text=True,
@@ -404,17 +408,36 @@ def run(php, classes, screenshot_dir=None):
         failed = request("updates", post=action, install_failure=True)
         assert "could not install the update" in failed and "UPGRADES=1" in failed
         failed = request("updates", post=action, service_failure=True)
-        assert "could not be verified" in failed and "UPGRADES=1" in failed
-        installed = request("updates", post=action)
-        assert "0.4.8 was installed. Check Status for a current observation" in installed and "UPGRADES=1" in installed
+        assert "observer readiness could not be verified" in failed and "UPGRADES=1" in failed
+        assert 'name="verify_installation"' in failed and 'name="upgrade_release"' not in failed
+        retry_form = Choices(failed).forms[0][1]
+        retry = {k: retry_form[k] for k in ("__csrf_magic", "target_version", "target_sha256")}
+        retry["verify_installation"] = "1"
+        installed_state = {"installed_release": "0.4.8", "release_http_failure": 0}
+        denied = request("updates", privileges=privileges, post=retry, **installed_state)
+        assert "UPGRADES=0 HTTP=403 REQUESTS=0" in denied
+        rejected = request("updates", post={**retry, "__csrf_magic": "invalid"}, **installed_state)
+        assert "CSRF check failed" in rejected and "UPGRADES=0" in rejected and "REQUESTS=0" in rejected
+        still_unready = request("updates", post=retry, worker_failure=True, snapshot=snapshot, **installed_state)
+        assert "observer readiness could not be verified" in still_unready and "UPGRADES=0" in still_unready
+        assert "REQUESTS=0" in still_unready
+        recovered = request("updates", post=retry, snapshot=snapshot, **installed_state)
+        assert "0.4.8 is installed and the observer has a current sample" in recovered and "REQUESTS=0" in recovered
+        assert "UPGRADES=0" in recovered and 'name="verify_installation"' not in recovered
+        changed = request("updates", post=retry, installed_release="0.4.7", release_http_failure=0)
+        assert "installed version changed" in changed and "UPGRADES=0" in changed and "REQUESTS=0" in changed
+        files_bad = request("updates", post=retry, installed_checksum_failure=True, **installed_state)
+        assert "version or files could not be verified" in files_bad and "UPGRADES=0" in files_bad and "REQUESTS=0" in files_bad
+        installed = request("updates", post=action, snapshot=snapshot)
+        assert "0.4.8 was installed and the observer has a current sample" in installed and "UPGRADES=1" in installed
         ce292 = {"platform_version": "2.9.2-RELEASE"}
         assert "Upgrade to 0.4.8" in request("updates", post=checked, **ce292)
-        installed = request("updates", post=action, **ce292)
-        assert "0.4.8 was installed. Check Status for a current observation" in installed and "UPGRADES=1" in installed
+        installed = request("updates", post=action, snapshot=snapshot, **ce292)
+        assert "0.4.8 was installed and the observer has a current sample" in installed and "UPGRADES=1" in installed
         current = request("updates", post=checked, installed_release="0.4.8", **ce292)
         assert 'name="upgrade_release"' not in current and "up to date" in current
-        replay = request("updates", post=action, installed_release="0.4.8", **ce292)
-        assert "no longer newer" in replay and "UPGRADES=0" in replay
+        replay = request("updates", post=action, snapshot=snapshot, **installed_state, **ce292)
+        assert "0.4.8 is installed and the observer has a current sample" in replay and "UPGRADES=0" in replay and "REQUESTS=0" in replay
         for options in [
             {"platform_version": "2.9.0-RELEASE"},
             {"platform_version": "2.9.2-DEVELOPMENT"},

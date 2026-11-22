@@ -105,8 +105,33 @@ function sdwan_release_asset_size(array $release): ?int {
 	return null;
 }
 
+function sdwan_release_verify_installation(string $version, ?int $installed_since = null): string {
+	if (sdwan_release_installed() !== $version ||
+	    pkg_exec('check -s ' . SDWAN_RELEASE_PACKAGE, $stdout, $stderr) !== 0) {
+		return 'verify_files';
+	}
+	if (mwexec('/usr/local/etc/rc.d/sdwand.sh status', true) !== 0) {
+		return 'verify';
+	}
+	// The native rc status tracks the daemon supervisor, including between worker restarts.
+	$supervisor = trim((string)@file_get_contents('/var/run/sdwand.pid', false, null, 0, 32));
+	if (!preg_match('/\A[1-9][0-9]{0,9}\z/', $supervisor) ||
+	    mwexec('/bin/pgrep -P ' . $supervisor . ' -u 0 -fx ' .
+	        escapeshellarg('/usr/local/bin/php /usr/local/sbin/sdwand\.php'), true) !== 0) {
+		return 'verify';
+	}
+	require_once(__DIR__ . '/sdwan.inc');
+	require_once(__DIR__ . '/sdwan_engine.inc');
+	try {
+		$snapshot = sdwan_current_snapshot(sdwan_get_config(), sdwan_gateways());
+	} catch (UnexpectedValueException $e) {
+		return 'verify';
+	}
+	return $snapshot !== null && $snapshot['generated_at'] >= ($installed_since ?? 0) ? 'verified' : 'verify';
+}
+
 /* The WebGUI caller checks the native install privilege and verifies CSRF before calling this. */
-function sdwan_release_upgrade(array $target): string {
+function sdwan_release_upgrade(array $target, bool $verify_only = false): string {
 	if (!sdwan_release_valid_target($target) || !sdwan_release_compatible()) {
 		return 'invalid';
 	}
@@ -118,7 +143,10 @@ function sdwan_release_upgrade(array $target): string {
 	$path = null;
 	try {
 		$installed = sdwan_release_installed();
-		if ($installed === null || pkg_version_compare($installed, $target['version']) !== '<') {
+		if ($installed === $target['version']) {
+			return sdwan_release_verify_installation($installed);
+		}
+		if ($verify_only || $installed === null || pkg_version_compare($installed, $target['version']) !== '<') {
 			return 'not_newer';
 		}
 		$release = sdwan_release_check();
@@ -157,15 +185,12 @@ function sdwan_release_upgrade(array $target): string {
 			return 'changed';
 		}
 		// Drain pkg and its hook messages together, using pfSense's native environment.
+		$installed_since = time();
 		if (pkg_exec("add {$file} 2>&1", $output, $stderr) !== 0) {
 			return 'install';
 		}
-		if (sdwan_release_installed() !== $release['version'] ||
-		    pkg_exec('check -s ' . SDWAN_RELEASE_PACKAGE, $stdout, $stderr) !== 0 ||
-		    mwexec('/usr/local/etc/rc.d/sdwand.sh status', true) !== 0) {
-			return 'verify';
-		}
-		return 'success';
+		$status = sdwan_release_verify_installation($release['version'], $installed_since);
+		return $status === 'verified' ? 'success' : $status;
 	} finally {
 		if ($path !== null && is_file($path)) {
 			unlink($path);

@@ -39,7 +39,7 @@ function pkg_version_compare($a, $b): string {
 
 function mwexec($command, $quiet): int {
 	check($command === '/usr/local/etc/rc.d/sdwand.sh status' && $quiet);
-	return 0; // The native service wrapper is exercised separately in the same FreeBSD job.
+	return 1; // The isolated database deliberately does not start the native observer.
 }
 
 $version = $argv[3] ?? '0.4.8';
@@ -69,10 +69,11 @@ if ($arg_root !== null) {
 	check(sdwan_release_upgrade($target) === 'checksum' && $pkg_adds === 0);
 	check(sdwan_release_installed() === $baseline);
 	$release_http = $index_http;
-	check(sdwan_release_upgrade($target) === 'success' && $pkg_adds === 1);
+	check(sdwan_release_upgrade($target) === 'verify' && $pkg_adds === 1);
 	check(sdwan_release_installed() === $version);
-	check(sdwan_release_upgrade($target) === 'not_newer' && $pkg_adds === 1);
-	echo "ok - interrupted and corrupt WebGUI downloads preserve the installed package, and retry upgrades and rejects replay\n";
+	$release_requests = [];
+	check(sdwan_release_upgrade($target) === 'verify' && $pkg_adds === 1 && $release_requests === []);
+	echo "ok - bad downloads preserve the package, the verified archive installs once, and readiness retry stays local\n";
 	exit;
 }
 
