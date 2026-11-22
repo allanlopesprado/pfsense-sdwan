@@ -8,6 +8,73 @@ function sdwan_preflight_error(string $message): array {
 	return ['errors' => [$message], 'binding' => null];
 }
 
+/* Activation checks route dependencies separately from runtime preflight.
+ * Losing a service route later must not disqualify other working members. */
+function sdwan_preflight_probe_paths(array $config, string $policy_name, array $gateways,
+    callable $has_path, ?array $previous = null): array {
+	$policy = array_column($config['policies'], null, 'name')[$policy_name] ?? [];
+	$old_policy = array_column($previous['policies'] ?? [], null, 'name')[$policy_name] ?? [];
+	$members = array_column($config['members'], null, 'name');
+	$old_members = array_column($previous['members'] ?? [], null, 'name');
+	$overrides = array_column($policy['probe_requirements'] ?? [], null, 'member');
+	$old_overrides = array_column($old_policy['probe_requirements'] ?? [], null, 'member');
+	$fields = ['probe_primary' => 'primary_check', 'probe_secondary' => 'secondary_check'];
+	$checks_for = static function (array $policy, array $member, array $override): array {
+		$modes = sdwan_policy_probe_requirements($policy, $member, $override);
+		$required = array_keys($modes, 'required', true);
+		$checks = [];
+		foreach ($required ?: array_keys($modes) as $slot) {
+			$checks[$slot] = $member[$slot] ?? null;
+		}
+		return [(bool)$required, $checks];
+	};
+	$errors = [];
+	foreach ($policy['members'] ?? [] as $name) {
+		$member = $members[$name];
+		$gateway = $member['gateway'];
+		[$required, $checks] = $checks_for($policy, $member, $overrides[$name] ?? []);
+		$old_member = $old_members[$name] ?? [];
+		[$old_required, $old_checks] = $old_member && in_array($name, $old_policy['members'] ?? [], true)
+		    ? $checks_for($old_policy, $old_member, $old_overrides[$name] ?? []) : [false, []];
+		foreach (array_diff_key($old_checks, $checks) as $slot => $value) {
+			if (!is_string($value)) {
+				continue;
+			}
+			$choice = $overrides[$name][$fields[$slot]] ?? $policy[$fields[$slot]] ?? null;
+			$check = $slot === 'probe_primary' ? 'primary' : 'secondary';
+			if (!$checks && $choice !== 'ignored') {
+				$errors[] = "Set the {$check} service check to Ignore for {$name} in Policies before removing the last service check from active forwarding.";
+			} elseif (isset($member[$slot]) && $choice === null) {
+				$errors[] = "Choose an explicit {$check} service check mode for {$name} in Policies before changing its active forwarding requirements.";
+			}
+		}
+		$same_gateway = ($old_member['gateway'] ?? null) === $gateway;
+		if (!$checks || ($same_gateway && $required === $old_required && $checks === $old_checks)) {
+			continue;
+		}
+		$available = false;
+		foreach ($checks as $slot => $value) {
+			if ($required && $same_gateway && $old_required && array_key_exists($slot, $old_checks) &&
+			    $old_checks[$slot] === $value) {
+				continue;
+			}
+			if (is_string($value) && $has_path($value, $gateways[$gateway], $gateway)) {
+				$available = true;
+				if (!$required) {
+					break;
+				}
+			} elseif ($required) {
+				$check = $slot === 'probe_primary' ? 'primary' : 'secondary';
+				$errors[] = "Member {$name}: configure a verifiable host route for the required {$check} service check through {$gateway} under System > Routing.";
+			}
+		}
+		if (!$required && !$available) {
+			$errors[] = "Member {$name}: configure a verifiable host route for at least one service check through {$gateway} under System > Routing.";
+		}
+	}
+	return $errors;
+}
+
 /* Native gateways can be pending DHCP or PPP negotiation. Validate literals
  * with the same family and zone checks as the observer and the PF renderer. */
 function sdwan_preflight_address(mixed $value, string $family, string $device): bool {

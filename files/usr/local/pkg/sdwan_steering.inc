@@ -189,6 +189,28 @@ function sdwan_steering_policy_revision(array $config, string $name): ?string {
 	return sdwan_config_revision($inputs);
 }
 
+function sdwan_steering_probe_path_available(string $value, array $gateway, string $name): bool {
+	require_once(__DIR__ . '/sdwan_probe.inc');
+	$target = sdwan_probe_target($value);
+	if ($target === null || $target['family'] !== $gateway['family']) {
+		return false;
+	}
+	$routes = sdwan_probe_host_routes([['probe_primary' => $value]]);
+	$enabled = array_values(array_filter($routes, static fn($route) => !$route[2]));
+	$planned = $enabled === [[$target['address'], $name, false]];
+	if ($enabled && !$planned) {
+		// An old live route may still be visible until native changes are applied.
+		return false;
+	}
+	if (sdwan_probe_path($target, $gateway) !== null) {
+		return true;
+	}
+	/* An offline interface or pending lease can have a correct native route
+	 * saved for when its source and next hop become available. */
+	[$device, $source, $hop] = sdwan_dynamic_gateway_identity($gateway);
+	return $planned && (!$device || !$source || !$hop);
+}
+
 /* Update policy inputs and their bound revisions in the caller's single XML
  * write. A settings edit never expands the approved native forwarding scope. */
 function sdwan_steering_policy_edit(array $current, array $candidate, bool $allowed): array {
@@ -216,6 +238,11 @@ function sdwan_steering_policy_edit(array $current, array $candidate, bool $allo
 			return ['errors' => ["Review the {$group} binding under Forwarding before changing its policy members or native scope.", ...$check['errors']],
 			    'rows' => null];
 		}
+		$probe_errors = sdwan_preflight_probe_paths($candidate, $binding['policy'], $native['gateways'],
+		    'sdwan_steering_probe_path_available', $current);
+		if ($probe_errors) {
+			return ['errors' => $probe_errors, 'rows' => null];
+		}
 		$updated[$group] = ['policy_revision' => $new, 'gateways' => ['item' => $approved['gateways']]];
 	}
 	if (!$updated) {
@@ -239,6 +266,13 @@ function sdwan_steering_revision(): string {
 function sdwan_steering_preview(array $config, string $policy, string $group): array {
 	$native = sdwan_steering_native();
 	$preview = sdwan_steering_preflight($config, $policy, $group, $native);
+	if ($preview['binding'] !== null && sdwan_steering_supported() && !isset(sdwan_steering_bindings()[$group])) {
+		$errors = sdwan_preflight_probe_paths($config, $policy, $native['gateways'],
+		    'sdwan_steering_probe_path_available');
+		if ($errors) {
+			$preview = ['errors' => $errors, 'binding' => null];
+		}
+	}
 	$preview['revision'] = sdwan_config_revision([$config, sdwan_steering_rows(), $native]);
 	if ($preview['binding'] !== null) {
 		$preview['binding']['policy_revision'] = sdwan_steering_policy_revision($config, $policy);
@@ -291,7 +325,7 @@ function sdwan_steering_edit(string $group, ?string $policy, string $expected_re
 	$observation_lock = null;
 	$receipt_before_edit = null;
 	try {
-		if (!config_read_file(false, false)) {
+		if (!config_read_file(false, false) || !is_array($config_before = config_get_path(''))) {
 			return ['The current pfSense configuration could not be read.'];
 		}
 		$config = sdwan_get_config();
@@ -339,6 +373,11 @@ function sdwan_steering_edit(string $group, ?string $policy, string $expected_re
 			if ($preview['errors']) {
 				return $preview['errors'];
 			}
+			$errors = sdwan_preflight_probe_paths($config, $policy, $native['gateways'],
+			    'sdwan_steering_probe_path_available');
+			if ($errors) {
+				return $errors;
+			}
 			$row = $preview['binding'];
 			$row['policy_revision'] = sdwan_steering_policy_revision($config, $policy);
 			foreach ($active as $saved) {
@@ -351,15 +390,21 @@ function sdwan_steering_edit(string $group, ?string $policy, string $expected_re
 			}
 			$updated = [...$rows, $row];
 		}
-		if (!is_array(config_set_path(SDWAN_BINDINGS_PATH, ['item' => $updated])) ||
+		$config_changed = sdwan_config_changed_since($config_before);
+		if ($config_changed || !is_array(config_set_path(SDWAN_BINDINGS_PATH, ['item' => $updated])) ||
 		    !is_array(write_config($policy === null ? 'Returned SD-WAN rules to native gateway selection' : 'Bound SD-WAN forwarding policy to native firewall rules'))) {
-			config_read_file(false, false);
+			if (!$config_changed) {
+				config_read_file(false, false);
+			}
 			if ($receipt_before_edit !== null) {
 				if ($receipt_before_edit) {
 					sdwan_steering_write_receipt($path, $receipt_before_edit);
 				} else {
 					@unlink($path);
 				}
+			}
+			if ($config_changed) {
+				return ['Settings changed. Review the current preview before applying.'];
 			}
 			sdwan_log_event('binding_error');
 			return ['pfSense could not save the forwarding binding.'];

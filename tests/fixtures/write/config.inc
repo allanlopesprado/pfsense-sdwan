@@ -12,22 +12,28 @@ if (!defined('SDWAN_LOCK_DIRECTORY')) {
 	});
 }
 function config_read_file($backup, $cache) {
-	global $current, $disk;
+	global $current, $disk, $before_config_read;
+	if (isset($before_config_read)) {
+		$before_config_read();
+	}
 	$current = $disk;
 	return true;
 }
 function config_get_path($path, $default = null) {
 	global $current;
-	return $current[$path] ?? $default;
+	return $path === '' ? $current : ($current[$path] ?? $default);
 }
 function config_set_path($path, $value) {
 	global $current;
 	return $current[$path] = $value;
 }
 function write_config($reason) {
-	global $current, $disk, $fail, $writes;
+	global $current, $disk, $fail, $writes, $before_config_write;
 	if ($fail) {
 		return false;
+	}
+	if (isset($before_config_write)) {
+		$before_config_write($current);
 	}
 	$writes++;
 	return $disk = $current;

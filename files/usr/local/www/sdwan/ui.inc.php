@@ -163,7 +163,8 @@ try {
 } catch (UnexpectedValueException $error) {
 	$pgtitle = [gettext('Services'), gettext('SD-WAN')];
 	include('head.inc');
-	print_input_errors([gettext('The stored SD-WAN configuration cannot be read by this version.'), $error->getMessage()]);
+	print_input_errors([gettext('The stored SD-WAN configuration cannot be read by this version. Review the configuration history under Diagnostics > Backup & Restore.'),
+	    $error->getMessage()]);
 	include('foot.inc');
 	exit;
 }

@@ -40,6 +40,99 @@ $baseline = preflight_check($native, true, 'WAN pair');
 if ($baseline['trackers'] !== ['101'] || $baseline['gateways'] !== ['ISP_A', 'ISP_B']) {
 	throw new Exception('Binding identities must match native rules and configured candidates.');
 }
+
+$probe_config = $config;
+$probe_config['members'][0] += [
+	'probe_primary' => 'tcp://192.0.2.20:443',
+	'probe_secondary' => 'dns://health.example 192.0.2.21',
+];
+$probe_config['members'][1]['probe_primary'] = 'tcp://192.0.2.22:443';
+$available_routes = [
+	'tcp://192.0.2.20:443' => 'ISP_B', // Present in the kernel but wired to the wrong gateway.
+	'dns://health.example 192.0.2.21' => 'ISP_A',
+	'tcp://192.0.2.22:443' => 'ISP_B',
+];
+$check = static fn($c, $old = null) => sdwan_preflight_probe_paths($c, 'Office', $native['gateways'],
+	static fn($probe, $gateway, $name) => ($available_routes[$probe] ?? '') === $name, $old);
+if ($check($probe_config)) {
+	throw new Exception('Legacy optional checks must accept one correctly routed alternative per member.');
+}
+$requires_primary = $probe_config;
+$requires_primary['policies'][0]['primary_check'] = 'required';
+$requires_primary['policies'][0]['secondary_check'] = 'optional';
+$requires_primary['policies'][0]['probe_requirements'] = [['member' => 'Second', 'secondary_check' => 'ignored']];
+if (count($check($requires_primary)) !== 1 || !str_contains($check($requires_primary)[0], 'required primary')) {
+	throw new Exception('Binding must reject a required service check routed through a different gateway.');
+}
+if (count($check($requires_primary, $probe_config)) !== 1) {
+	throw new Exception('Changing the existing policy from legacy optional to required must recheck the route.');
+}
+$requires_primary['policies'][0]['strategy'] = 'cost';
+if ($check($requires_primary, $requires_primary)) {
+	throw new Exception('An unchanged, previously configured dependency must not block unrelated edits.');
+}
+$moves_both = $requires_primary;
+$moves_both['members'][1]['probe_primary'] = 'tcp://192.0.2.23:443';
+$errors = $check($moves_both, $requires_primary);
+if (count($errors) !== 1 || !str_contains($errors[0], 'Second')) {
+	throw new Exception('Only the changed required dependency needs to be rechecked on an active edit.');
+}
+$removed_optional_path = $probe_config;
+unset($removed_optional_path['members'][0]['probe_secondary']);
+if (count($check($removed_optional_path, $probe_config)) !== 1) {
+	throw new Exception('An active legacy policy must reject removal of its last route for an optional check.');
+}
+$ignore_unrouted = $requires_primary;
+$ignore_unrouted['policies'][0]['probe_requirements'][] = ['member' => 'First', 'primary_check' => 'ignored'];
+if ($check($ignore_unrouted)) {
+	throw new Exception('An ignored check is not a routing dependency for this policy.');
+}
+$optional_missing = $config;
+$optional_missing['policies'][0]['primary_check'] = 'optional';
+if (count($check($optional_missing)) !== 2) {
+	throw new Exception('A policy that uses optional checks needs a configured and routed slot for each member.');
+}
+$no_service_check = $probe_config;
+unset($no_service_check['members'][1]['probe_primary']);
+$errors = $check($no_service_check, $probe_config);
+if (count($errors) !== 1 || !str_contains($errors[0], 'Ignore for Second')) {
+	throw new Exception('Deleting the final legacy service check cannot fall back to gateway-only silently.');
+}
+$only_secondary = $probe_config;
+$only_secondary['policies'][0]['secondary_check'] = 'optional';
+$only_secondary['policies'][0]['probe_requirements'] = [['member' => 'Second', 'primary_check' => 'optional',
+    'secondary_check' => 'ignored']];
+$errors = $check($only_secondary, $probe_config);
+if (count($errors) !== 1 || !str_contains($errors[0], 'explicit primary service check mode for First')) {
+	throw new Exception('A policy-wide mode cannot implicitly disable another existing probe.');
+}
+$only_secondary['policies'][0]['primary_check'] = 'ignored';
+if ($check($only_secondary, $probe_config)) {
+	throw new Exception('An explicit policy-wide Ignore can preserve a different member override.');
+}
+
+require_once __DIR__ . '/../files/usr/local/pkg/sdwan_steering.inc';
+function get_real_interface($interface, $family, $realv6iface, $flush): ?string {
+	return null; // An offline WAN has no source or applied host route yet.
+}
+$offline = $native['gateways']['ISP_A'] + ['address' => 'dynamic'];
+$offline_path = 'tcp://192.0.2.20:443';
+$enabled = ['network' => '192.0.2.20/32', 'gateway' => 'ISP_A'];
+$disabled = $enabled + ['disabled' => ''];
+$misrouted = array_replace($enabled, ['gateway' => 'ISP_B']);
+foreach ([
+	'absent' => [[], false],
+	'disabled' => [[$disabled], false],
+	'wrong gateway' => [[$misrouted], false],
+	'conflicting routes' => [[$enabled, $misrouted], false],
+	'correct persistent route' => [[$enabled], true],
+] as $label => [$routes, $expected]) {
+	$current['staticroutes/route'] = $routes;
+	if (sdwan_steering_probe_path_available($offline_path, $offline, 'ISP_A') !== $expected) {
+		throw new Exception('Offline route configuration: ' . $label);
+	}
+}
+unset($current['staticroutes/route']);
 $earlier = ['type' => 'pass', 'tracker' => '103', 'interface' => 'lan', 'ipprotocol' => 'inet46',
     'protocol' => 'any', 'source' => ['any' => ''], 'destination' => ['any' => ''], 'sched' => 'none'];
 foreach ([

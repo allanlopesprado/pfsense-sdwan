@@ -39,3 +39,26 @@ $repaired = $edited;
 $repaired['members'] = [];
 verify(sdwan_save_config($repaired, sdwan_config_revision($edited)) === [] && sdwan_get_config() === $initial,
     'a restored reference to a missing gateway can be removed');
+
+$disk['gateways/gateway_item'] = $native['gateways/gateway_item'];
+$current = $disk;
+$prior_writes = $writes;
+$reads = 0;
+$before_config_read = static function () use (&$reads, &$disk): void {
+	if (++$reads === 2) {
+		$disk['filter']['rule'][] = ['descr' => 'Concurrent native rule'];
+	}
+};
+$errors = sdwan_save_config($edited, $revision);
+unset($before_config_read);
+verify($errors !== [] && $writes === $prior_writes && $current === $disk &&
+    count($disk['filter']['rule']) === 2 && sdwan_get_config() === $initial,
+    'a native edit during package validation survives and the user can retry');
+verify(sdwan_save_config($edited, $revision) === [] && $writes === $prior_writes + 1 &&
+    count($disk['filter']['rule']) === 2 && sdwan_get_config() === $edited,
+    'retrying after the native edit only changes SD-WAN settings');
+
+$disk[SDWAN_CONFIG_PATH] = ['version' => 'future'];
+$errors = sdwan_save_config($initial, sdwan_config_revision($edited));
+verify($errors !== [] && $writes === $prior_writes + 1 && $disk[SDWAN_CONFIG_PATH] === ['version' => 'future'],
+    'an incompatible restore after the form opened returns a save error and is kept intact');

@@ -33,6 +33,9 @@ function get_interface_gateway_v6($interface): ?string {
 	return get_interface_gateway($interface);
 }
 function get_real_interface($interface, $family, $realv6iface, $flush): ?string {
+	if ($realv6iface === false && $flush === true && !empty($GLOBALS['probe_paths_offline'])) {
+		return null;
+	}
 	if ($realv6iface !== false || $flush !== false) {
 		throw new RuntimeException('Steering must use the native filter generator interface lookup');
 	}
@@ -75,6 +78,21 @@ verify(str_contains(sdwan_steering_preview($config, 'p', 'G')['errors'][0] ?? ''
 $current = $disk;
 verify(sdwan_steering_bind('p', 'G', $preview['revision']) !== [] && !$writes && !$pending, 'stock CE cannot activate forwarding');
 $abi = 1;
+$before_probe_test = $disk;
+$probe_config = $config;
+$probe_config['members'][0]['probe_primary'] = 'tcp://192.0.2.42:443';
+$probe_config['policies'][0]['probe_requirements'] = [['member' => 'a', 'primary_check' => 'required']];
+$probe_paths_offline = true;
+$disk[SDWAN_CONFIG_PATH] = sdwan_encode_config($probe_config);
+$disk['staticroutes/route'] = [['network' => '192.0.2.42/32', 'gateway' => 'B']];
+$current = $disk;
+$bad_probe = sdwan_steering_preview($probe_config, 'p', 'G');
+$errors = sdwan_steering_bind('p', 'G', $bad_probe['revision']);
+verify($bad_probe['binding'] === null && str_contains($bad_probe['errors'][0], 'required primary') &&
+    $errors === $bad_probe['errors'] && !$writes && !$pending && $current === $disk && !isset($disk[SDWAN_BINDINGS_PATH]),
+    'an incorrectly routed required probe prevents preview and activation without changing the firewall');
+$disk = $current = $before_probe_test;
+unset($probe_paths_offline);
 $preview = sdwan_steering_preview($config, 'p', 'G');
 verify(sdwan_steering_bind('p', 'G', str_repeat('0', 64)) !== [] && !$writes, 'optimistic revision rejects an outdated binding');
 $fail = true;
@@ -85,6 +103,18 @@ $bindings = sdwan_steering_bindings();
 $raw = $disk[SDWAN_BINDINGS_PATH]['item'][0];
 verify(sdwan_steering_decode($raw) === $bindings['G'] && $raw['gateways']['item'] === ['A', 'B'], 'binding persists outside the package in XML list form');
 verify(sdwan_steering_bind('p', 'G', sdwan_steering_revision()) !== [] && $writes === 1, 'a bound rule cannot be bound again');
+$before_removing_probe = $disk;
+$legacy = $config;
+$legacy['members'][0]['probe_primary'] = 'tcp://192.0.2.42:443';
+$disk[SDWAN_CONFIG_PATH] = sdwan_encode_config($legacy);
+$disk[SDWAN_BINDINGS_PATH]['item'][0]['policy_revision'] = sdwan_steering_policy_revision($legacy, 'p');
+$disk[SDWAN_BINDINGS_PATH . '/item'] = $disk[SDWAN_BINDINGS_PATH]['item'];
+$current = $disk;
+$errors = sdwan_save_config($config, sdwan_config_revision($legacy), true);
+verify(str_contains($errors[0] ?? '', 'removing the last service check') && sdwan_get_config() === $legacy &&
+    $writes === 1 && $pending === 1 && $current === $disk,
+    'an active legacy policy retains its last service check after an accidental deletion');
+$disk = $current = $before_removing_probe;
 verify(sdwan_steering_gateway_for_rule($raw, $rule) === null, 'missing or stale snapshot never authorizes pass');
 $sample = ['status' => 'online', 'substatus' => 'none', 'delay' => '12ms', 'stddev' => '1ms', 'loss' => '0%'];
 $snapshot = sdwan_evaluate($config, ['A' => $sample, 'B' => $sample], time(), sdwan_gateways());
@@ -454,6 +484,24 @@ verify(sdwan_steering_unbind('G', $revision_before_native_edit) === ['Unsupporte
     sdwan_steering_reconnect('G', 'A', $revision_before_native_edit)['errors'] === ['Unsupported forwarding binding format.'] &&
     $writes === $before_writes && $pending === $before_requests && !is_file($receipt_path),
     'configuration altered between the form and the save reports invalid bindings without a partial change');
+$current = $disk = $before_unbind;
+$known_receipt = ['signature' => str_repeat('b', 64), 'attempts' => 1, 'requested_at' => 500,
+    'accepted' => true, 'confirmed' => true, 'trackers' => ['301']];
+sdwan_steering_write_receipt($receipt_path, $known_receipt);
+$reads = 0;
+$before_config_read = static function () use (&$disk, &$reads): void {
+	if (++$reads === 2) {
+		$disk['system/hostname'] = 'written-from-native-settings';
+	}
+};
+$errors = sdwan_steering_unbind('G', sdwan_steering_revision());
+unset($before_config_read);
+verify(str_contains($errors[0] ?? '', 'Settings changed') && $reads === 2 &&
+    $current === $disk && $disk['system/hostname'] === 'written-from-native-settings' &&
+    isset(sdwan_steering_bindings()['G']) && $writes === $before_writes && $pending === $before_requests &&
+    sdwan_steering_read_receipt($receipt_path) === $known_receipt,
+    'native config drift during unbinding preserves both the native edit and the existing PF receipt');
+unlink($receipt_path);
 $current = $disk = $before_unbind;
 $fail = true;
 verify(sdwan_steering_unbind('G', sdwan_steering_revision()) !== [] && $current === $disk &&

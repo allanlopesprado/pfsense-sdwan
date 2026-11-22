@@ -20,6 +20,17 @@ Reproduce an offline run with PHP CLI and Python 3. Use its run ID as the seed.
 python3 tests/audit/run.py --seed 44955564168 --output ./audit-results
 ```
 
+## Configuration lifecycle
+
+The package checks exercise an empty install, setup order, old policies, rejected edits and deletions, native gateway removal, failed writes, retries, and clean teardown. A separate test runs concurrent PHP writers against a shared file-backed configuration. Every wave starts from the same revision and must produce one durable edit while preserving native settings.
+
+```sh
+php tests/config_lifecycle.php 172831 2048
+php tests/config_parallel.php 4 16
+```
+
+Before enabling forwarding, apply the probe host routes in System > Routing. The disposable appliance test stages an invalid route, verifies that activation is refused, then confirms that the same invalid edit cannot change an active binding or disrupt its traffic. [Netgate static routes](https://docs.netgate.com/pfsense/en/latest/routing/static.html)
+
 ## Vendor references and test implications
 
 | Official reference | Documented behavior | pfSense verification |

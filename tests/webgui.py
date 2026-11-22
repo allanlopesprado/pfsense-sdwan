@@ -343,7 +343,7 @@ def run(php, classes, screenshot_dir=None):
         for privileges in ({}, {"/firewall_rules.php": False}):
             active_list = request("policies", native=active_policy, privileges=privileges)
             assert "Remove the forwarding binding before deleting this policy" in active_list, active_list
-            assert 'value="delete"' not in active_list, active_list
+            assert 'value="review-delete"' not in active_list, active_list
             if privileges:
                 assert "PBR" not in active_list, active_list
             controls = Choices(active_list)
@@ -355,20 +355,38 @@ def run(php, classes, screenshot_dir=None):
         invalid_bindings = {**active_policy, "gateways/sdwan_bindings": {"item": [None]}}
         invalid_list = request("policies", native=invalid_bindings)
         assert "Review the saved forwarding bindings before deleting policies" in invalid_list
-        assert 'value="delete"' not in invalid_list
+        assert 'value="review-delete"' not in invalid_list
         controls = Choices(invalid_list)
         blocked = request("policies", native=invalid_bindings, post={
             "action": "delete", "original": "VOICE", "__csrf_magic": controls.tokens[0],
             "revision": controls.revisions[0]})
         assert "Review the saved forwarding bindings before deleting policies" in blocked
         assert json.loads(blocked.split("SAVED=")[1]) == [0, config]
-        unbound_list = request("policies")
-        assert 'value="delete"' in unbound_list
-        controls = Choices(unbound_list)
-        deleted = request("policies", post={"action": "delete", "original": "VOICE",
-                          "__csrf_magic": controls.tokens[0], "revision": controls.revisions[0]})
-        assert json.loads(deleted.split("SAVED=")[1]) == [1, {**config, "policies": []}], deleted
-        print("ok - a policy can be deleted only after its forwarding binding is removed")
+        for page, name in (("members", "1"), ("slas", "1"), ("policies", "VOICE")):
+            list_page = request(page)
+            assert 'value="review-delete"' in list_page and 'value="delete"' not in list_page
+            controls = next(post for _, post in Choices(list_page).forms if post.get("original") == name)
+            direct = request(page, post={**controls, "action": "delete"})
+            assert "Review this entry before confirming its deletion" in direct
+            assert json.loads(direct.split("SAVED=")[1]) == [0, config]
+            review = request(page, post={**controls, "action": "review-delete"})
+            assert f"Delete {name}?" in review and f'href="/sdwan/{page}.php">Cancel' in review
+            assert json.loads(review.split("SAVED=")[1]) == [0, config]
+            confirm = {**Choices(review).forms[0][1], "action": "delete"}
+            stale = request(page, post={**confirm, "revision": "old-revision"})
+            assert "Configuration changed" in stale
+            assert json.loads(stale.split("SAVED=")[1]) == [0, config]
+            wrong = request(page, post={**confirm, "confirm_delete": "another-entry"})
+            assert "Review this entry before confirming its deletion" in wrong
+            assert json.loads(wrong.split("SAVED=")[1]) == [0, config]
+            if page == "policies":
+                newly_bound = request(page, native=active_policy, post=confirm)
+                assert "Remove the forwarding binding before deleting this policy" in newly_bound
+                assert json.loads(newly_bound.split("SAVED=")[1]) == [0, config]
+            deleted = request(page, post=confirm)
+            remaining = [entry for entry in config[page] if entry["name"] != name]
+            assert json.loads(deleted.split("SAVED=")[1]) == [1, {**config, page: remaining}], deleted
+        print("ok - deletion needs confirmation and rechecks the revision and dependencies before saving")
 
         thresholds = [dict(sla, rttsd_ms="1.5") for sla in config["slas"]]
         optional_config = {**probe_config, "slas": thresholds}
@@ -422,7 +440,7 @@ def run(php, classes, screenshot_dir=None):
         member_list = request("members")
         assert 'table-rowdblclickedit' in member_list and 'class="fa-solid fa-pencil"' in member_list
         assert 'class="action-buttons"' in member_list and 'icon-embed-btn' in member_list
-        assert Choices(member_list).tokens and 'value="delete"' in member_list
+        assert Choices(member_list).tokens and 'value="review-delete"' in member_list
 
         assert "diagnostics.php?policy=VOICE" in request("status")
         assert "diagnostics.php?policy=VOICE" not in request("status", inspect=False)

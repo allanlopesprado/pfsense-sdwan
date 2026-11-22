@@ -19,6 +19,8 @@ python3 -B tests/lab/test_observe_path.py
 python3 -B tests/steering_daemon.py "$PHP_BIN"
 python3 -B tests/steering_startup.py "$PHP_BIN"
 "$PHP_BIN" tests/config_edits.php
+"$PHP_BIN" tests/config_lifecycle.php
+"$PHP_BIN" tests/config_parallel.php
 python3 -B tests/widget.py "$PHP_BIN"
 "$PHP_BIN" tests/release.php
 "$PHP_BIN" -d disable_functions=curl_init,curl_setopt_array,curl_exec,curl_getinfo tests/release_transport.php

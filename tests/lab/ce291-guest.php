@@ -159,6 +159,38 @@ if ($action === 'settings') {
     write_config('Configure the disposable SD-WAN two-service acceptance');
     exit;
 }
+if ($action === 'probe_route_guard') {
+    $original = sdwan_get_config();
+    $bindings = sdwan_steering_bindings();
+    $changed = $original;
+    $changed['members'][0]['probe_primary'] = 'tcp://192.0.2.170:7';
+    $has_route_error = static fn(array $errors): bool =>
+        count(array_filter($errors, static fn(string $error): bool =>
+            str_contains($error, 'required primary service check through GW_A'))) === 1;
+    if ($bindings) {
+        $errors = sdwan_save_config($changed, sdwan_config_revision($original), true);
+        if (!$has_route_error($errors) || sdwan_get_config() !== $original || sdwan_steering_bindings() !== $bindings) {
+            throw new RuntimeException('An invalid service route changed an active policy: ' . implode('; ', $errors));
+        }
+        echo 'ACTIVE_POLICY_REJECTED_INVALID_PROBE_ROUTE', PHP_EOL;
+        exit;
+    }
+    if (sdwan_save_config($changed, sdwan_config_revision($original), true)) {
+        throw new RuntimeException('Cannot stage a service check before forwarding is enabled');
+    }
+    try {
+        $errors = sdwan_steering_bind('ERP', 'G', sdwan_steering_revision());
+        if (!$has_route_error($errors) || sdwan_steering_bindings()) {
+            throw new RuntimeException('Forwarding accepted an invalid service route: ' . implode('; ', $errors));
+        }
+    } finally {
+        if (sdwan_save_config($original, sdwan_config_revision($changed), true)) {
+            throw new RuntimeException('Cannot restore the original service checks');
+        }
+    }
+    echo 'INITIAL_BIND_REJECTED_INVALID_PROBE_ROUTE', PHP_EOL;
+    exit;
+}
 if ($action === 'bind' || $action === 'unbind') {
     $started = hrtime(true);
     $groups = ['G' => 'ERP', 'B' => 'Backup'];

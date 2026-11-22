@@ -27,6 +27,7 @@ $names = array_column($rows, 'name');
 $editing = sdwan_ui_scalar($_GET, 'edit');
 $original = $editing;
 $display_form = isset($_GET['edit']) || isset($_GET['add']);
+$confirm_deletion = false;
 $errors = [];
 $sdwan_record = [];
 $optional_fields = match ($collection) {
@@ -69,13 +70,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 		$display_form = false;
 	} elseif ($original !== '' && $position === false) {
 		$errors[] = gettext('This entry no longer exists.');
-	} elseif ($action === 'delete' && $original !== '') {
+	} elseif (in_array($action, ['review-delete', 'delete'], true) && $original !== '') {
 		if (isset($used_by[$original])) {
 			$errors[] = sprintf(gettext('Remove this entry from the following policies first: %s.'), implode(', ', $used_by[$original]));
 		} elseif ($binding_error !== '') {
 			$errors[] = $binding_error;
 		} elseif (isset($bound_policies[$original])) {
 			$errors[] = $bound_message;
+		} elseif ($action === 'review-delete') {
+			$confirm_deletion = true;
+		} elseif (($_POST['confirm_delete'] ?? null) !== $original) {
+			$errors[] = gettext('Review this entry before confirming its deletion.');
 		} else {
 			unset($rows[$position]);
 		}
@@ -181,7 +186,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 	} else {
 		$errors[] = gettext('Unknown action.');
 	}
-	if (!$errors) {
+	if (!$errors && !$confirm_deletion) {
 		$candidate = $sdwan;
 		$candidate[$collection] = array_values($rows);
 		$errors = sdwan_save_config($candidate, $expected_revision, sdwan_can_edit_forwarding());
@@ -238,7 +243,7 @@ if ($errors) {
 	print_info_box(gettext('SD-WAN configuration saved.'), 'success');
 }
 
-if (!$display_form): ?>
+if (!$display_form && !$confirm_deletion): ?>
 <div class="panel panel-default">
 	<div class="panel-heading"><h2 class="panel-title"><?=sdwan_ui_escape($sections[$collection])?></h2></div>
 	<div class="panel-body">
@@ -275,8 +280,8 @@ if (!$display_form): ?>
 				?>
 				<i class="fa-solid fa-lock" title="<?=$in_use?>" aria-hidden="true"></i><span class="sr-only"><?=$in_use?></span>
 				<?php else: ?>
-				<button type="submit" name="action" value="delete" class="btn btn-link btn-xs fa-solid fa-trash-can"
-				    title="<?=gettext('Delete entry')?>" aria-label="<?=gettext('Delete entry')?>"></button>
+				<button type="submit" name="action" value="review-delete" class="btn btn-link btn-xs fa-solid fa-trash-can"
+				    title="<?=gettext('Review deletion')?>" aria-label="<?=gettext('Review deletion')?>"></button>
 				<?php endif; ?>
 			</form></td>
 		</tr>
@@ -290,7 +295,21 @@ if (!$display_form): ?>
 	</div>
 </div>
 <?php endif;
-if ($prerequisite !== ''):
+if ($confirm_deletion): ?>
+<div class="panel panel-default">
+	<div class="panel-heading"><h2 class="panel-title"><?=gettext('Confirm deletion')?></h2></div>
+	<div class="panel-body">
+		<p><?=sdwan_ui_escape(sprintf(gettext('Delete %s?'), $original))?></p>
+		<form method="post" action="<?=$url?>" class="form-inline">
+			<input type="hidden" name="revision" value="<?=sdwan_ui_escape($revision)?>">
+			<input type="hidden" name="original" value="<?=sdwan_ui_escape($original)?>">
+			<input type="hidden" name="confirm_delete" value="<?=sdwan_ui_escape($original)?>">
+			<a class="btn btn-default" href="<?=$url?>"><?=gettext('Cancel')?></a>
+			<button type="submit" name="action" value="delete" class="btn btn-danger"><?=gettext('Delete')?></button>
+		</form>
+	</div>
+</div>
+<?php elseif ($prerequisite !== ''):
 	print_info_box($prerequisite, 'info', false);
 elseif (!$display_form): ?>
 	<nav class="action-buttons" aria-label="<?=gettext('Actions')?>">

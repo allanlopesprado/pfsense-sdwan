@@ -547,6 +547,12 @@ function sdwan_validate_config(array $config, ?array $gateways, array $previous 
 	return [];
 }
 
+/* The native write lock is internal to write_config(). Recheck the entire
+ * configuration after validation so a native save during preflight survives. */
+function sdwan_config_changed_since(array $before): bool {
+	return !config_read_file(false, false) || config_get_path('') !== $before;
+}
+
 function sdwan_save_config(array $candidate, string $expected_revision, bool $allow_forwarding_changes = false): array {
 	require_once('config.inc');
 	/* Serialize competing WebGUI package edits; write_config() owns the XML lock. */
@@ -555,10 +561,15 @@ function sdwan_save_config(array $candidate, string $expected_revision, bool $al
 		return ['SD-WAN settings are busy. Reload the page and try again.'];
 	}
 	try {
-		if (!config_read_file(false, false)) {
+		if (!config_read_file(false, false) || !is_array($before = config_get_path(''))) {
 			return ['The current pfSense configuration could not be read.'];
 		}
-		$current = sdwan_get_config();
+		try {
+			$current = sdwan_get_config();
+		} catch (UnexpectedValueException $error) {
+			return ['The current SD-WAN configuration could not be read. Review it in Diagnostics > Backup & Restore.',
+			    $error->getMessage()];
+		}
 		if (!hash_equals(sdwan_config_revision($current), $expected_revision)) {
 			return ['Settings have changed. Reload the page before saving.'];
 		}
@@ -589,6 +600,9 @@ function sdwan_save_config(array $candidate, string $expected_revision, bool $al
 				return $update['errors'];
 			}
 			$binding_rows = $update['rows'];
+		}
+		if (sdwan_config_changed_since($before)) {
+			return ['The pfSense configuration changed during validation. Reload this page and try again.'];
 		}
 		if (!is_array(config_set_path(SDWAN_CONFIG_PATH, sdwan_encode_config($candidate))) ||
 		    ($binding_rows !== null && !is_array(config_set_path(SDWAN_BINDINGS_PATH, ['item' => $binding_rows]))) ||
