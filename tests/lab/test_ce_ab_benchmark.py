@@ -63,7 +63,14 @@ class ApplicationBenchmarkTest(unittest.TestCase):
 
     def test_timeout_is_recorded(self):
         with patch.object(benchmark.socket, "create_connection", side_effect=TimeoutError):
-            self.assertEqual(benchmark.transaction("192.0.2.162", b"marker", .1), {"status": "timeout"})
+            self.assertEqual(benchmark.transaction("192.0.2.162", b"marker", .1),
+                             {"status": "timeout", "stage": "connect"})
+        with patch.object(benchmark.socket, "create_connection") as connect:
+            conn = connect.return_value.__enter__.return_value
+            peer = conn.makefile.return_value.__enter__.return_value
+            peer.readline.side_effect = TimeoutError
+            self.assertEqual(benchmark.transaction("192.0.2.162", b"marker", .1),
+                             {"status": "timeout", "stage": "reply"})
 
     def test_freebsd_resource_query_uses_one_header_assignment_per_option(self):
         class Fixture:
