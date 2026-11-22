@@ -265,18 +265,37 @@ function sdwan_probe_collect_ready(array &$jobs, array &$results, $curl, int $de
 	}
 }
 
-function sdwan_probe_observe(array $members, array $inventory, array $observations): array {
+function sdwan_probe_secondary_first(array $config): array {
+	$members = array_column($config['members'], null, 'name');
+	$required = [];
+	foreach ($config['policies'] as $policy) {
+		$overrides = array_column($policy['probe_requirements'] ?? [], null, 'member');
+		foreach ($policy['members'] as $name) {
+			$member = $members[$name] ?? null;
+			if ($member === null) {
+				continue;
+			}
+			$slots = sdwan_policy_probe_requirements($policy, $member, $overrides[$name] ?? []);
+			$required[$name] = ($required[$name] ?? []) + array_filter($slots, static fn($mode) => $mode === 'required');
+		}
+	}
+	return array_filter($required, static fn($slots) => isset($slots['probe_secondary']) && !isset($slots['probe_primary']));
+}
+
+function sdwan_probe_observe(array $members, array $inventory, array $observations, array $secondary_first = []): array {
 	$results = $jobs = [];
 	$curl = function_exists('curl_multi_init') ? curl_multi_init() : null;
 	$deadline = hrtime(true) + 2500000000;
 	/* Give every member a chance at one result before running backups. */
-	foreach (['probe_primary', 'probe_secondary'] as $field) {
+	$fields = ['probe_primary', 'probe_secondary'];
+	foreach ([0, 1] as $position) {
 		foreach ($members as $member) {
+			$name = $member['name'];
+			$field = $fields[isset($secondary_first[$name]) ? 1 - $position : $position];
 			if (!isset($member[$field])) {
 				continue;
 			}
 			sdwan_probe_collect_ready($jobs, $results, $curl, $deadline);
-			$name = $member['name'];
 			$gateway = $inventory[$member['gateway']] ?? null;
 			$target = sdwan_probe_target($member[$field]);
 			$results[$name][$field] = 'Unavailable';

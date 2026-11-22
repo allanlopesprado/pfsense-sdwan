@@ -99,7 +99,8 @@ function sdwan_observe_once(): void {
 		$service_checks = [];
 		if (array_column($config['members'], 'probe_primary')) {
 			require_once('/usr/local/pkg/sdwan_probe.inc');
-			$service_checks = sdwan_probe_observe($config['members'], $inventory, $observations);
+			$service_checks = sdwan_probe_observe($config['members'], $inventory, $observations,
+			    sdwan_probe_secondary_first($config));
 		}
 		$snapshot = sdwan_evaluate($config, $observations, $started, $inventory, $service_checks);
 		$snapshot['config_revision'] = sdwan_config_revision($config);

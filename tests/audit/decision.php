@@ -134,16 +134,18 @@ namespace {
         return [$members, $inventory, $observations];
     }
 
-    function observe_bounded_probes(int $members, int $routeMs): array {
+    function observe_bounded_probes(int $members, int $routeMs, array $secondaryFirst = []): array {
         [$paths, $inventory, $observations] = path_config($members);
         ProbeFixture::$now = 0;
         ProbeFixture::$routeLatency = $routeMs * 1_000_000;
         ProbeFixture::$routeTimeouts = [];
-        $observed = SdwanAuditProbeFixture\sdwan_probe_observe($paths, $inventory, $observations);
+        $observed = SdwanAuditProbeFixture\sdwan_probe_observe($paths, $inventory, $observations, $secondaryFirst);
         $labels = array_merge(...array_values(array_map('array_values', $observed)));
         $primary = array_column($observed, 'probe_primary');
+        $secondary = array_column($observed, 'probe_secondary');
         return [intdiv(ProbeFixture::$now, 1_000_000), count(array_keys($labels, 'Passed', true)), $labels,
-            count(array_keys($primary, 'Passed', true)), intdiv(min(ProbeFixture::$routeTimeouts), 1_000_000)];
+            count(array_keys($primary, 'Passed', true)), intdiv(min(ProbeFixture::$routeTimeouts), 1_000_000),
+            count(array_keys($secondary, 'Passed', true))];
     }
 
     function observe_tcp_route_change(string $initialFlags, string $finalFlags): string {
@@ -192,6 +194,15 @@ namespace {
     [$slowFourMs, , , $slowFourPrimary] = observe_bounded_probes(4, 250);
     [$slowFiveMs, $slowFivePass, $slowFiveLabels, $slowFivePrimary] = observe_bounded_probes(5, 250);
     [$clampedMs, $clampedPassed, , , $minimumTimeout] = observe_bounded_probes(5, 275);
+    [$requiredPaths] = path_config(5);
+    $requiredConfig = [
+        'members' => $requiredPaths,
+        'policies' => [['members' => array_column($requiredPaths, 'name'), 'secondary_check' => 'required']],
+    ];
+    $secondaryFirst = SdwanAuditProbeFixture\sdwan_probe_secondary_first($requiredConfig);
+    [$requiredMs, , , $requiredPrimary, , $requiredSecondary] = observe_bounded_probes(5, 250, $secondaryFirst);
+    $requiredConfig['policies'][] = ['members' => ['WAN5'], 'primary_check' => 'required'];
+    $sharedPriority = SdwanAuditProbeFixture\sdwan_probe_secondary_first($requiredConfig);
     $qualityLabels = array_values($initial['policies']['calls']['candidates']);
     $isolation = ($after['policies']['calls']['selected'] ?? 'blocked') . '/' .
         ($after['policies']['copies']['selected'] ?? 'blocked');
@@ -219,6 +230,10 @@ namespace {
             "{$slowFivePrimary} primary paths " . ($slowFiveMs <= 2500 ? 'within 2500ms' : "in {$slowFiveMs}ms")),
         audit_case('probe_recheck_respects_remaining_budget', '4 passed / 2500ms / 25ms final route limit',
             "{$clampedPassed} passed / {$clampedMs}ms / {$minimumTimeout}ms final route limit"),
+        audit_case('probe_required_secondary_before_optional_primary', '5 secondary / 0 primary / 2500ms',
+            "{$requiredSecondary} secondary / {$requiredPrimary} primary / {$requiredMs}ms"),
+        audit_case('probe_both_slots_required_across_policies', 'WAN1,WAN2,WAN3,WAN4',
+            implode(',', array_keys($sharedPriority))),
         audit_case('probe_route_stays_usable', 'Passed / 1 TCP attempts / 2 route lookups',
             observe_tcp_route_change($routeFlags, $routeFlags)),
         audit_case('probe_route_ignores_flag_order', 'Passed / 1 TCP attempts / 2 route lookups',
