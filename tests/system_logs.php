@@ -48,6 +48,12 @@ verify(count($logs) === 1 && str_contains($logs[0][1], 'recovered'), 'one recove
 [$ledger, $recovery] = sdwan_log_plan($ledger, 'observation', $restored, '', 174);
 verify(!$logs && !$recovery, 'rapid service error/recovery loops do not flood');
 
+[$ledger, $logs] = sdwan_log_plan($ledger, 'filter_retirement_unconfirmed', [], '', 175);
+verify(count($logs) === 1 && $logs[0][0] === LOG_ERR && str_contains($logs[0][1], 'without confirming withdrawal'),
+	'unconfirmed shutdown is logged even after a recent observation error');
+[$ledger, $logs] = sdwan_log_plan($ledger, 'filter_retirement_unconfirmed', [], '', 176);
+verify($logs === [], 'repeated unconfirmed shutdown messages are rate-limited');
+
 $many = ['policies' => []];
 for ($i = 0; $i < 30; $i++) {
 	$many['policies']['p' . $i] = ['selected' => 'path', 'path_status' => 'single'];

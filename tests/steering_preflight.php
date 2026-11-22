@@ -40,6 +40,24 @@ $baseline = preflight_check($native, true, 'WAN pair');
 if ($baseline['trackers'] !== ['101'] || $baseline['gateways'] !== ['ISP_A', 'ISP_B']) {
 	throw new Exception('Binding identities must match native rules and configured candidates.');
 }
+$earlier = ['type' => 'pass', 'tracker' => '103', 'interface' => 'lan', 'ipprotocol' => 'inet46',
+    'protocol' => 'any', 'source' => ['any' => ''], 'destination' => ['any' => ''], 'sched' => 'none'];
+foreach ([
+    'catchall' => [$earlier, false],
+    'same-network-and-containing-port' => [array_replace($earlier, ['source' => ['network' => 'lan'],
+        'protocol' => 'tcp', 'destination' => ['address' => '192.0.2.0/24', 'port' => '420-449']]), false],
+    'narrower-port' => [array_replace($earlier, ['destination' => ['any' => '', 'port' => '445']]), true],
+    'different-family' => [array_replace($earlier, ['ipprotocol' => 'inet6']), true],
+    'different-interface' => [array_replace($earlier, ['interface' => 'opt1']), true],
+    'narrower-source' => [array_replace($earlier, ['source' => ['address' => '198.51.100.1']]), true],
+    'disjoint-local-bypass' => [array_replace($earlier, ['destination' => ['address' => '198.51.100.0/24']]), true],
+    'disabled' => [$earlier + ['disabled' => ''], true],
+    'scheduled' => [array_replace($earlier, ['sched' => 'weekdays']), true],
+] as $label => [$rule, $allowed]) {
+	$n = $native;
+	array_unshift($n['rules'], $rule);
+	preflight_check($n, $allowed, 'earlier rule ' . $label);
+}
 $n = $native;
 $n['gateways']['ISP_A']['monitor'] = '192.0.2.45';
 $n['gateways']['ISP_B']['monitor'] = '192.0.2.45';

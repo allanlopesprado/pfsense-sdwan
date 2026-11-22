@@ -123,8 +123,8 @@ def check_shell_hooks(tmp):
 
 def check_invalidation(tmp, php):
     helper = tmp / "sdwan_invalidate.inc"
-    helper.write_bytes((FILES / "usr/local/pkg/sdwan_invalidate.inc").read_bytes())
-    (tmp / "sdwan_log.inc").write_bytes((FILES / "usr/local/pkg/sdwan_log.inc").read_bytes())
+    for name in (helper.name, "sdwan.inc", "sdwan_log.inc", "sdwan_preflight.inc"):
+        (tmp / name).write_bytes((FILES / "usr/local/pkg" / name).read_bytes())
     state = tmp / "sdwan-observer.json"
     receipt = tmp / "sdwan-observer.json.forwarded"
     marker = tmp / "reload"
@@ -132,25 +132,73 @@ def check_invalidation(tmp, php):
     (tmp / "config.inc").write_text("""<?php
         function config_get_path($path, $default) {
             if ($path !== 'gateways/sdwan_bindings/item') { exit(64); }
-            return getenv('ACTIVE') === 'yes' ? [['group' => 'lab']] : $default;
+            return getenv('ACTIVE') === 'yes' ? [['trackers' => ['item' => ['301']]]] : $default;
         }
+        function config_read_file($backup, $cache) { return getenv('UNREADABLE_CONFIG') !== 'yes'; }
+        function fixture_monotonic() {
+            static $time = 0;
+            return $time += 1000000000;
+        }
+        function fixture_sleep($time) {}
     """)
     (tmp / "filter.inc").write_text("""<?php
         if (getenv('PATCHED') === 'yes') { function filter_sdwan_binding_api() { return 1; } }
-        function filter_configure() {
-            if (file_exists(SDWAN_SNAPSHOT_PATH) || file_exists(SDWAN_SNAPSHOT_PATH . '.forwarded')) {
+    """)
+    steering = (FILES / "usr/local/pkg/sdwan_steering.inc").read_text()
+    for name, body in {
+        "sdwan_steering_request_reload(): bool": """
+            if (is_file(SDWAN_SNAPSHOT_PATH) ||
+                sdwan_steering_read_receipt(SDWAN_SNAPSHOT_PATH . '.forwarded')['attempts'] < 1) {
                 exit(65);
             }
             file_put_contents(__DIR__ . '/reload', 'queued');
-        }
-    """)
-    for active, patched in [(False, False), (False, True), (True, False), (True, True)]:
+            return getenv('FILTER_RESULT') !== 'queue-refused';
+        """,
+        "sdwan_steering_pf_rules(): ?array": """
+            $result = getenv('FILTER_RESULT');
+            if ($result === 'unavailable') {
+                return null;
+            }
+            if ($result === 'already-closed' || ($result === 'applied' && is_file(__DIR__ . '/reload'))) {
+                return ['block drop in quick on em0 inet all ridentifier 301',
+                    'pass in quick on em0 inet all ridentifier 401'];
+            }
+            return ['pass in quick on em0 inet all ridentifier 301'];
+        """,
+    }.items():
+        start = steering.index(f"function {name} {{")
+        end = steering.index("\n}", start)
+        steering = steering[:start] + f"function {name} {{" + body + steering[end:]
+    steering = steering.replace("hrtime(true)", "fixture_monotonic()").replace("usleep(", "fixture_sleep(")
+    (tmp / "sdwan_steering.inc").write_text(steering, encoding="utf-8")
+
+    for active, patched, outcome, config_error, ok, requested in [
+        (False, False, "ignored", False, True, False),
+        (False, True, "ignored", False, True, False),
+        (True, False, "ignored", False, True, False),
+        (True, True, "already-closed", False, True, False),
+        (True, True, "applied", False, True, True),
+        (True, True, "accepted-stale", False, False, True),
+        (True, True, "queue-refused", False, False, True),
+        (True, True, "unavailable", False, False, True),
+        (True, True, "applied", True, False, False),
+    ]:
         state.write_text("prior choice")
         receipt.write_text("prior reload")
-        env = dict(os.environ, ACTIVE="yes" if active else "", PATCHED="yes" if patched else "")
-        subprocess.run([php, "-d", f"include_path={tmp}", "-f", str(helper)], env=env, check=True)
-        if state.exists() or receipt.exists() or marker.exists() != (active and patched):
-            raise AssertionError("Invalid cleanup or reload for the installed core and bindings")
+        env = dict(os.environ, ACTIVE="yes" if active else "", PATCHED="yes" if patched else "",
+                   FILTER_RESULT=outcome, UNREADABLE_CONFIG="yes" if config_error else "")
+        run = subprocess.run([php, "-d", f"include_path={tmp}", "-f", str(helper)], env=env,
+                             text=True, capture_output=True, timeout=15)
+        assert run.returncode == (0 if ok else 1), (outcome, run)
+        assert not state.exists() and receipt.exists() != ok and marker.exists() == requested, (outcome, run)
+        if not ok:
+            assert "Cannot confirm withdrawal" in run.stderr, (outcome, run)
+            if requested:
+                pending = json.loads(receipt.read_text())
+                assert pending["attempts"] == 1 and not pending["confirmed"], pending
+                assert pending["accepted"] == (outcome != "queue-refused"), pending
+            else:
+                assert receipt.read_text() == "prior reload"
         marker.unlink(missing_ok=True)
 
 

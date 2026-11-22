@@ -201,6 +201,57 @@ function sdwan_preflight_prefixes_overlap(?string $first, ?string $second): bool
 	    ($tail === 0 || ((ord($a[0][$bytes]) ^ ord($b[0][$bytes])) >> (8 - $tail)) === 0);
 }
 
+/* Only deny an approval when an earlier rule covers the whole endpoint. */
+function sdwan_preflight_endpoint_covers(array $earlier, array $bound): bool {
+	if (array_diff(array_keys($earlier), ['any', 'address', 'network', 'port'])) {
+		return false;
+	}
+	$port = static function (array $endpoint): array {
+		$first = $endpoint['port'] ?? '';
+		if ($first === '') {
+			return [0, 65535];
+		}
+		$range = preg_split('/[-:]/', $first, 2);
+		return [(int)$range[0], (int)($range[1] ?? $range[0])];
+	};
+	[$first, $last] = $port($earlier);
+	[$bound_first, $bound_last] = $port($bound);
+	if ($first > $bound_first || $last < $bound_last) {
+		return false;
+	}
+	if (sdwan_preflight_unrestricted($earlier) ||
+	    (isset($earlier['network']) && $earlier['network'] === ($bound['network'] ?? null))) {
+		return true;
+	}
+	$address = $earlier['address'] ?? null;
+	$bound_address = $bound['address'] ?? null;
+	if ($address === null || $bound_address === null) {
+		return false;
+	}
+	$prefix = sdwan_preflight_prefix(explode('/', $address, 2));
+	$bound_prefix = sdwan_preflight_prefix(explode('/', $bound_address, 2));
+	return $prefix !== null && $bound_prefix !== null && $prefix[1] <= $bound_prefix[1] &&
+	    sdwan_preflight_prefixes_overlap($address, $bound_address);
+}
+
+function sdwan_preflight_rule_shadows(array $earlier, array $bound, string $family, string $ingress): bool {
+	/* Interface tabs are quick. Restrict this check to static predicates with
+	 * known semantics so local exemptions and partial traffic matches still work. */
+	$fields = ['type', 'interface', 'direction', 'ipprotocol', 'protocol', 'source', 'destination',
+	    'tracker', 'gateway', 'descr', 'created', 'updated', 'log', 'statetype', 'sched'];
+	return ($earlier['interface'] ?? '') === $ingress &&
+	    in_array($earlier['type'] ?? '', ['pass', 'block', 'reject'], true) &&
+	    in_array($earlier['direction'] ?? '', ['', 'in'], true) &&
+	    in_array($earlier['sched'] ?? '', ['', 'none'], true) &&
+	    in_array($earlier['ipprotocol'] ?? '', [$family, 'inet46'], true) &&
+	    in_array($earlier['protocol'] ?? '', ['', 'any', $bound['protocol'] ?? ''], true) &&
+	    !array_diff(array_keys($earlier), $fields) &&
+	    sdwan_preflight_endpoint($earlier['source'] ?? null, $family, $ingress) &&
+	    sdwan_preflight_endpoint($earlier['destination'] ?? null, $family, $ingress) &&
+	    sdwan_preflight_endpoint_covers($earlier['source'], $bound['source']) &&
+	    sdwan_preflight_endpoint_covers($earlier['destination'], $bound['destination']);
+}
+
 function sdwan_preflight_native_rules(array $native, string $group, string $family, array $uplinks, bool $vti): array {
 	$trackers = [];
 	$scope = [];
@@ -253,6 +304,11 @@ function sdwan_preflight_native_rules(array $native, string $group, string $fami
 		}
 		if (sdwan_preflight_unrestricted($rule['source']) && sdwan_preflight_unrestricted($rule['destination'])) {
 			return sdwan_preflight_error("Rule {$tracker} requires a specific source or destination.");
+		}
+		for ($preceding = 0; $preceding < $index; $preceding++) {
+			if (sdwan_preflight_rule_shadows($rules[$preceding], $rule, $family, $ingress)) {
+				return sdwan_preflight_error("An earlier rule on the same interface fully covers rule {$tracker}. Review rule order before binding.");
+			}
 		}
 		$guard = $rules[$index + 1] ?? null;
 		$guard_id = $guard['tracker'] ?? null;

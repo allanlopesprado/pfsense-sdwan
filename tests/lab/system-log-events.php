@@ -15,5 +15,9 @@ foreach (['A', 'A', 'B', 'B', null, null] as $member) {
 for ($i = 0; $i < 25; $i++) {
 	sdwan_log_event('error', [], $secret);
 }
+foreach (['filter_requested', 'filter_applied', 'filter_divergent', 'filter_retirement_unconfirmed'] as $kind) {
+	sdwan_log_event($kind);
+	sdwan_log_event($kind);
+}
 // A later native routine must not inherit the package's tag or facility.
 syslog(LOG_NOTICE, 'native-ident-control');

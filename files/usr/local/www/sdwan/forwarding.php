@@ -92,12 +92,20 @@ $gateway_name = $strategy === 'balance' && $gateways
     ? implode(', ', array_map(static fn($name) => $member_gateways[$name] ?? $name, $gateways))
     : ($member_gateways[$winner ?? ''] ?? null);
 $steering = $sample['steering'][$group_name] ?? [];
-$target = $binding !== null && ($steering['revision'] ?? null) === sdwan_config_revision($binding) &&
+$binding_current = false;
+if ($binding !== null && $supported) {
+	$binding_preview = $binding['policy'] === $policy_name ? $preview :
+	    sdwan_steering_preview($sdwan, $binding['policy'], $group_name);
+	$binding_current = sdwan_steering_preflight_matches($binding, $binding_preview) &&
+	    $binding['policy_revision'] === $binding_preview['binding']['policy_revision'];
+}
+$target = $binding_current && ($steering['revision'] ?? null) === sdwan_config_revision($binding) &&
     in_array($steering['gateway'] ?? null, $binding['gateways'], true)
     ? implode(', ', $steering['pool'] ?? [$steering['gateway']]) : null;
 $pf_labels = [
-	'applied' => gettext('Applied to new connections'),
-	'blocked' => gettext('Blocked by the active filter'),
+	'applied' => gettext('Matching route rule loaded in PF'),
+	'blocked' => gettext('Matching block rule loaded in PF'),
+	'binding_changed' => gettext('Native rules or policy no longer match the approved binding'),
 	'pending' => gettext('Active filter differs from the current decision'),
 	'requested' => gettext('Reload requested. Waiting for PF confirmation'),
 	'divergent' => gettext('Persistent divergence. Automatic retries exhausted'),
@@ -105,11 +113,14 @@ $pf_labels = [
 	'unavailable' => gettext('Filter verification unavailable'),
 ];
 $inventory = sdwan_gateways();
-$filter_status = $binding === null ? null : sdwan_steering_pf_status($binding, $steering, $inventory,
-    $supported ? sdwan_steering_pf_rules() : null);
-if ($binding !== null && $supported && $sample === null) {
-	$filter_status = 'expired';
-} elseif ($filter_status === 'pending' && isset($sample['steering'])) {
+$filter_status = match (true) {
+	$binding === null => null,
+	!$supported => 'unavailable',
+	!$binding_current => 'binding_changed',
+	$sample === null => 'expired',
+	default => sdwan_steering_pf_status($binding, $steering, $inventory, sdwan_steering_pf_rules()),
+};
+if ($filter_status === 'pending' && isset($sample['steering'])) {
 	$receipt = sdwan_steering_read_receipt(SDWAN_SNAPSHOT_PATH . '.forwarded');
 	if (($receipt['signature'] ?? null) === sdwan_steering_runtime_signature($sample, $inventory) &&
 	    !$receipt['confirmed']) {

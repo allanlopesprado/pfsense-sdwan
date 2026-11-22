@@ -71,8 +71,16 @@ $expected = [
 	'SD-WAN Policy voice: no eligible path (previously B).',
 	'SD-WAN Gateway observation failed.',
 ];
+$forwarding = [
+	'SD-WAN Native filter reload requested. Waiting for PF confirmation.',
+	'SD-WAN Active PF rules confirmed the current forwarding decision.',
+	'SD-WAN Persistent PF divergence. Automatic reload attempts for this decision have stopped.',
+	'SD-WAN Observer stopped without confirming withdrawal of the previous forwarding rules. Check Status > Filter Reload.',
+];
 if ($level === 'warning') {
-	$expected = array_slice($expected, 3);
+	$expected = [...array_slice($expected, 3), ...array_slice($forwarding, 2)];
+} else {
+	$expected = [...$expected, ...$forwarding];
 }
 demand($messages === $expected, "Unexpected event stream from General ({$format}): " . json_encode($messages));
 foreach ($events as $entry) {

@@ -349,6 +349,11 @@ function sdwan_steering_state(array $config, array $binding, array $result, arra
 	return ['revision' => $revision] + $step;
 }
 
+function sdwan_steering_preflight_matches(array $binding, array $check): bool {
+	return !$check['errors'] && $binding['rules_revision'] === $check['binding']['rules_revision'] &&
+	    $binding['gateways'] === $check['binding']['gateways'] && $binding['trackers'] === $check['binding']['trackers'];
+}
+
 /* Run in the observer process. Recheck native membership/ACL drift on each
  * sample so a subsequent reload can close a binding that is no longer valid. */
 function sdwan_steering_observations(array $config, array $snapshot, array $previous): array {
@@ -356,8 +361,7 @@ function sdwan_steering_observations(array $config, array $snapshot, array $prev
 	$native = sdwan_steering_native();
 	foreach (sdwan_steering_bindings() as $group => $binding) {
 		$check = sdwan_steering_preflight($config, $binding['policy'], $group, $native);
-		$approved = !$check['errors'] && $binding['rules_revision'] === $check['binding']['rules_revision'] &&
-		    $binding['gateways'] === $check['binding']['gateways'] && $binding['trackers'] === $check['binding']['trackers'];
+		$approved = sdwan_steering_preflight_matches($binding, $check);
 		$result = $approved ? ($snapshot['policies'][$binding['policy']] ?? []) : [];
 		$states[$group] = sdwan_steering_state($config, $binding, $result, $previous[$group] ?? [], $snapshot['generated_at']);
 	}
@@ -500,17 +504,31 @@ function sdwan_steering_retire_on_start(): bool {
 	    config_path_enabled('system', 'disablefilter')) {
 		return true;
 	}
+	return sdwan_steering_retire_observation(true);
+}
+
+/* Ordinary stop waits for an in-flight observation before withdrawing the
+ * snapshot. Keep the receipt until the loaded bound passes are gone. */
+function sdwan_steering_retire_observation(bool $startup = false): bool {
 	$lock = @fopen(SDWAN_SNAPSHOT_PATH . '.lock', 'c');
 	if ($lock === false) {
 		return false;
 	}
 	try {
 		clearstatcache();
-		if (!flock($lock, LOCK_EX | LOCK_NB) || !config_read_file(false, true)) {
+		if (!flock($lock, $startup ? LOCK_EX | LOCK_NB : LOCK_EX)) {
+			return false;
+		}
+		$path = SDWAN_SNAPSHOT_PATH . '.forwarded';
+		if (!$startup && is_file(SDWAN_SNAPSHOT_PATH) && !unlink(SDWAN_SNAPSHOT_PATH)) {
+			return false;
+		}
+		if (!config_read_file(false, true)) {
 			return false;
 		}
 		$trackers = [];
-		foreach ((array)config_get_path(SDWAN_BINDINGS_PATH . '/item', []) as $binding) {
+		$bindings = config_get_path(SDWAN_BINDINGS_PATH . '/item', []);
+		foreach ($bindings && sdwan_steering_supported() ? (array)$bindings : [] as $binding) {
 			foreach ((array)($binding['trackers']['item'] ?? []) as $tracker) {
 				if ((is_int($tracker) || is_string($tracker)) && preg_match('/^[1-9][0-9]{0,9}$/D', (string)$tracker)) {
 					$trackers[$tracker] = true;
@@ -518,9 +536,8 @@ function sdwan_steering_retire_on_start(): bool {
 			}
 		}
 		if (!$trackers) {
-			return true;
+			return $startup || !is_file($path) || unlink($path);
 		}
-		$path = SDWAN_SNAPSHOT_PATH . '.forwarded';
 		if (is_file(SDWAN_SNAPSHOT_PATH) && !unlink(SDWAN_SNAPSHOT_PATH)) {
 			return false;
 		}
@@ -539,6 +556,7 @@ function sdwan_steering_retire_on_start(): bool {
 		if ($closed()) {
 			return !is_file($path) || unlink($path);
 		}
+		/* Reuse the startup signature so stop and restart share the retry budget. */
 		$signature = sdwan_config_revision(['startup', array_keys($trackers)]);
 		$receipt = sdwan_steering_read_receipt($path);
 		$now = time();
@@ -554,6 +572,10 @@ function sdwan_steering_retire_on_start(): bool {
 		$receipt['attempts']++;
 		$receipt['requested_at'] = $now;
 		if (!sdwan_steering_write_receipt($path, $receipt) || !sdwan_steering_request_reload()) {
+			return false;
+		}
+		$receipt['accepted'] = true;
+		if (!sdwan_steering_write_receipt($path, $receipt)) {
 			return false;
 		}
 		$deadline = hrtime(true) + 5_000_000_000;
