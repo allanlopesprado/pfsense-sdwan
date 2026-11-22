@@ -341,10 +341,10 @@ elseif (!$display_form): ?>
 			->setHelp(gettext('A smaller value is preferred by the lowest cost strategy.'));
 		$section->addInput(new Form_Input('probe_primary', gettext('Primary service check'), 'text',
 		    $sdwan_record['probe_primary'] ?? '', ['maxlength' => 512]))
-		    ->setHelp(gettext('Optional. Enter a TCP service address such as tcp://192.0.2.20:587, or an HTTPS URL or DNS name followed by a space and the target IP. Add a host route through this gateway under System > Routing. HTTPS requires a valid certificate.'));
+		    ->setHelp(gettext('Optional. Enter a TCP service address such as tcp://192.0.2.20:587, or an HTTPS URL or DNS name followed by a space and the target IP. Add a host route through this gateway. Prefix the check with fib=1 followed by a space to use a preconfigured routing table. HTTPS requires a valid certificate.'));
 		$section->addInput(new Form_Input('probe_secondary', gettext('Secondary service check'), 'text',
 		    $sdwan_record['probe_secondary'] ?? '', ['maxlength' => 512]))
-		    ->setHelp(gettext('Use a different target IP and its own host route. Use Policies to select which service checks determine eligibility.'));
+		    ->setHelp(gettext('Use a different target IP within the same routing table. Each target needs a host route. Use Policies to select which service checks determine eligibility.'));
 	} elseif ($collection === 'slas') {
 		$section->addInput(new Form_Input('latency_ms', gettext('Maximum RTT (ms)'), 'number', $sdwan_record['latency_ms'] ?? '',
 			['min' => '0.000001', 'max' => '600000', 'step' => 'any', 'required' => true]));

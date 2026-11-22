@@ -195,6 +195,9 @@ function sdwan_steering_probe_path_available(string $value, array $gateway, stri
 	if ($target === null || $target['family'] !== $gateway['family']) {
 		return false;
 	}
+	if (isset($target['fib'])) {
+		return sdwan_probe_path($target, $gateway) !== null;
+	}
 	$routes = sdwan_probe_host_routes([['probe_primary' => $value]]);
 	$enabled = array_values(array_filter($routes, static fn($route) => !$route[2]));
 	$planned = $enabled === [[$target['address'], $name, false]];
@@ -766,6 +769,67 @@ function sdwan_steering_write_receipt(string $path, array $receipt): bool {
 function sdwan_steering_rule_tracker(string $rule): ?string {
 	return preg_match('/"(?:[^"\\\\]|\\\\.)*"(*SKIP)(*F)|\bridentifier ([0-9]{1,10})(?=\s|$)/', $rule, $match)
 	    ? $match[1] : null;
+}
+
+/* An empty result means no verified stale passes. Null means the watchdog
+ * could not verify the current rules or their approved scope. */
+function sdwan_steering_expired_passes(): ?array {
+	if (!config_read_file(false, true)) {
+		return null;
+	}
+	if (!config_get_path(SDWAN_BINDINGS_PATH . '/item', []) || sdwan_read_snapshot() !== null) {
+		return [];
+	}
+	if (!sdwan_steering_supported()) {
+		return null;
+	}
+	if (is_platform_booting() || config_path_enabled('system', 'disablefilter')) {
+		return [];
+	}
+	try {
+		$trackers = sdwan_steering_trackers(sdwan_steering_bindings());
+	} catch (UnexpectedValueException) {
+		return null;
+	}
+	$rules = sdwan_steering_pf_rules();
+	return $rules === null ? null : sdwan_steering_pass_trackers($trackers, $rules);
+}
+
+function sdwan_steering_pass_trackers(array $trackers, array $rules): array {
+	$approved = array_fill_keys($trackers, true);
+	$present = [];
+	foreach ($rules as $rule) {
+		if (str_starts_with($rule, 'pass ')) {
+			$tracker = sdwan_steering_rule_tracker($rule);
+			if ($tracker !== null && isset($approved[$tracker])) {
+				$present[$tracker] = true;
+			}
+		}
+	}
+	return array_values(array_filter($trackers, static fn($tracker) => isset($present[$tracker])));
+}
+
+/* Require the running native adapter on every attempt. Never edit rules or
+ * states directly, and skip the native global down-gateway state flush. */
+function sdwan_steering_reconcile_expiry(): bool {
+	$stale = sdwan_steering_expired_passes();
+	if ($stale === null) {
+		return false;
+	}
+	if (!$stale) {
+		return true;
+	}
+	if (!function_exists('filter_configure_sync')) {
+		return false;
+	}
+	filter_configure_sync(false);
+	$rules = sdwan_steering_pf_rules();
+	if ($rules !== null && !sdwan_steering_pass_trackers($stale, $rules)) {
+		sdwan_log_event('filter_expiry_applied');
+		return true;
+	}
+	// The observer may have recovered while the native filter was compiling.
+	return sdwan_read_snapshot() !== null;
 }
 
 /* A restarted observer withdraws the interrupted decision before sampling. A

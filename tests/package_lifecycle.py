@@ -71,6 +71,7 @@ def check_shell_hooks(tmp, php):
     upgrade_lock = tmp / "sdwan-package-upgrade.lock"
     commit = tmp / "sdwan-filter-commit.json"
     pid = tmp / "sdwand.pid"
+    watchdog_pid = tmp / "sdwan-expiry.pid"
     removal_ready = tmp / "sdwan-package-removal.ready"
     fpm_pid = tmp / "php-fpm.pid"
     service = tmp / "rc.d" / "sdwand.sh"
@@ -128,6 +129,7 @@ function delete_package_xml($name, $phase) {
             ("/var/run/sdwan-observer.json", str(state)),
             ("/var/run/sdwan-filter-commit.json", str(commit)),
             ("/var/run/sdwand.pid", str(pid)),
+            ("/var/run/sdwan-expiry.pid", str(watchdog_pid)),
             ("/var/run/sdwan-package-removal.ready", str(removal_ready)),
             ("/var/run/sdwan-settings.lock", str(settings_lock)),
             ("/var/run/sdwan-package-upgrade.lock", str(upgrade_lock)),
@@ -215,6 +217,11 @@ function delete_package_xml($name, $phase) {
     no_helper = run("deinstall", "DEINSTALL", code=1)
     assert "withdrawal cannot be checked" in no_helper.stderr and receipt.exists()
     receipt.unlink()
+    # A surviving watchdog must be stopped before deleting the helper.
+    watchdog_pid.touch()
+    surviving_guard = run("deinstall", "DEINSTALL", code=1, STATUS_RESULT="0")
+    assert "expiry guard is still running" in surviving_guard.stderr
+    watchdog_pid.unlink()
     # Cleanup can be retried when the prior attempt already removed the service.
     service.unlink()
     run("deinstall", "DEINSTALL")
