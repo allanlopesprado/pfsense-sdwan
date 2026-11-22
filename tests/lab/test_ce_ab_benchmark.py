@@ -24,6 +24,7 @@ class ApplicationBenchmarkTest(unittest.TestCase):
         self.assertEqual(measured["reply_p95_ms"], 14)
         self.assertEqual(measured["loss_pct"], 25)
         self.assertEqual(measured["unexpected_source_replies"], 1)
+        self.assertEqual(measured["unexpected_source_runs"], 1)
         self.assertEqual(measured["tail_mismatches"], 0)
 
     def test_crossing_boundaries_is_not_a_failure(self):

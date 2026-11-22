@@ -4,6 +4,7 @@ pkg/sdwan.inc
 pkg/sdwan.xml
 pkg/sdwan_engine.inc
 pkg/sdwan_probe.inc
+pkg/sdwan_probe_worker.php
 pkg/sdwan_invalidate.inc
 pkg/sdwan_log.inc
 pkg/sdwan_preflight.inc

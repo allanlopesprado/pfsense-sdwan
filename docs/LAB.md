@@ -142,6 +142,14 @@ For access tests, DHCP renewal keeps the lease, and a new lease changes the addr
 
 For HA and interoperability, use two clones of the same target CE revision with independent consoles and isolated WAN A, WAN B, LAN, and synchronization segments. Prepare a reference peer and a FortiGate licensed for the chosen proposals. In each pairing, record VIP ownership, PF states, IKE and CHILD_SA negotiation, and the first application transaction during the same failure. Use **a management session independent of the interrupted path**. Record XMLRPC synchronization, dynamic routing, and restoration of the lab image snapshot. [Official CE installer](https://docs.netgate.com/pfsense/en/latest/install/download-installer-image.html) · [FortiGate-VM evaluation license limits](https://docs.fortinet.com/document/fortigate/7.2.10/administration-guide/441460) · [IPsec in HA](https://docs.netgate.com/pfsense/en/latest/highavailability/ipsec.html)
 
+For FortiOS, establish a control with an exact pair of protected subnets before accepting a remote `0.0.0.0/0` selector. Record negotiated selectors and routes for the tunnel peer, protected service, default gateway, and LAN management. Capture client and server traffic, plus ESP or NAT-T on each WAN. Repeat with the active node powered off, one WAN removed, and all protected paths removed. The last case requires zero cleartext copies of the protected flow on the WANs. Confirm whether an original TCP session survives and record the first fresh transaction through the same virtual addresses. [Route-based IPsec](https://docs.netgate.com/pfsense/en/latest/vpn/ipsec/routed-vti.html) · [Configuration synchronization](https://docs.netgate.com/pfsense/en/latest/highavailability/xmlrpc-sync.html)
+
+### Repeatable CE operations
+
+Run the [CE two-WAN workflow](../.github/workflows/ce291-appliance.yml) with `scenario=acceptance` for each version. It powers off the configured guest, boots with both WAN carriers disabled, and tests recovery with one WAN before both. `scenario=recovery` starts on CE 2.9.1 and uses fingerprint-verified offline packages for the 2.9.2 system transaction. It records the adapter ABI after reboot, restores the backup with changed NIC assignments, and boots the saved 2.9.1 disk to verify rollback. The online upgrade orchestrator has a separate procedure. [Netgate upgrade procedure](https://docs.netgate.com/pfsense/en/latest/install/upgrade-guide-update.html)
+
+Run `scenario=benchmark` for repeated application transactions and short continuous observations. A 48–72 hour observation uses the [Linux benchmark procedure](benchmarks/ce-application-ab.md) and a persistent isolated host. GitHub-hosted jobs have a six-hour execution limit. [GitHub Actions limits](https://docs.github.com/en/actions/reference/limits)
+
 ## Sources
 
 - [Developing pfSense packages](https://docs.netgate.com/pfsense/en/latest/development/develop-packages.html)

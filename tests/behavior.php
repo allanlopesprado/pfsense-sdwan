@@ -236,7 +236,23 @@ $invalid['policies'][2]['members'] = ['b'];
 check('service check overrides may only reference a candidate member', sdwan_validate_config($invalid, $inventory) !== []);
 
 $checks['members'][1]['probe_primary'] = 'dns://example.com 192.0.2.53';
-check('a service IP cannot take host routes on different members', sdwan_validate_config($checks, $inventory) !== []);
+check('a service IP cannot take two host routes in the default routing table', sdwan_validate_config($checks, $inventory) !== []);
+$checks['members'][0]['probe_secondary'] = 'fib=1 dns://example.com 192.0.2.53';
+$checks['members'][1]['probe_primary'] = 'fib=2 dns://example.com 192.0.2.53';
+check('one service IP can be measured in separate FIBs',
+    sdwan_validate_config($checks, $inventory) === [] &&
+    sdwan_decode_config(sdwan_encode_config($checks)) === $checks &&
+    sdwan_probe_target($checks['members'][0]['probe_secondary'])['fib'] === 1);
+$checks['members'][1]['probe_primary'] = 'fib=1 dns://example.com 192.0.2.53';
+check('a repeated service IP in the same FIB is refused',
+    sdwan_validate_config($checks, $inventory) !== []);
+check('the FIB prefix accepts only a positive canonical table number and a valid existing check',
+    sdwan_probe_target('fib=3 tcp://192.0.2.40:443')['fib'] === 3 &&
+    sdwan_probe_target('fib=4 https://status.example/ready 192.0.2.40')['fib'] === 4 &&
+    sdwan_probe_target('fib=0 tcp://192.0.2.40:443') === null &&
+    sdwan_probe_target('fib=01 tcp://192.0.2.40:443') === null &&
+    sdwan_probe_target('fib=65536 tcp://192.0.2.40:443') === null &&
+    sdwan_probe_target('fib=1 https://status.example/../ready 192.0.2.40') === null);
 check('service targets require a supported protocol and a concrete destination IP',
     sdwan_probe_target('http://example.com 192.0.2.53') === null &&
     sdwan_probe_target('https://admin@example.com 192.0.2.53') === null &&

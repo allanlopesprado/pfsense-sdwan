@@ -1,6 +1,10 @@
 #!/usr/local/bin/php
 <?php
 
+if (PHP_SAPI !== 'cli') {
+	exit(64);
+}
+
 const SDWAN_LOG_DEDICATED_CLI = true;
 const SDWAN_OBSERVER_PACKAGE_VERSION = '%%PKGVERSION%%';
 
@@ -254,11 +258,72 @@ function sdwan_observe_once(): void {
 	}
 }
 
-if (PHP_SAPI !== 'cli' || !in_array(array_slice($argv, 1), [[], ['--once']], true)) {
-	fwrite(STDERR, "Usage: sdwand.php [--once]\n");
+/* The observer can stop while holding its snapshot lock. This independent
+ * supervisor only reads the atomic snapshot and waits on the native filter. */
+function sdwan_expiry_watchdog(): never {
+	sdwan_load_steering();
+	$previous = [];
+	$attempts = 0;
+	$retry_at = 0;
+	for (;;) {
+		try {
+			clearstatcache();
+			$stale = sdwan_steering_expired_passes();
+			if ($stale === null) {
+				sdwan_log_event('filter_expiry_unconfirmed');
+			} elseif (!$stale) {
+				$previous = [];
+				$attempts = 0;
+				$retry_at = 0;
+			} else {
+				if ($stale !== $previous) {
+					$previous = $stale;
+					$attempts = 0;
+				}
+				if ($attempts < SDWAN_RELOAD_MAX_ATTEMPTS && hrtime(true) >= $retry_at) {
+					$attempts++;
+					sdwan_log_event('filter_expiry_requested');
+					// A fresh PHP process rechecks the on-disk native adapter.
+					$ok = sdwan_expiry_reload();
+					$retry_at = hrtime(true) + SDWAN_RELOAD_RETRY_INTERVAL * 1_000_000_000;
+					if (!$ok) {
+						sdwan_log_event('filter_expiry_unconfirmed');
+					}
+				}
+			}
+		} catch (Throwable) {
+			sdwan_log_event('filter_expiry_unconfirmed');
+		}
+		sleep(5);
+	}
+}
+
+function sdwan_expiry_reload(): bool {
+	if (!function_exists('exec') || !is_executable('/bin/timeout')) {
+		return false;
+	}
+	exec('/bin/timeout -k 5 45 /usr/local/bin/php ' . escapeshellarg(__FILE__) .
+	    ' --expiry-reload >/dev/null 2>&1', $output, $status);
+	return $status === 0;
+}
+
+$arguments = array_slice($argv, 1);
+if (!in_array($arguments, [[], ['--once'], ['--expiry-watchdog'], ['--expiry-reload']], true)) {
+	fwrite(STDERR, "Usage: sdwand.php [--once|--expiry-watchdog|--expiry-reload]\n");
 	exit(64);
 }
-$once = count($argv) === 2;
+if ($arguments === ['--expiry-watchdog']) {
+	sdwan_expiry_watchdog();
+}
+if ($arguments === ['--expiry-reload']) {
+	// Initialize the same native globals and modules as pfSense's filter entrypoint.
+	require_once('functions.inc');
+	require_once('filter.inc');
+	require_once('shaper.inc');
+	sdwan_load_steering();
+	exit(sdwan_steering_reconcile_expiry() ? 0 : 1);
+}
+$once = $arguments === ['--once'];
 if (!$once) {
 	if (config_get_path('gateways/sdwan_bindings/item', [])) {
 		sdwan_load_steering();

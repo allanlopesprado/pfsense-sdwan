@@ -25,11 +25,24 @@ def stage(work):
     engine = (ROOT / "pkg/sdwan_engine.inc").read_text()
     install("sdwan_engine.inc", engine.replace("'/var/run/sdwan-observer.json'", "__DIR__ . '/snapshot.json'"))
     install("gwlb.inc", "<?php\n")
+    install("functions.inc", "<?php\n")
+    install("shaper.inc", "<?php\n")
     install("config.inc", """<?php
         $fixture = json_decode(file_get_contents(__DIR__ . '/fixture.json'), true, 512, JSON_THROW_ON_ERROR);
-        function config_get_path($path, $default) {
-            return $path === 'gateways/sdwan_bindings/item' && $GLOBALS['fixture']['bound']
-                ? [['trackers' => ['item' => ['301']]]] : $default;
+        function config_get_path($path, $default = null) {
+            if (!$GLOBALS['fixture']['bound']) {
+                return $default;
+            }
+            $row = ['trackers' => ['item' => ['301']]];
+            if (!empty($GLOBALS['fixture']['expiry'])) {
+                $row += ['group' => ['G'], 'policy' => 'p', 'gateways' => ['item' => ['A', 'B']],
+                    'policy_revision' => str_repeat('b', 64), 'rules_revision' => str_repeat('c', 64)];
+            }
+            return match ($path) {
+                'gateways/sdwan_bindings/item' => [$row],
+                'gateways/sdwan_bindings' => ['item' => [$row]],
+                default => $default,
+            };
         }
         function config_read_file($backup, $cache) {
             static $reads = 0;
@@ -39,11 +52,18 @@ def stage(work):
             }
             return true;
         }
-        function config_path_enabled($section, $key) { return false; }
+        function config_path_enabled($section, $key) { return !empty($GLOBALS['fixture']['filter_disabled']); }
     """)
     install("filter.inc", """<?php
         function filter_sdwan_binding_api(): int { return $GLOBALS['fixture']['abi']; }
         function is_platform_booting(): bool { return $GLOBALS['fixture']['booting']; }
+        function filter_configure_sync($delete_states = true): void {
+            if ($delete_states || !empty($GLOBALS['queued']) || !is_file(SDWAN_SNAPSHOT_PATH)) {
+                exit(79);
+            }
+            echo 'native compiler; ';
+            $GLOBALS['direct_reload'] = true;
+        }
     """)
     steering = (ROOT / "pkg/sdwan_steering.inc").read_text()
     for name, body in {
@@ -57,6 +77,11 @@ def stage(work):
             return $GLOBALS['queued'];
         """,
         "sdwan_steering_pf_rules(): ?array": """
+            if (!empty($GLOBALS['direct_reload']) && !empty($GLOBALS['fixture']['native_applies'])) {
+                echo 'verified direct withdrawal';
+                return ['block drop in quick on igb0 inet all ridentifier 301',
+                    'pass in quick on igb0 inet all ridentifier 401'];
+            }
             static $after_reload = 0;
             if (!empty($GLOBALS['queued']) && ++$after_reload >= 2) {
                 echo 'verified PF; ';
@@ -136,7 +161,30 @@ def run(php):
             result = launch(existing | {"retirement_reads": 0} | settings, paths=True, mode=mode)
             assert (result.returncode, result.stdout) == (77, "initial observation"), result
             assert state.exists() and receipt.exists()
+
+        expiry = {"expiry": True, "native_applies": True, "ack": False}
+        expired = {"generated_at": int(time.time()) - 31, "config_revision": "a" * 64,
+                   "members": [], "policies": []}
+        for settings, expected in [
+            ({}, (0, "native compiler; verified direct withdrawal")),
+            ({"native_applies": False}, (1, "native compiler; ")),
+            ({"rules": None}, (1, "")),
+            ({"rules": ["pass in quick on igb0 inet all ridentifier 401"]}, (0, "")),
+            ({"rules": ['pass in quick on igb0 inet all label "ridentifier 301" ridentifier 401']}, (0, "")),
+            ({"abi": 0}, (1, "")),
+            ({"booting": True}, (0, "")),
+            ({"bound": False}, (0, "")),
+            ({"filter_disabled": True}, (0, "")),
+        ]:
+            state.write_text(json.dumps(expired), encoding="utf-8")
+            result = launch(existing | expiry | settings, mode="--expiry-reload", reset=False)
+            assert (result.returncode, result.stdout) == expected, (settings, result)
+            assert json.loads(state.read_text(encoding="utf-8")) == expired
+        state.write_text(json.dumps(expired | {"generated_at": int(time.time())}), encoding="utf-8")
+        result = launch(existing | expiry, mode="--expiry-reload", reset=False)
+        assert (result.returncode, result.stdout) == (0, ""), result
     print("ok - supervised startup withdraws stale bound passes and waits for PF before observing")
+    print("ok - independent expiry reload verifies native PF withdrawal without the queue, a global state flush or snapshot removal")
 
 
 if __name__ == "__main__":

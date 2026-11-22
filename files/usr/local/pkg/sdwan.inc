@@ -328,7 +328,7 @@ function sdwan_probe_host_routes(array $members): array {
 			}
 			require_once(__DIR__ . '/sdwan_probe.inc');
 			$target = sdwan_probe_target($member[$field]);
-			if ($target !== null) {
+			if ($target !== null && !isset($target['fib'])) {
 				$targets[$target['address']] = $target['family'] === 'inet6' ? 128 : 32;
 			}
 		}
@@ -452,10 +452,11 @@ function sdwan_validate_config(array $config, ?array $gateways, array $previous 
 					    (($old_members_by_name[$name][$probe_field] ?? null) !== $row[$probe_field] || $changed_gateways[$name])) {
 						return ["Service check addresses must match the gateway address family for {$name}."];
 					}
-					if (isset($used_probes[$probe['address']])) {
-						return ['Each service check needs a distinct destination address and a matching native host route.'];
+					$key = ($probe['fib'] ?? 0) . '/' . $probe['address'];
+					if (isset($used_probes[$key])) {
+						return ['Each service check needs a distinct destination address within its routing table and a matching host route.'];
 					}
-					$used_probes[$probe['address']] = true;
+					$used_probes[$key] = true;
 					$member_probes[$name][$probe_field] = true;
 				}
 				$cost = $row['cost'];

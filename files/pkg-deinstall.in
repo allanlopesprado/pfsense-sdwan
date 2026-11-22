@@ -38,7 +38,12 @@ DEINSTALL)
 			echo 'SD-WAN observer is still running. Stop it and retry removal.' >&2
 			exit 1
 		fi
-	elif [ -f /var/run/sdwand.pid ]; then
+		if [ -f /var/run/sdwan-expiry.pid ] &&
+		    /usr/local/etc/rc.d/sdwand.sh watchdog_status >/dev/null 2>&1; then
+			echo 'SD-WAN expiry guard is still running. Stop it and retry removal.' >&2
+			exit 1
+		fi
+	elif [ -f /var/run/sdwand.pid ] || [ -f /var/run/sdwan-expiry.pid ]; then
 		echo 'SD-WAN observer status cannot be checked. Restore the service script before removal.' >&2
 		exit 1
 	fi
@@ -58,7 +63,7 @@ POST-DEINSTALL)
 	rm -f "$removal_ready" || exit 1
 	register_removal "$2" || exit 1
 	# The observer is stopped, PF withdrawal was checked, and the package is gone.
-	rm -f /var/run/sdwand.pid /var/run/sdwan-filter-commit.json \
+	rm -f /var/run/sdwand.pid /var/run/sdwan-expiry.pid /var/run/sdwan-filter-commit.json \
 		/var/run/sdwan-observer.json /var/run/sdwan-observer.json.forwarded \
 		/var/run/sdwan-observer.json.events /var/run/sdwan-observer.json.lock || exit 1
 	for lock in /var/run/sdwan-settings.lock /var/run/sdwan-package-upgrade.lock; do

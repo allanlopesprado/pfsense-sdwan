@@ -86,13 +86,17 @@ def run(parent, rendered, client, firewall, lan, wan_a, wan_b):
     settings.write_text(saved)
 
     supervisor = work / "supervisor.pid"
+    watchdog = work / "watchdog-supervisor.pid"
     child = work / "child.pid"
     log = work / "worker.log"
     rc = work / "sdwand.sh"
     rc.write_text((ROOT / "files/usr/local/etc/rc.d/sdwand.sh").read_text()
                   .replace("/var/run/sdwand.pid", str(supervisor))
-                  .replace("/usr/local/bin/php /usr/local/sbin/sdwand.php",
-                           " ".join(["-p", str(child), "-o", str(log), *php, str(daemon)])))
+                  .replace("/var/run/sdwan-expiry.pid", str(watchdog))
+                  .replace("/usr/local/bin/php /usr/local/sbin/sdwand.php --expiry-watchdog",
+                           " ".join([*php, str(daemon), "--expiry-watchdog"]))
+                  .replace('/usr/local/bin/php /usr/local/sbin/sdwand.php"',
+                           " ".join(["-p", str(child), "-o", str(log), *php, str(daemon)]) + '"'))
     snapshot = work / "snapshot.json"
     receipt = work / "snapshot.json.forwarded"
 
@@ -215,6 +219,9 @@ def run(parent, rendered, client, firewall, lan, wan_a, wan_b):
                             "echo sdwan_current_snapshot(sdwan_get_config(), sdwan_gateways()) === null ? "
                             "'expired' : 'current';")
             assert jexec(firewall, *php, "-r", read_current, check=True).stdout == "current"
+            watchdog_pid = watchdog.read_text().strip()
+            assert watchdog_pid.isdecimal()
+            jexec(firewall, "/bin/kill", "-TERM", watchdog_pid, check=True)
             jexec(firewall, "/bin/kill", "-KILL", supervisor_pid, worker_pid, check=True)
 
             stale = json.loads(snapshot.read_text())
@@ -239,7 +246,7 @@ def run(parent, rendered, client, firewall, lan, wan_a, wan_b):
             raise
     print("ok - the real supervisor restarted the killed worker, withdrew the old pass, and confirmed recovery on WAN B")
     print("ok - the loaded guard blocked a new flow while the old state and independent traffic retained WAN A")
-    print("ok - loss of both processes left an expired decision forwarding until an independent guard reload")
+    print("ok - loss of the observer and expiry guard left an expired decision forwarding until an independent reload")
 
 
 if __name__ == "__main__":

@@ -5,6 +5,14 @@ function sdwan_probe_target($value): ?array {
 	if (!is_string($value) || strlen($value) > 512) {
 		return null;
 	}
+	$fib = [];
+	if (preg_match('/\Afib=([1-9][0-9]{0,4}) (.+)\z/D', $value, $prefix)) {
+		if ((int)$prefix[1] > 65535) {
+			return null;
+		}
+		$fib = ['fib' => (int)$prefix[1]];
+		$value = $prefix[2];
+	}
 	if (preg_match('~\Atcp://(\[[A-Fa-f0-9:.]+\]|[0-9.]+):([1-9][0-9]{0,4})\z~D', $value, $parts)) {
 		$address = trim($parts[1], '[]');
 		$port = (int) $parts[2];
@@ -35,7 +43,7 @@ function sdwan_probe_target($value): ?array {
 	    (ord($packed[0]) === 169 && ord($packed[1]) === 254))) {
 		return null;
 	}
-	return $target + ['address' => inet_ntop($packed), 'family' => $ipv6 ? 'inet6' : 'inet'];
+	return $target + ['address' => inet_ntop($packed), 'family' => $ipv6 ? 'inet6' : 'inet'] + $fib;
 }
 
 function sdwan_probe_https_path_valid(string $value): bool {
@@ -174,12 +182,19 @@ function sdwan_probe_remaining_us(int $deadline): int {
 	return max(0, intdiv($deadline - hrtime(true), 1000));
 }
 
+function sdwan_probe_fib_supported(): bool {
+	return PHP_OS_FAMILY === 'BSD' && function_exists('proc_open') && is_executable('/usr/sbin/setfib') &&
+	    is_executable('/usr/local/bin/php') && is_readable(__DIR__ . '/sdwan_probe_worker.php');
+}
+
 /* All sockets are bound to the live interface source. Require a native host
  * route pinned to the gateway or its PPP link, and check it again before accepting results. */
 function sdwan_probe_path(array $target, array $gateway, ?int $deadline = null): ?array {
 	$family = $target['family'];
+	$fib = $target['fib'] ?? 0;
 	if (($deadline !== null && hrtime(true) >= $deadline) ||
 	    !in_array($family, ['inet', 'inet6'], true) || $family !== ($gateway['family'] ?? null) ||
+	    !is_int($fib) || $fib < 0 || $fib > 65535 || ($fib > 0 && !sdwan_probe_fib_supported()) ||
 	    !function_exists('exec') ||
 	    !is_executable('/sbin/route') || !is_executable('/bin/timeout')) {
 		return null;
@@ -208,7 +223,7 @@ function sdwan_probe_path(array $target, array $gateway, ?int $deadline = null):
 	}
 	$seconds = sprintf('%.6F', $timeout / 1000000);
 	exec('/bin/timeout ' . $seconds . ' /sbin/route -n get -' . $family . ' ' .
-	    escapeshellarg($target['address']) . ' 2>/dev/null', $lines, $result);
+	    escapeshellarg($target['address']) . ($fib > 0 ? " -fib {$fib}" : '') . ' 2>/dev/null', $lines, $result);
 	if ($result !== 0) {
 		return null;
 	}
@@ -232,6 +247,39 @@ function sdwan_probe_result(array $job, bool $replied, string $failure, int $dea
 	return $replied ? 'Passed' : $failure;
 }
 
+/* Keep per-socket FIB selection out of the observer process. The worker
+ * creates and verifies its own sockets after setfib has selected the table. */
+function sdwan_probe_fib_start(int $fib, string $value, array $gateway, int $deadline): ?array {
+	if (!sdwan_probe_fib_supported()) {
+		return null;
+	}
+	$query = json_encode([$value, array_intersect_key($gateway, ['interface' => true, 'family' => true,
+	    'address' => true]), $deadline], JSON_THROW_ON_ERROR);
+	if (strlen($query) > 4096) {
+		return null;
+	}
+	$worker = @proc_open(['/usr/sbin/setfib', '-F', (string)$fib, '/usr/local/bin/php',
+	    __DIR__ . '/sdwan_probe_worker.php'], [['pipe', 'r'], ['pipe', 'w'], ['file', '/dev/null', 'w']], $pipes);
+	if (!is_resource($worker)) {
+		return null;
+	}
+	$written = @fwrite($pipes[0], $query);
+	fclose($pipes[0]);
+	if ($written !== strlen($query) || !stream_set_blocking($pipes[1], false)) {
+		sdwan_probe_fib_close($worker, $pipes[1], true);
+		return null;
+	}
+	return ['worker' => $worker, 'worker_output' => $pipes[1]];
+}
+
+function sdwan_probe_fib_close($worker, $output, bool $running): void {
+	if ($running) {
+		proc_terminate($worker, 9);
+	}
+	fclose($output);
+	proc_close($worker);
+}
+
 /* Start pending HTTPS work and consume ready replies without waiting for I/O. */
 function sdwan_probe_collect_ready(array &$jobs, array &$results, $curl, int $deadline): void {
 	if (!$jobs || hrtime(true) >= $deadline) {
@@ -243,6 +291,20 @@ function sdwan_probe_collect_ready(array &$jobs, array &$results, $curl, int $de
 	foreach ($jobs as $index => $job) {
 		if (hrtime(true) >= $deadline) {
 			return;
+		}
+		if (isset($job['worker'])) {
+			$status = proc_get_status($job['worker']);
+			if ($status['running']) {
+				continue;
+			}
+			$reply = stream_get_contents($job['worker_output'], 64);
+			sdwan_probe_fib_close($job['worker'], $job['worker_output'], false);
+			$results[$job['member']][$job['field']] = $status['exitcode'] === 0 && is_string($reply) &&
+			    in_array($reply, ["Passed\n", "Unavailable\n", "No matching host route or source\n",
+			    "Path not verified\n", "TCP check failed\n", "DNS check failed\n", "HTTPS check failed\n", "Timed out\n"], true)
+			    ? rtrim($reply, "\n") : 'Routing table unavailable';
+			unset($jobs[$index]);
+			continue;
 		}
 		if (!isset($job['socket'])) {
 			continue;
@@ -303,10 +365,11 @@ function sdwan_probe_secondary_first(array $config): array {
 	return array_filter($required, static fn($slots) => isset($slots['probe_secondary']) && !isset($slots['probe_primary']));
 }
 
-function sdwan_probe_observe(array $members, array $inventory, array $observations, array $secondary_first = []): array {
+function sdwan_probe_observe(array $members, array $inventory, array $observations, array $secondary_first = [],
+    ?int $deadline = null, int $active_fib = 0): array {
 	$results = $jobs = [];
 	$curl = function_exists('curl_multi_init') ? curl_multi_init() : null;
-	$deadline = hrtime(true) + 2500000000;
+	$deadline ??= hrtime(true) + 2500000000;
 	/* Give every member a chance at one result before running backups. */
 	$fields = ['probe_primary', 'probe_secondary'];
 	foreach ([0, 1] as $position) {
@@ -322,6 +385,19 @@ function sdwan_probe_observe(array $members, array $inventory, array $observatio
 			$results[$name][$field] = 'Unavailable';
 			if ($target === null || $gateway === null ||
 			    ($observations[$member['gateway']]['status'] ?? null) !== 'online' || hrtime(true) >= $deadline) {
+				continue;
+			}
+			$fib = $target['fib'] ?? 0;
+			if ($fib !== $active_fib) {
+				if ($active_fib !== 0) {
+					continue;
+				}
+				$worker = sdwan_probe_fib_start($fib, $member[$field], $gateway, $deadline);
+				if ($worker === null) {
+					$results[$name][$field] = 'Routing table unavailable';
+				} else {
+					$jobs[] = ['member' => $name, 'field' => $field] + $worker;
+				}
 				continue;
 			}
 			$path = sdwan_probe_path($target, $gateway, $deadline);
@@ -401,7 +477,9 @@ function sdwan_probe_observe(array $members, array $inventory, array $observatio
 	}
 	foreach ($jobs as $job) {
 		$results[$job['member']][$job['field']] = 'Timed out';
-		if (isset($job['socket'])) {
+		if (isset($job['worker'])) {
+			sdwan_probe_fib_close($job['worker'], $job['worker_output'], true);
+		} elseif (isset($job['socket'])) {
 			fclose($job['socket']);
 		} else {
 			curl_multi_remove_handle($curl, $job['curl']);
