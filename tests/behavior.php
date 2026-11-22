@@ -57,6 +57,15 @@ check('unsupported schema rejected', sdwan_validate_config($invalid, $inventory)
 $changed = $config;
 $changed['policies'][0]['strategy'] = 'latency';
 check('revision depends on policy contents', sdwan_config_revision($changed) !== sdwan_config_revision($config));
+$hysteresis = $config;
+$hysteresis['policies'][0] += ['degrade_samples' => '6', 'recover_seconds' => '0'];
+check('policy degradation and recovery bounds survive a configuration round trip',
+    sdwan_validate_config($hysteresis, $inventory) === [] &&
+    sdwan_decode_config(sdwan_encode_config($hysteresis)) === $hysteresis);
+$hysteresis['policies'][0]['degrade_samples'] = '7';
+check('degradation samples are limited to six', sdwan_validate_config($hysteresis, $inventory) !== []);
+$hysteresis['policies'][0] = array_replace($hysteresis['policies'][0], ['degrade_samples' => '1', 'recover_seconds' => '301']);
+check('recovery hold is limited to 300 seconds', sdwan_validate_config($hysteresis, $inventory) !== []);
 
 check('socket measurements converted from microseconds', sdwan_parse_dpinger_line("WAN6 1234 200 1\n", 'WAN6') === [1.234, 0.2, 1.0]);
 foreach (['WAN6 0 0 0', 'OTHER 1000 20 2', 'WAN6 123 2', 'WAN6 1234 200 101'] as $malformed) {

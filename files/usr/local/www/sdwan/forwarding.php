@@ -193,6 +193,9 @@ if ($preview !== null):
 			<?php if ($binding !== null): ?>
 			<dt><?=gettext('Selected gateways')?></dt><dd><?=sdwan_ui_escape($target ?? gettext('No current target'))?></dd>
 			<dt><?=gettext('Active filter')?></dt><dd><?=sdwan_ui_escape($pf_labels[$filter_status])?></dd>
+			<?php if ($filter_status === 'applied' && !empty($steering['degraded'])): ?>
+			<dt><?=gettext('Degradation hold')?></dt><dd><?=sdwan_ui_escape(implode(', ', array_keys($steering['degraded'])))?></dd>
+			<?php endif; ?>
 			<?php endif; ?>
 			<?php if ($default_families): ?>
 			<dt><?=gettext('Default gateway')?></dt><dd><?=sdwan_ui_escape(implode(', ', $default_families))?></dd>

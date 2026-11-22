@@ -2,6 +2,8 @@
 
 const SDWAN_SNAPSHOT_PATH = '/var/run/sdwan-observer.json';
 const SDWAN_MAX_SNAPSHOT_AGE = 30;
+const SDWAN_QUALITY_BREACHES = ['RTT exceeds the SLA', 'RTT standard deviation exceeds the SLA or is unavailable',
+    'Loss exceeds the SLA'];
 
 /* Canonical dpinger endpoint, including the kernel interface for link-local IPv6. */
 function sdwan_monitor_address(string $value, string $family, string $device, bool $infer_scope): ?string {
@@ -170,7 +172,10 @@ function sdwan_candidate_reason(?array $member, ?array $sample, ?array $sla, ?ar
 	if ($sample['loss_pct'] > (float)$sla['loss_pct']) {
 		return 'Loss exceeds the SLA';
 	}
-	$checks = $sample['checks'] ?? [];
+	return sdwan_service_reason($sample['checks'] ?? [], $requirements);
+}
+
+function sdwan_service_reason(array $checks, ?array $requirements): string {
 	$required = array_keys($requirements ?? [], 'required', true);
 	if ($requirements !== null) {
 		$checks = array_intersect_key($checks, $required ? array_fill_keys($required, true) : $requirements);
@@ -187,6 +192,10 @@ function sdwan_candidate_reason(?array $member, ?array $sample, ?array $sla, ?ar
 		    'No configured service check passed' : 'No verified service measurement';
 	}
 	return 'Eligible';
+}
+
+function sdwan_is_wan_quality_breach(string $reason, array $sample, array $sla): bool {
+	return in_array($reason, SDWAN_QUALITY_BREACHES, true) && (!isset($sla['rttsd_ms']) || $sample['rttsd_ms'] !== null);
 }
 
 function sdwan_path_status(int $configured, int $eligible): string {
@@ -218,6 +227,7 @@ function sdwan_evaluate(array $config, array $gateways, int $now, array $invento
 		$selected = null;
 		$best = INF;
 		$candidates = [];
+		$soft = [];
 		$overrides = array_column($policy['probe_requirements'] ?? [], null, 'member');
 		// Gateways can change family outside this package after a restore.
 		$families = [];
@@ -240,11 +250,16 @@ function sdwan_evaluate(array $config, array $gateways, int $now, array $invento
 		foreach ($policy['members'] as $name) {
 			$member = $members[$name] ?? null;
 			$sample = $samples[$name] ?? null;
+			$requirements = sdwan_policy_probe_requirements($policy, $member ?? [], $overrides[$name] ?? []);
 			$reason = $mixed ? 'Members now use different IP address families' :
-			    sdwan_candidate_reason($member, $sample, $sla,
-			        sdwan_policy_probe_requirements($policy, $member ?? [], $overrides[$name] ?? []));
+			    sdwan_candidate_reason($member, $sample, $sla, $requirements);
 			$candidates[$name] = $reason;
 			if ($reason !== 'Eligible') {
+				if ((int)($policy['degrade_samples'] ?? 1) > 1 && $sample && $sla &&
+				    sdwan_is_wan_quality_breach($reason, $sample, $sla) &&
+				    sdwan_service_reason($sample['checks'] ?? [], $requirements) === 'Eligible') {
+					$soft[] = (string)$name;
+				}
 				continue;
 			}
 			switch ($policy['strategy']) {
@@ -281,11 +296,14 @@ function sdwan_evaluate(array $config, array $gateways, int $now, array $invento
 			'shared_interface' => count($interfaces) !== count(array_unique($interfaces)),
 			'shared_underlay' => count($transports) !== count(array_unique($transports)),
 		];
+		if ($soft) {
+			$policies[$policy['name']]['soft'] = $soft;
+		}
 	}
 	return ['generated_at' => $now, 'members' => $samples, 'policies' => $policies];
 }
 
-function sdwan_snapshot_steering_valid(mixed $steering): bool {
+function sdwan_snapshot_steering_valid(mixed $steering, ?int $sample_time = null): bool {
 	if (!is_array($steering)) {
 		return false;
 	}
@@ -294,6 +312,20 @@ function sdwan_snapshot_steering_valid(mixed $steering): bool {
 		    !preg_match('/^[a-f0-9]{64}$/D', $state['revision']) || !array_key_exists('gateway', $state) ||
 		    ($state['gateway'] !== null && (!is_string($state['gateway']) || $state['gateway'] === ''))) {
 			return false;
+		}
+		if (array_key_exists('degraded', $state) || array_key_exists('degraded_at', $state)) {
+			if (!is_array($state['degraded'] ?? null) || !$state['degraded'] ||
+			    !is_int($state['degraded_at'] ?? null) || $state['degraded_at'] < 0 ||
+			    ($sample_time !== null && $state['degraded_at'] !== $sample_time) ||
+			    (array_key_exists('pool', $state) && !is_array($state['pool']))) {
+				return false;
+			}
+			foreach ($state['degraded'] as $gateway => $count) {
+				if (!in_array((string)$gateway, $state['pool'] ?? [$state['gateway']], true) ||
+				    !is_int($count) || $count < 1 || $count > 5) {
+					return false;
+				}
+			}
 		}
 		if (!array_key_exists('pool', $state)) {
 			continue;
@@ -332,7 +364,7 @@ function sdwan_read_snapshot(?bool &$expired = null): ?array {
 		$expired = true;
 		return null;
 	}
-	if (array_key_exists('steering', $data) && !sdwan_snapshot_steering_valid($data['steering'])) {
+	if (array_key_exists('steering', $data) && !sdwan_snapshot_steering_valid($data['steering'], $when)) {
 		return null;
 	}
 	$gateways = $data['gateways'] ?? [];
@@ -376,6 +408,19 @@ function sdwan_read_snapshot(?bool &$expired = null): ?array {
 		foreach ($policy['candidates'] as $member => $reason) {
 			if (!isset($data['members'][$member]) || !is_string($reason)) {
 				return null;
+			}
+		}
+		if (array_key_exists('soft', $policy)) {
+			if (!is_array($policy['soft']) || !array_is_list($policy['soft'])) {
+				return null;
+			}
+			$seen = [];
+			foreach ($policy['soft'] as $member) {
+				if (!is_string($member) || isset($seen[$member]) ||
+				    !in_array($policy['candidates'][$member] ?? null, SDWAN_QUALITY_BREACHES, true)) {
+					return null;
+				}
+				$seen[$member] = true;
 			}
 		}
 		/* Old snapshots remain readable for their normal 30-second lifetime. */

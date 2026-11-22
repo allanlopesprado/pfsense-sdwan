@@ -333,7 +333,7 @@ function sdwan_validate_config(array $config, ?array $gateways, array $previous 
 	$probe_fields = ['primary_check' => 'probe_primary', 'secondary_check' => 'probe_secondary'];
 	$probe_modes = ['ignored', 'optional', 'required'];
 	$optional = ['slas' => ['rttsd_ms'], 'members' => ['probe_primary', 'probe_secondary'],
-	    'policies' => [...array_keys($probe_fields), 'probe_requirements']];
+	    'policies' => [...array_keys($probe_fields), 'probe_requirements', 'degrade_samples', 'recover_seconds']];
 	if (($config['version'] ?? null) !== SDWAN_CONFIG_VERSION ||
 	    array_diff_key($config, sdwan_empty_config())) {
 		return ['Unsupported SD-WAN configuration format.'];
@@ -422,6 +422,13 @@ function sdwan_validate_config(array $config, ?array $gateways, array $previous 
 				}
 				if (!is_array($row['members']) || !array_is_list($row['members']) || !$row['members']) {
 					return ["Select at least one member for {$name}."];
+				}
+				foreach (['degrade_samples' => [1, 6], 'recover_seconds' => [0, 300]] as $field => [$min, $max]) {
+					if (array_key_exists($field, $row) &&
+					    (!is_string($row[$field]) || !preg_match('/\A[0-9]{1,3}\z/', $row[$field]) ||
+					    (int)$row[$field] < $min || (int)$row[$field] > $max)) {
+						return ["Invalid degradation or recovery setting for policy {$name}."];
+					}
 				}
 				foreach ($probe_fields as $field => $slot) {
 					if (array_key_exists($field, $row) && !in_array($row[$field], $probe_modes, true)) {

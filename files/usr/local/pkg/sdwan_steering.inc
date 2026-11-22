@@ -351,7 +351,7 @@ function sdwan_steering_edit(string $group, ?string $policy, string $expected_re
 }
 
 /* Quarantine loss immediately. Keep a healthy incumbent while a better path settles. */
-function sdwan_steering_step(array $previous, array $eligible, ?string $best, int $now): array {
+function sdwan_steering_step(array $previous, array $eligible, ?string $best, int $now, int $hold = SDWAN_STEERING_HOLD): array {
 	$incumbent = $previous['gateway'] ?? null;
 	$candidate = null;
 	$since = null;
@@ -364,7 +364,7 @@ function sdwan_steering_step(array $previous, array $eligible, ?string $best, in
 		$since = ($previous['candidate'] ?? null) === $best &&
 		    is_int($previous['since'] ?? null) && $previous['since'] <= $now ? $previous['since'] : $now;
 		$chosen = $incumbent;
-		if ($now - $since >= SDWAN_STEERING_HOLD) {
+		if ($now - $since >= $hold) {
 			$chosen = $best;
 			$candidate = $since = null;
 		}
@@ -372,11 +372,14 @@ function sdwan_steering_step(array $previous, array $eligible, ?string $best, in
 	return ['gateway' => $chosen, 'candidate' => $candidate, 'since' => $since];
 }
 
-function sdwan_steering_state(array $config, array $binding, array $result, array $old, int $now): array {
+function sdwan_steering_state(array $config, array $binding, array $result, array $old, int $now,
+    bool $prior_applied = false): array {
 	$eligible = [];
 	$best = null;
-	$policies = array_column($config['policies'], 'strategy', 'name');
+	$policy = array_column($config['policies'], null, 'name')[$binding['policy']] ?? [];
 	$revision = sdwan_config_revision($binding);
+	$prior = ($old['revision'] ?? null) === $revision ? $old : [];
+	$degraded = [];
 	if ($binding['policy_revision'] === sdwan_steering_policy_revision($config, $binding['policy'])) {
 		$members = array_column($config['members'], 'gateway', 'name');
 		foreach ($result['candidates'] ?? [] as $name => $reason) {
@@ -388,13 +391,40 @@ function sdwan_steering_state(array $config, array $binding, array $result, arra
 				}
 			}
 		}
+		$limit = (int)($policy['degrade_samples'] ?? 1);
+		$previous_sample = $prior['degraded_at'] ?? null;
+		if ($prior_applied && $limit > 1 && ($previous_sample === null || $previous_sample <= $now)) {
+			$active = $prior['pool'] ?? [$prior['gateway'] ?? null];
+			foreach ($result['soft'] ?? [] as $member) {
+				$gateway = $members[$member] ?? null;
+				if ($gateway === null || !in_array($gateway, $active, true) ||
+				    !in_array($gateway, $binding['gateways'], true)) {
+					continue;
+				}
+				$count = (int)($prior['degraded'][$gateway] ?? 0);
+				if ($count === 0 || $previous_sample !== $now) {
+					$count++;
+				}
+				if ($count < $limit) {
+					$degraded[$gateway] = $count;
+					$eligible[] = $gateway;
+				}
+			}
+		}
 	}
-	if (($policies[$binding['policy']] ?? null) === 'balance') {
+	$metadata = ['revision' => $revision];
+	if ($degraded) {
+		$metadata += ['degraded' => $degraded, 'degraded_at' => $now];
+	}
+	if (($policy['strategy'] ?? null) === 'balance') {
 		$pool = array_values(array_intersect($binding['gateways'], $eligible));
-		return ['revision' => $revision, 'gateway' => $pool[0] ?? null, 'pool' => $pool];
+		return $metadata + ['gateway' => $pool[0] ?? null, 'pool' => $pool];
 	}
-	$step = sdwan_steering_step(($old['revision'] ?? null) === $revision ? $old : [], $eligible, $best, $now);
-	return ['revision' => $revision] + $step;
+	if (isset($degraded[$prior['gateway'] ?? ''])) {
+		$best = $prior['gateway'];
+	}
+	return $metadata + sdwan_steering_step($prior, $eligible, $best, $now,
+	    (int)($policy['recover_seconds'] ?? SDWAN_STEERING_HOLD));
 }
 
 function sdwan_steering_preflight_matches(array $binding, array $check): bool {
@@ -408,6 +438,8 @@ function sdwan_steering_observations(array $config, array $snapshot, array $prev
 	$states = [];
 	$rule_pairs = [];
 	$native = sdwan_steering_native();
+	$loaded = null;
+	$read_filter = false;
 	foreach (sdwan_steering_bindings() as $group => $binding) {
 		$check = sdwan_steering_preflight($config, $binding['policy'], $group, $native);
 		$approved = sdwan_steering_preflight_matches($binding, $check);
@@ -415,7 +447,16 @@ function sdwan_steering_observations(array $config, array $snapshot, array $prev
 			$rule_pairs[$group] = $check['rule_pairs'];
 		}
 		$result = $approved ? ($snapshot['policies'][$binding['policy']] ?? []) : [];
-		$states[$group] = sdwan_steering_state($config, $binding, $result, $previous[$group] ?? [], $snapshot['generated_at']);
+		$old = $previous[$group] ?? [];
+		$applied = false;
+		if (!empty($result['soft']) && isset($old['gateway'])) {
+			if (!$read_filter) {
+				$loaded = sdwan_steering_pf_rules();
+				$read_filter = true;
+			}
+			$applied = sdwan_steering_pf_status($binding, $old, $native['gateways'], $loaded, $check['rule_pairs']) === 'applied';
+		}
+		$states[$group] = sdwan_steering_state($config, $binding, $result, $old, $snapshot['generated_at'], $applied);
 	}
 	return $states;
 }
@@ -1108,16 +1149,22 @@ function sdwan_steering_gateways_for_rule(array $raw, array $rule): array {
 	if (($state['revision'] ?? null) !== sdwan_config_revision($binding)) {
 		return [];
 	}
-	$strategy = array_column($config['policies'], 'strategy', 'name')[$binding['policy']] ?? null;
-	$chosen = $strategy === 'balance' ? ($state['pool'] ?? []) : [$state['gateway'] ?? null];
+	$policy = array_column($config['policies'], null, 'name')[$binding['policy']] ?? [];
+	$chosen = ($policy['strategy'] ?? null) === 'balance' ? ($state['pool'] ?? []) : [$state['gateway'] ?? null];
 	if (!is_array($chosen) || !array_is_list($chosen)) {
 		return [];
 	}
 	$members = array_column($config['members'], 'name', 'gateway');
-	$reasons = $snapshot['policies'][$binding['policy']]['candidates'] ?? [];
+	$result = $snapshot['policies'][$binding['policy']] ?? [];
 	foreach ($chosen as $gateway) {
-		if (!is_string($gateway) || !in_array($gateway, $binding['gateways'], true) ||
-		    ($reasons[$members[$gateway] ?? ''] ?? null) !== 'Eligible') {
+		if (!is_string($gateway) || !in_array($gateway, $binding['gateways'], true)) {
+			return [];
+		}
+		$member = $members[$gateway] ?? '';
+		$degraded = $state['degraded'][$gateway] ?? null;
+		if (($result['candidates'][$member] ?? null) !== 'Eligible' &&
+		    !(is_int($degraded) && $degraded > 0 && $degraded < (int)($policy['degrade_samples'] ?? 1) &&
+		        in_array($member, $result['soft'] ?? [], true))) {
 			return [];
 		}
 	}

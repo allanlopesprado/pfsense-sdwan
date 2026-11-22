@@ -270,6 +270,12 @@ def run(php, classes, screenshot_dir=None):
         assert writes == 1 and stored["policies"] == [{**config["policies"][0], "strategy": "latency"}]
         stale = request("policies", post={**posted, "revision": "previous-revision"})
         assert "Configuration changed" in stale and json.loads(stale.split("SAVED=")[1]) == [0, config]
+        timers = request("policies", post={**posted, "degrade_samples": "3", "recover_seconds": "0"})
+        writes, timed_config = json.loads(timers.split("SAVED=")[1])
+        assert writes == 1 and timed_config["policies"][0]["degrade_samples"] == "3"
+        assert timed_config["policies"][0]["recover_seconds"] == "0"
+        invalid_timer = request("policies", post={**posted, "recover_seconds": "301"})
+        assert json.loads(invalid_timer.split("SAVED=")[1]) == [0, config], invalid_timer
         print("ok - native policy form round-trip preserves restored tie order and distinct numeric names")
 
         probe_config = {**config, "members": [dict(member) for member in config["members"]]}

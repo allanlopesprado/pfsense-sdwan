@@ -10,7 +10,8 @@ register_shutdown_function(static function () use ($dir) {
 	foreach (glob($dir . '/*') as $path) { unlink($path); }
 	rmdir($dir);
 });
-foreach (['sdwan.inc', 'sdwan_engine.inc', 'sdwan_steering.inc', 'sdwan_preflight.inc', 'sdwan_log.inc'] as $file) {
+foreach (['sdwan.inc', 'sdwan_engine.inc', 'sdwan_steering.inc', 'sdwan_preflight.inc', 'sdwan_log.inc',
+    'sdwan_probe.inc'] as $file) {
 	$contents = file_get_contents($pkg . '/' . $file);
 	if ($file === 'sdwan_engine.inc') {
 		$contents = str_replace('/var/run/sdwan-observer.json', $dir . '/snapshot', $contents);
@@ -131,6 +132,68 @@ verify(sdwan_steering_step($future_suggestion, ['A','B'], 'B', 110)['since'] ===
     'a clock rollback restarts the healthy challenger timer');
 verify(sdwan_steering_step($pending_choice, ['B'], 'B', 101)['gateway'] === 'B' &&
     sdwan_steering_step($old, [], null, 101)['gateway'] === null, 'ineligible incumbent fails over immediately and total SLA loss denies new flows');
+verify(sdwan_steering_step($old, ['A','B'], 'B', 100, 0)['gateway'] === 'B',
+    'zero configured recovery hold returns immediately to the preferred path');
+$tuned = $config;
+$tuned['members'][0]['probe_primary'] = 'tcp://192.0.2.77:443';
+$tuned['policies'][0] += ['degrade_samples' => '3', 'recover_seconds' => '5',
+	'probe_requirements' => [['member' => 'a', 'primary_check' => 'required']]];
+$tuned_raw = array_replace($raw, ['policy_revision' => sdwan_steering_policy_revision($tuned, 'p')]);
+$tuned_binding = sdwan_steering_decode($tuned_raw);
+$applied = ['revision' => sdwan_config_revision($tuned_binding), 'gateway' => 'A'];
+$verification_time = time();
+$wan_a = array_replace($sample, ['delay' => '600001ms']);
+$inventory = sdwan_gateways();
+$probe_ok = ['a' => ['probe_primary' => 'Passed']];
+$soft_sample = sdwan_evaluate($tuned, ['A' => $wan_a, 'B' => $sample], $verification_time, $inventory, $probe_ok);
+$quality = $soft_sample['policies']['p'];
+verify($quality['selected'] === 'b' && $quality['soft'] === ['a'], 'a passing service check identifies a soft WAN SLA breach');
+$first = sdwan_steering_state($tuned, $tuned_binding, $quality, $applied, $verification_time, true);
+$replayed = sdwan_steering_state($tuned, $tuned_binding, $quality, $first, $verification_time, true);
+$second = sdwan_steering_state($tuned, $tuned_binding, $quality, $first, $verification_time + 1, true);
+$third = sdwan_steering_state($tuned, $tuned_binding, $quality, $second, $verification_time + 2, true);
+verify($first['gateway'] === 'A' && $first['degraded'] === ['A' => 1] &&
+    $replayed === $first && $second['degraded'] === ['A' => 2] && $third['gateway'] === 'B' &&
+    !isset($third['degraded']), 'only fresh consecutive degraded samples consume the opt-in hold');
+verify(sdwan_steering_state($tuned, $tuned_binding, $quality, $applied, $verification_time)['gateway'] === 'B',
+    'an unverified incumbent cannot retain a degraded path');
+$balanced = $tuned;
+$balanced['policies'][0]['strategy'] = 'balance';
+$balanced_binding = array_replace($tuned_binding, ['policy_revision' => sdwan_steering_policy_revision($balanced, 'p')]);
+$only_b_applied = ['revision' => sdwan_config_revision($balanced_binding), 'gateway' => 'B', 'pool' => ['B']];
+verify(sdwan_steering_state($balanced, $balanced_binding, $quality, $only_b_applied, $verification_time, true)['pool'] === ['B'],
+    'a weighted pool cannot admit an out-of-SLA path that was not already applied');
+$both_applied = array_replace($only_b_applied, ['gateway' => 'A', 'pool' => ['A', 'B']]);
+$balanced_state = sdwan_steering_state($balanced, $balanced_binding, $quality, $both_applied, $verification_time, true);
+verify($balanced_state['pool'] === ['A', 'B'] && $balanced_state['degraded'] === ['A' => 1],
+    'an opt-in weighted pool retains only previously applied degrading members');
+$critical = sdwan_evaluate($tuned, ['A' => $wan_a, 'B' => $sample], $verification_time, $inventory, [
+    'a' => ['probe_primary' => 'Timed out'],
+])['policies']['p'];
+verify(!isset($critical['soft']) &&
+    sdwan_steering_state($tuned, $tuned_binding, $critical, $first, $verification_time + 1, true)['gateway'] === 'B',
+    'a simultaneous required service failure bypasses the WAN degradation hold');
+$unavailable = sdwan_evaluate($tuned, ['A' => array_replace($sample, ['status' => 'down'])],
+    $verification_time, $inventory, $probe_ok)['policies']['p'];
+verify(sdwan_steering_state($tuned, $tuned_binding, $unavailable, $first, $verification_time + 1, true)['gateway'] === null,
+    'unambiguous outages take effect immediately even during a degradation hold');
+$recovered = sdwan_evaluate($tuned, ['A' => $sample, 'B' => $sample], $verification_time, $inventory, $probe_ok)['policies']['p'];
+$holding = sdwan_steering_state($tuned, $tuned_binding, $recovered, $third, $verification_time + 3, true);
+verify($holding['gateway'] === 'B' &&
+    sdwan_steering_state($tuned, $tuned_binding, $recovered, $holding, $verification_time + 7, true)['gateway'] === 'B' &&
+    sdwan_steering_state($tuned, $tuned_binding, $recovered, $holding, $verification_time + 8, true)['gateway'] === 'A',
+    'a healthy preferred gateway returns at the configured recovery boundary');
+$current[SDWAN_CONFIG_PATH] = sdwan_encode_config($tuned);
+$soft_sample['config_revision'] = sdwan_config_revision($tuned);
+$soft_sample['gateway_inventory_revision'] = sdwan_gateway_inventory_revision($tuned, $inventory);
+$soft_sample['steering']['G'] = $first;
+file_put_contents(SDWAN_SNAPSHOT_PATH, json_encode($soft_sample));
+verify(sdwan_steering_gateway_for_rule($tuned_raw, $rule) === 'A', 'native renderer permits the approved temporarily degraded gateway');
+$soft_sample['steering']['G']['degraded_at']--;
+file_put_contents(SDWAN_SNAPSHOT_PATH, json_encode($soft_sample));
+verify(sdwan_steering_gateway_for_rule($tuned_raw, $rule) === null, 'native renderer rejects a degraded decision from another sample');
+$current = $disk;
+file_put_contents(SDWAN_SNAPSHOT_PATH, json_encode($snapshot));
 $t1 = $snapshot['steering'];
 $t2 = $t1;
 $t2['G']['since'] = time();

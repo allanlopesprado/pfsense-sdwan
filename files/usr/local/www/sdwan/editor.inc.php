@@ -87,6 +87,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 					$sdwan_record[$field] = $mode;
 				}
 			}
+			foreach (['degrade_samples', 'recover_seconds'] as $field) {
+				if (!array_key_exists($field, $_POST)) {
+					continue;
+				}
+				if (!is_string($_POST[$field])) {
+					$errors[] = gettext('Enter valid degradation and recovery settings.');
+				} elseif (trim($_POST[$field]) === '') {
+					$cleared[$field] = true;
+				} else {
+					$sdwan_record[$field] = trim($_POST[$field]);
+				}
+			}
 			foreach ($sdwan_record['members'] as $member) {
 				if (!sdwan_valid_name($member)) {
 					continue;
@@ -296,6 +308,12 @@ elseif (!$display_form): ?>
 			->setAttribute('required', 'required')
 			->setHelp(gettext('Select one member to monitor a path, or two or more of the same address family to compare paths. For equal scores the first selected member in the displayed list wins.'));
 		$section->addInput(new Form_Select('strategy', gettext('Selection strategy'), $sdwan_record['strategy'] ?? 'cost', $strategies));
+		$section->addInput(new Form_Input('degrade_samples', gettext('WAN degradation samples'), 'number',
+		    $sdwan_record['degrade_samples'] ?? '', ['min' => 1, 'max' => 6, 'placeholder' => '1']))
+		    ->setHelp(gettext('The default excludes a path on the first SLA breach. Higher values allow a currently applied path to remain briefly when service checks still pass. Down links and missing measurements take effect immediately.'));
+		$section->addInput(new Form_Input('recover_seconds', gettext('Preferred path recovery (seconds)'), 'number',
+		    $sdwan_record['recover_seconds'] ?? '', ['min' => 0, 'max' => 300, 'placeholder' => '30']))
+		    ->setHelp(gettext('For lowest cost or lowest RTT, keep the current healthy path while the preferred path recovers. The default is 30 seconds.'));
 	}
 	$form->add($section);
 	if ($collection === 'policies' && (array_column($sdwan['members'], 'probe_primary') ||
