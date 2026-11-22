@@ -9,6 +9,14 @@ function get_real_interface(string $name, string $family, bool $real, bool $flus
 	return ['wan' => 'em0', 'opt1' => 'em2', 'lan' => 'em1'][$name] ?? null;
 }
 
+function get_interface_gateway_v6(string $name): ?string {
+	return $name === 'wan' ? 'fe80::a%em0' : null;
+}
+
+function find_interface_ipv6_ll(string $device, bool $flush): ?string {
+	return $device === 'em0' ? 'fe80::b' : null;
+}
+
 function config_get_path(string $path, mixed $default = null): mixed {
 	return $default;
 }
@@ -174,5 +182,101 @@ $invalid = $native;
 array_splice($invalid['rules'], 1, 0, [['tracker' => '771292103', 'type' => 'pass']]);
 $rows[] = audit_case('preflight_guard_no_longer_adjacent', true,
 	sdwan_steering_preflight($settings, 'office', 'LAB_SD', $invalid)['errors'] !== []);
+
+$pair = $native;
+$pair['groups'][0]['item'] = ['GW0|1|address', 'GW1|2|address'];
+$pair['interfaces'] = ['lan' => ['enable' => '', 'if' => 'em1'], 'wan' => ['enable' => '', 'if' => 'em0'],
+	'opt1' => ['enable' => '', 'if' => 'em2']];
+$pair['gateways'] = array_intersect_key($native['gateways'], ['GW0' => true, 'GW1' => true]);
+$pair['gateways']['GW0']['interface'] = 'wan';
+$pair['default4'] = 'WAN_DEFAULT';
+$pair_settings = $settings;
+$pair_settings['members'] = array_slice($settings['members'], 0, 2);
+$pair_settings['policies'][0]['members'] = array_slice($settings['policies'][0]['members'], 0, 2);
+$pair_settings['policies'][0]['strategy'] = 'cost';
+$preflight = static fn(array $fixture): array => sdwan_steering_preflight($pair_settings, 'office', 'LAB_SD', $fixture);
+
+// A saved static address can be unusable after an import or a reassignment.
+// Dynamic gateways must be left to the native resolver.
+$hop_cases = [
+	'valid_ipv4' => ['192.0.2.1', true],
+	'ipv4_unspecified' => ['0.0.0.0', false],
+	'ipv4_loopback' => ['127.0.0.1', false],
+	'ipv4_multicast' => ['224.0.0.1', false],
+	'ipv4_with_scope' => ['192.0.2.1%em0', false],
+];
+foreach ($hop_cases as $case => [$hop, $usable]) {
+	$fixture = $pair;
+	$fixture['gateways']['GW0']['address'] = $hop;
+	$rows[] = audit_case("static_hop_preflight_{$case}", $usable, $preflight($fixture)['errors'] === [], $usable ? null : true);
+	$rows[] = audit_case("static_hop_renderer_{$case}", $usable,
+		filter_sdwan_gateway_route(['interface' => 'em0', 'ipprotocol' => 'inet'], $hop) !== null);
+}
+
+$ipv6_pair = $pair;
+$ipv6_pair['rules'][0]['ipprotocol'] = $ipv6_pair['rules'][1]['ipprotocol'] = 'inet6';
+$ipv6_pair['rules'][0]['source'] = $ipv6_pair['rules'][1]['source'] = ['address' => '2001:db8:1::10'];
+$ipv6_pair['rules'][0]['destination'] = $ipv6_pair['rules'][1]['destination'] = ['address' => '2001:db8:15::/64'];
+foreach (['GW0' => 'em0', 'GW1' => 'em2'] as $key => $device) {
+	$ipv6_pair['gateways'][$key]['family'] = 'inet6';
+	$ipv6_pair['gateways'][$key]['address'] = "fe80::1%{$device}";
+	$ipv6_pair['gateways'][$key]['monitor'] = "fe80::a%{$device}";
+}
+$running_monitor = ['targetip' => 'fe80::a%em0', 'srcip' => 'fe80::b%em0'];
+$monitor_cases = [
+	'correct_scope' => ['fe80::a%em0', true, true],
+	'implicit_scope' => ['fe80::a', true, true],
+	'dynamic_resolves' => ['dynamic', true, true],
+	'wrong_scope' => ['fe80::a%em9', false, false],
+	'wrong_family' => ['192.0.2.44', false, false],
+	'invalid_address' => ['invalid-address', false, false],
+	'other_member_target' => ['fe80::a%em2', false, false],
+];
+foreach ($monitor_cases as $case => [$target, $allowed, $matches]) {
+	$fixture = $ipv6_pair;
+	$fixture['gateways']['GW0']['monitor'] = $target;
+	$known = !$allowed && $case !== 'other_member_target' ? true : null;
+	$rows[] = audit_case("monitor_preflight_{$case}", $allowed, $preflight($fixture)['errors'] === [], $known);
+	$rows[] = audit_case("monitor_runtime_{$case}", $matches, sdwan_monitor_matches($fixture['gateways']['GW0'], $running_monitor));
+}
+
+// These cases cover the authorization digest only. They do not assume a
+// different native route or a failed IPsec association after an address edit.
+$vti = $ipv6_pair;
+$vti['filtermode'] = 'if_ipsec';
+$vti['vips'][] = ['uniqid' => 'routed_a', 'mode' => 'carp', 'interface' => 'wan', 'subnet' => '203.0.113.6', 'vhid' => '3'];
+foreach (['GW0' => ['_viprouted_a', '13', '218', 'opt11'], 'GW1' => ['opt1', '14', '219', 'opt12']] as
+    $key => [$transport, $ike, $req, $assigned]) {
+	$vti['interfaces'][$assigned] = ['enable' => '', 'if' => 'ipsec' . $req];
+	$vti['gateways'][$key]['interface'] = $assigned;
+	$vti['gateways'][$key]['monitor'] = '2001:db8:1::' . $ike;
+	$vti['gateways'][$key]['address'] = 'dynamic';
+	$vti['phase1'][] = ['ikeid' => $ike, 'interface' => $transport, 'iketype' => 'ikev2', 'remote-gateway' => '198.51.100.' . $ike];
+	$vti['phase2'][] = ['ikeid' => $ike, 'reqid' => $req, 'mode' => 'vti',
+		'localid' => ['type' => 'address', 'address' => "2001:db8:{$ike}::1"],
+		'remoteid' => ['type' => 'address', 'address' => "2001:db8:{$ike}::2"]];
+}
+$vti_approved = $preflight($vti);
+$rows[] = audit_case('vti_preflight_baseline', true, $vti_approved['errors'] === []);
+$vti_mutations = [
+	'phase2_local_endpoint' => ['phase2', 'localid', ['type' => 'address', 'address' => '2001:db8:13::3'], true],
+	'phase2_remote_endpoint' => ['phase2', 'remoteid', ['type' => 'address', 'address' => '2001:db8:13::4'], true],
+	'carp_local_ip' => ['vips', 'subnet', '203.0.113.7', true],
+	'carp_vhid' => ['vips', 'vhid', '4', true],
+	'phase1_remote_peer' => ['phase1', 'remote-gateway', '198.51.100.77', false],
+];
+foreach ($vti_mutations as $case => [$section, $key, $value, $known_same]) {
+	$fixture = $vti;
+	$fixture[$section][0][$key] = $value;
+	$revision = $preflight($fixture)['binding']['rules_revision'] ?? null;
+	$same = $revision !== null && $revision === $vti_approved['binding']['rules_revision'];
+	$rows[] = audit_case("vti_binding_unchanged_after_{$case}", false, $same, $known_same ? true : null);
+}
+$fixture = $vti;
+$fixture['phase2'][0]['lifetime'] = '7200';
+$rows[] = audit_case('vti_binding_stable_after_lifetime_edit', true, $preflight($fixture)['binding'] === $vti_approved['binding']);
+$fixture = $vti;
+$fixture['phase2'][0]['disabled'] = '';
+$rows[] = audit_case('vti_preflight_rejects_disabled_phase2', true, $preflight($fixture)['errors'] !== []);
 
 echo json_encode($rows, JSON_THROW_ON_ERROR | JSON_PRETTY_PRINT), PHP_EOL;

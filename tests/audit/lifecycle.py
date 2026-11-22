@@ -28,7 +28,13 @@ def case(name, expected, observed, known_observed=None):
     return result
 
 
-def observer(binary):
+def replace_native_boundary(source, signature, body):
+    start = source.index(signature) + len(signature)
+    end = source.index("\n}", start)
+    return source[:start] + body + source[end:]
+
+
+def observer(binary, *, two_bindings=False):
     with tempfile.TemporaryDirectory(prefix="sdwan-audit-") as temporary:
         work = Path(temporary)
         stage(work)
@@ -37,10 +43,13 @@ def observer(binary):
         daemon.write_text(daemon.read_text().replace("/usr/local/pkg/sdwan_steering.inc", steering.as_posix()))
         shutil.copy(PKG / "sdwan_preflight.inc", work)
         source = (PKG / steering.name).read_text()
-        start = source.index("function sdwan_steering_pf_rules(): ?array {")
-        end = source.index("\n}", start)
-        steering.write_text(source[:start] + "function sdwan_steering_pf_rules(): ?array {"
-                            + "return config_get_path('fixture_pf_rules');" + source[end:])
+        source = replace_native_boundary(source, "function sdwan_steering_pf_rules(): ?array {",
+                                         "return config_get_path('fixture_pf_rules');")
+        source = replace_native_boundary(
+            source, "function sdwan_steering_request_reload(): bool {",
+            "file_put_contents(SDWAN_SNAPSHOT_PATH . '.attempts', 'x', FILE_APPEND);"
+            "return config_get_path('fixture_reload_accepted', false);")
+        steering.write_text(source)
         (work / "filter.inc").write_text(
             "<?php function filter_sdwan_binding_api(): int { return 1; }\n"
             "function is_platform_booting(): bool { return config_get_path('booting', false); }\n")
@@ -51,26 +60,35 @@ def observer(binary):
         config["interfaces"].update({"lan": {"enable": "", "if": "igb0"},
                                      "opt1": {"enable": "", "if": "igb1"},
                                      "opt2": {"enable": "", "if": "igb2"}})
-        rule = {"type": "pass", "interface": "lan", "ipprotocol": "inet", "tracker": "301", "gateway": "G",
-                "source": {"address": "192.0.2.0/24"}, "destination": {"any": ""}}
-        guard = dict(rule, type="block", tracker="302")
-        del guard["gateway"]
-        config["gateways/gateway_group"] = [{"name": "G", "item": ["GW_A|1|", "GW_B|2|"]}]
-        config["filter/rule"] = [rule, guard]
+        groups = [("G", 301, "192.0.2.0/24")]
+        if two_bindings:
+            groups.append(("H", 311, "198.51.100.0/24"))
+        config["gateways/gateway_group"] = []
+        config["filter/rule"] = []
+        for name, tracker, network in groups:
+            rule = {"type": "pass", "interface": "lan", "ipprotocol": "inet", "tracker": str(tracker),
+                    "gateway": name, "source": {"address": network}, "destination": {"any": ""}}
+            guard = dict(rule, type="block", tracker=str(tracker + 1))
+            del guard["gateway"]
+            config["gateways/gateway_group"].append({"name": name, "item": ["GW_A|1|", "GW_B|2|"]})
+            config["filter/rule"].extend([rule, guard])
         settings = work / "fixture.json"
         settings.write_text(json.dumps(config))
 
         params = ["-d", f"include_path={work}"]
         include = "require " + json.dumps(steering.as_posix()) + "; "
-        try_binding = "echo json_encode(sdwan_steering_preview(sdwan_get_config(), 'calls', 'G'));"
-        preview = json.loads(php(binary, *params, "-r", include + try_binding))
-        if preview["errors"]:
-            raise RuntimeError(preview)
-        row = preview["binding"]
-        for key in ("trackers", "gateways"):
-            row[key] = {"item": row[key]}
-        config["gateways/sdwan_bindings"] = {"item": [row]}
-        config["gateways/sdwan_bindings/item"] = [row]
+        rows = []
+        for name, _, _ in groups:
+            try_binding = f"echo json_encode(sdwan_steering_preview(sdwan_get_config(), 'calls', '{name}'));"
+            preview = json.loads(php(binary, *params, "-r", include + try_binding))
+            if preview["errors"]:
+                raise RuntimeError(preview)
+            row = preview["binding"]
+            for key in ("trackers", "gateways"):
+                row[key] = {"item": row[key]}
+            rows.append(row)
+        config["gateways/sdwan_bindings"] = {"item": rows}
+        config["gateways/sdwan_bindings/item"] = rows
 
         def observe():
             settings.write_text(json.dumps(config))
@@ -85,6 +103,8 @@ def observer(binary):
         config["booting"] = False
         receipt.write_text(json.dumps({"signature": signature, "requested_at": int(time.time()) - 3600,
                                        "attempts": 3, "accepted": True, "confirmed": False}))
+        if two_bindings:
+            return unbind_one_of_two(observe, config, receipt, rows[1])
 
         # Leave PF unreadable after an old, accepted request for five observations.
         for _ in range(5):
@@ -109,7 +129,144 @@ def observer(binary):
         snapshot.write_text(json.dumps(old))
         lookup = php(binary, *params, "-r", include + "echo json_encode(sdwan_read_snapshot());")
         results.append(case("expired_observation", "withdrawn", "withdrawn" if lookup == "null" else "usable"))
+        results.extend(unbind_cleanup(observe, config, receipt, events))
         return results
+
+
+def unbind_cleanup(observe, config, receipt, events):
+    # A former steering rule remains loaded after deletion of the last binding.
+    config["fixture_pf_rules"] = ["pass in quick on igb0 route-to (igb2 198.51.100.1) inet all ridentifier 301"]
+    del config["gateways/sdwan_bindings"]
+    del config["gateways/sdwan_bindings/item"]
+    events.unlink(missing_ok=True)
+    requests = receipt.with_name("snapshot.json.attempts")
+    try:
+        observe()
+    except RuntimeError as error:
+        if "Observation failed" not in str(error):
+            raise
+        replied = json.loads(receipt.read_bytes())
+        retained = not replied["accepted"] and replied["attempts"] == 1
+    else:
+        retained = False
+    results = [case("unbind_rejected_cleanup", "retained", "retained" if retained else "lost")]
+
+    # The second queue request is acknowledged but the fixture still has the old PF rule.
+    replied = json.loads(receipt.read_bytes())
+    replied["requested_at"] = int(time.time()) - 60
+    receipt.write_text(json.dumps(replied))
+    config["fixture_reload_accepted"] = True
+    observe()
+    pending = receipt.exists()
+    results.append(case("unbind_acknowledged_cleanup", "pending",
+                        "pending" if pending else "retired_while_stale", "retired_while_stale"))
+
+    # Subsequent cycles exercise the old receipt after the normal retry interval.
+    if pending:
+        replied = json.loads(receipt.read_bytes())
+        replied["requested_at"] = int(time.time()) - 60
+        receipt.write_text(json.dumps(replied))
+    count = len(requests.read_bytes())
+    for _ in range(5):
+        observe()
+    log = json.loads(events.read_bytes())
+    followed_up = len(requests.read_bytes()) > count or "filter_divergent" in log.get("filter_event_at", {})
+    results.append(case("unbind_stale_pf_followup", "reported_or_retried",
+                        "reported_or_retried" if followed_up else "passive_while_stale", "passive_while_stale"))
+
+    count = len(requests.read_bytes())
+    config["fixture_pf_rules"] = []
+    observe()
+    results.append(case("unbind_independent_pf_repair", "passive",
+                        "passive" if len(requests.read_bytes()) == count else "requested"))
+    return results
+
+
+def unbind_one_of_two(observe, config, receipt, retained_binding):
+    g_block = "block drop in quick on igb0 inet all ridentifier 301"
+    h_block = "block drop in quick on igb0 inet all ridentifier 311"
+    config["fixture_pf_rules"] = [g_block, h_block]
+    observe()
+    if not json.loads(receipt.read_bytes())["confirmed"]:
+        raise RuntimeError("The fixture did not confirm both original bindings")
+
+    # Native tier 1 restores GW_A. Keep the old GW_B path loaded for the removed group.
+    g_native = "pass in quick on igb0 route-to (igb1 192.0.2.1) inet all ridentifier 301"
+    g_stale = g_native.replace("igb1 192.0.2.1", "igb2 198.51.100.1")
+    config["gateways/sdwan_bindings"] = {"item": [retained_binding]}
+    config["gateways/sdwan_bindings/item"] = [retained_binding]
+    config["fixture_reload_accepted"] = True
+    config["fixture_pf_rules"] = [g_stale, h_block]
+    observe()
+    observe()
+    state = json.loads(receipt.read_bytes())
+    results = [case("unbind_partial_stale_tracker", "pending",
+                    "confirmed_while_stale" if state["confirmed"] else "pending", "confirmed_while_stale")]
+
+    config["fixture_pf_rules"] = [g_stale, h_block.replace("311", "399")]
+    observe()
+    state = json.loads(receipt.read_bytes())
+    results.append(case("unbind_partial_remaining_tracker_changed", "pending",
+                        "confirmed" if state["confirmed"] else "pending"))
+
+    config["fixture_pf_rules"] = [g_native, h_block]
+    observe()
+    state = json.loads(receipt.read_bytes())
+    results.append(case("unbind_partial_native_rules_restored", "confirmed",
+                        "confirmed" if state["confirmed"] and state["attempts"] == 0 else "pending"))
+    return results
+
+
+SNAPSHOT_FIXTURE = r"""<?php
+ob_start();
+require 'tests/steering.php';
+ob_end_clean();
+$current = $before;
+$ready = array_replace($snapshot, ['generated_at' => time()]);
+$gateways = sdwan_gateways();
+$cases = [
+    'snapshot_valid_binding' => $ready,
+    'snapshot_observation_only' => array_diff_key($ready, ['steering' => true]),
+    'snapshot_empty_steering' => array_replace($ready, ['steering' => []]),
+    'snapshot_steering_string' => array_replace($ready, ['steering' => 'damaged']),
+    'snapshot_steering_group_boolean' => array_replace($ready, ['steering' => ['G' => true]]),
+    'snapshot_steering_missing_gateway' => array_replace($ready, ['steering' => ['G' => ['revision' => str_repeat('0', 64)]]]),
+    'snapshot_steering_pool_string' => array_replace_recursive($ready, ['steering' => ['G' => ['pool' => 'A']]]),
+    'snapshot_malformed_steering_expired' => array_replace($ready, ['generated_at' => time() - 31, 'steering' => 'damaged']),
+    'snapshot_wrong_inventory_revision' => array_replace($ready, ['gateway_inventory_revision' => str_repeat('0', 64)]),
+    'snapshot_wrong_config_revision' => array_replace($ready, ['config_revision' => str_repeat('0', 64)]),
+];
+$results = [];
+foreach ($cases as $label => $data) {
+    file_put_contents(SDWAN_SNAPSHOT_PATH, json_encode($data, JSON_THROW_ON_ERROR));
+    $sample = sdwan_current_snapshot($config, $gateways);
+    $status = $sample === null ? 'discarded' : 'usable';
+    if ($sample !== null && isset($sample['steering'])) {
+        set_error_handler(static function ($severity, $message): never { throw new ErrorException($message, 0, $severity); });
+        try {
+            sdwan_steering_runtime_signature($sample, $gateways);
+        } catch (Throwable $problem) {
+            $status = 'accepted_but_signature_invalid';
+        } finally {
+            restore_error_handler();
+        }
+    }
+    $results[$label] = $status;
+}
+echo json_encode($results, JSON_THROW_ON_ERROR);
+"""
+
+
+def snapshots(binary):
+    states = run_php_fixture(binary, SNAPSHOT_FIXTURE)
+    valid = {"snapshot_valid_binding", "snapshot_observation_only", "snapshot_empty_steering"}
+    malformed = {"snapshot_steering_string", "snapshot_steering_group_boolean",
+                 "snapshot_steering_missing_gateway", "snapshot_steering_pool_string"}
+    return [
+        case(label, "usable" if label in valid else "discarded", state,
+             "accepted_but_signature_invalid" if label in malformed else None)
+        for label, state in states.items()
+    ]
 
 
 UPGRADE_FIXTURE = r"""<?php
@@ -174,12 +331,16 @@ echo json_encode([$locked, $afterInstall, $retry, $supervisorOnly], JSON_THROW_O
 """
 
 
-def upgrade(binary):
+def run_php_fixture(binary, source):
     process = subprocess.run([binary, "-n", "-d", "disable_functions=curl_init,curl_setopt_array,curl_exec,curl_getinfo"],
-                             input=UPGRADE_FIXTURE, cwd=ROOT, text=True, capture_output=True, timeout=15)
+                             input=source, cwd=ROOT, text=True, capture_output=True, timeout=15)
     if process.returncode:
-        raise RuntimeError(f"Upgrade fixture failed: {process.stderr}{process.stdout}")
-    locked, after_install, retry, supervisor_only = json.loads(process.stdout)
+        raise RuntimeError(f"PHP fixture failed: {process.stderr}{process.stdout}")
+    return json.loads(process.stdout)
+
+
+def upgrade(binary):
+    locked, after_install, retry, supervisor_only = run_php_fixture(binary, UPGRADE_FIXTURE)
     return [
         case("upgrade_lock", "busy", locked),
         case("upgrade_verification_when_supervisor_down", "verify", after_install),
@@ -192,7 +353,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("php", nargs="?", default=os.environ.get("PHP_BIN", "php"))
     args = parser.parse_args()
-    print(json.dumps(observer(args.php) + upgrade(args.php)))
+    print(json.dumps(observer(args.php) + observer(args.php, two_bindings=True) + snapshots(args.php) + upgrade(args.php)))
 
 
 if __name__ == "__main__":
