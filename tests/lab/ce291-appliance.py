@@ -18,6 +18,7 @@ import struct
 import threading
 import subprocess
 import sys
+import tempfile
 import time
 
 import pexpect
@@ -58,6 +59,24 @@ def stop_vm(qemu):
                 return
             time.sleep(.1)
     raise RuntimeError("The disposable QEMU process did not stop")
+
+
+def qmp_command(path, name, **arguments):
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
+        connection.settimeout(10)
+        connection.connect(str(path))
+        with connection.makefile("rb") as stream:
+            if "QMP" not in json.loads(stream.readline()):
+                raise RuntimeError("QEMU did not send its QMP greeting")
+            for request in ({"execute": "qmp_capabilities"}, {"execute": name, "arguments": arguments}):
+                connection.sendall(json.dumps(request).encode() + b"\n")
+                while True:
+                    result = json.loads(stream.readline())
+                    if "event" not in result:
+                        break
+                if "return" not in result:
+                    raise RuntimeError(f"QMP {request['execute']} failed: {result}")
+            return result["return"]
 
 
 def wire(cleanup):
@@ -123,14 +142,14 @@ def serve_lease(cleanup, address, gateway):
     return process
 
 
-def wait_lease(qemu, address, gateway):
+def wait_lease(qemu, address, gateway, device="vtnet2"):
     result = command(qemu, f'''i=0
-        until ifconfig vtnet2 | grep -Fq 'inet {address} ' &&
-            test "$(cat /tmp/vtnet2_router 2>/dev/null)" = '{gateway}'; do
+        until ifconfig {device} | grep -Fq 'inet {address} ' &&
+            test "$(cat /tmp/{device}_router 2>/dev/null)" = '{gateway}'; do
             i=$((i+1)); test "$i" -le 50; sleep 1
         done
-        ifconfig vtnet2 | grep -F 'inet {address} '
-        cat /tmp/vtnet2_router''', timeout=60)
+        ifconfig {device} | grep -F 'inet {address} '
+        cat /tmp/{device}_router''', timeout=60)
     print(f"DHCP lease: {result!r}", flush=True)
 
 
@@ -434,8 +453,17 @@ def same_target_probes(qemu):
             cat {LAB}/fib1.out {LAB}/fib2.out""")
         assert result.splitlines() == [f"{A} same-target", f"{B} same-target"], result
         assert evidence_count("probe-a") > before_a and evidence_count("probe-b") > before_b
+        before_a, before_b = evidence_count("probe-a"), evidence_count("probe-b")
+        package = json.loads(command(qemu, f"php {LAB}/ce291-guest.php package_fib_probe").splitlines()[-1])
+        assert package == {name: {"probe_primary": "Passed"} for name in GATEWAYS}, package
+        after_a, after_b = evidence_count("probe-a"), evidence_count("probe-b")
+        assert after_a > before_a and after_b > before_b
+        reversed_fibs = json.loads(command(qemu, f"php {LAB}/ce291-guest.php package_fib_probe reversed").splitlines()[-1])
+        assert reversed_fibs == {name: {"probe_primary": "No matching host route or source"} for name in GATEWAYS}, reversed_fibs
+        assert (evidence_count("probe-a"), evidence_count("probe-b")) == (after_a, after_b)
         assert route_and_nat(qemu) == reference
         print(f"SAME_IP_TWO_FIBS_OK: 192.0.2.168 returned via both physical WANs: {result!r}", flush=True)
+        print("PACKAGE_SAME_IP_TWO_FIBS_OK: both probes passed, reversed routes were refused before sending", flush=True)
     finally:
         for fib, (_, hop) in enumerate(GATEWAYS.values(), 1):
             command(qemu, f"route -n delete -host 192.0.2.168 -fib {fib}; "
@@ -525,20 +553,27 @@ def verify_unapplied_reload(qemu, primary, certificate):
 
 def verify_expired_sample(qemu, primary, certificate):
     worker = command(qemu, 'pgrep -f -P "$(cat /var/run/sdwand.pid)" /usr/local/sbin/sdwand.php')
-    assert worker.isdecimal(), worker
-    command(qemu, f"kill -STOP {worker}")
+    queue = command(qemu, "pgrep -u 0 -x check_reload_status")
+    assert worker.isdecimal() and queue.isdecimal(), (worker, queue)
+    command(qemu, "/usr/local/etc/rc.d/sdwand.sh watchdog_status")
+    command(qemu, f"kill -STOP {worker} {queue}")
     try:
         wait_receipt(qemu, lambda s: not s["snapshot"], 48)
-        command(qemu, "test -s /var/run/sdwan-observer.json; /etc/rc.filter_configure_sync")
+        command(qemu, """i=0
+            until grep -Fq 'Active PF rules confirmed withdrawal of the expired forwarding passes.' /var/log/system.log; do
+                i=$((i+1)); test "$i" -le 45; sleep 1
+            done
+            test -s /var/run/sdwan-observer.json""", timeout=52)
         assert_rules(loaded(qemu), {"G": None, "B": None})
         tcp_pair("stale observation", (None, None))
         management("stale observation", certificate)
     finally:
-        command(qemu, f"kill -CONT {worker}")
+        command(qemu, f"kill -CONT {queue} {worker}")
     wait_paths(qemu, "fresh observation after expiry", primary)
     command(qemu, "grep -Fq 'Previous observation expired. Its result cannot be reused' /var/log/system.log")
     tcp_pair("fresh observation after expiry", (A, A))
     print("EXPIRED_SAMPLE_BLOCKED_AND_REPORTED_IN_SYSTEM_LOGS", flush=True)
+    print("INDEPENDENT_EXPIRY_WATCHDOG_BLOCKED_TRAFFIC_WITH_OBSERVER_AND_QUEUE_SUSPENDED", flush=True)
 
 
 def worker_pid(qemu):
@@ -592,7 +627,7 @@ def verify_native_dhcp(qemu, cleanup, provider, certificate):
     assert route_and_nat(qemu) == reference
 
 
-def acceptance(qemu, cleanup, provider):
+def acceptance(qemu, cleanup, provider, *, cold_restart):
     package = f"{LAB}/candidate.pkg"
     rollback = f"{LAB}/rollback.pkg"
     digest = command(qemu, f"sha256 -q {package}")
@@ -695,16 +730,26 @@ def acceptance(qemu, cleanup, provider):
     print("Original ERP and backup TCP sessions replied after both WANs recovered", flush=True)
 
     booted = command(qemu, "sysctl -n kern.boottime")
-    qemu.sendline("shutdown -r now")
-    console_shell(qemu)
+    qemu = cold_restart(qemu)
     assert command(qemu, "sysctl -n kern.boottime") != booted
     assert command(qemu, "pkg query '%v' pfSense-pkg-SDWAN") == version
     command(qemu, "test -S /var/run/check_reload_status; /usr/local/etc/rc.d/sdwand.sh status")
+    for device in ("vtnet0", "vtnet2"):
+        assert "status: no carrier" in command(qemu, f"ifconfig {device}")
+    rebooted_offline = wait_paths(qemu, "cold boot with both carriers down", {"G": None, "B": None})
+    assert rebooted_offline["snapshot"]["observer"] == {"pid": worker_pid(qemu), "version": version}
+    tcp_pair("cold boot with no WAN", (None, None))
+    management("cold boot with no WAN", certificate)
+    qmp_command(qemu.sdwan_qmp, "set_link", name="lan2", up=True)
+    wait_lease(qemu, B, GATEWAYS["GW_B"][1])
+    wait_paths(qemu, "WAN2 restored after cold boot", {"G": "GW_B", "B": "GW_B"})
+    tcp_pair("one WAN restored after cold boot", (B, B))
+    qmp_command(qemu.sdwan_qmp, "set_link", name="lan0", up=True)
     rebooted = wait_paths(qemu, "after reboot", primary)
     assert rebooted["snapshot"]["observer"] == {"pid": worker_pid(qemu), "version": version}
     tcp_pair("after reboot", (A, A))
     assert route_and_nat(qemu) == reference
-    print("REBOOT_WITH_NATIVE_SERVICES_OK", flush=True)
+    print("COLD_BOOT_WITH_BOTH_WANS_DISCONNECTED_AND_RECOVERY_OK", flush=True)
 
     # Keep both upstreams reachable and fail only the ERP probe on WAN1. The
     # restored native route is distinguishable from the last package choice.
@@ -744,24 +789,136 @@ def acceptance(qemu, cleanup, provider):
     print("NATIVE_AND_PACKAGE_ROLLBACK_OK", flush=True)
 
 
-def appliance(image, ce_version):
+def recovery(qemu, cleanup, _provider, *, restart, image):
+    package = f"{LAB}/candidate.pkg"
+    command(qemu, f'test "$(sha256 -q {package})" = "$(cat {LAB}/candidate.sha256)"')
+    version = command(qemu, f"pkg query -F {package} '%v'")
+    assert command(qemu, "cat /etc/version") == "2.9.1-RELEASE"
+    command(qemu, f"pkg add {package}", timeout=180)
+    command(qemu, f"php {LAB}/ce291-guest.php settings")
+    stock_hash = command(qemu, "sha256 -q /etc/inc/filter.inc")
+    command(qemu, f"cp {LAB}/filter*.inc /etc/inc/; /usr/local/etc/rc.d/sdwand.sh restart")
+    command(qemu, f"php {LAB}/ce291-guest.php bind")
+    primary = {"G": "GW_A", "B": "GW_A"}
+    wait_paths(qemu, "before OS transaction", primary)
+    tcp_pair("before OS transaction", (A, A))
+    certificate = management("before OS transaction")
+    config_hash = command(qemu, f"php {LAB}/ce291-guest.php capture_config")
+    assert re.fullmatch(r"[0-9a-f]{64}", config_hash)
+    reference = route_and_nat(qemu)
+    backup_dir = cleanup.enter_context(tempfile.TemporaryDirectory(prefix="sdwan-rollback-", dir=image.parent))
+    backup = Path(backup_dir) / "ce291-before.raw"
+    qemu = restart(qemu, copy_to=backup)
+    command(qemu, f"""env ABI=FreeBSD:16:amd64 OSVERSION=1600018 REPOS_DIR={LAB}/ce292-repos \
+        /usr/local/sbin/pkg-static install -Uy pfSense pfSense-base pfSense-kernel-pfSense \
+        pfSense-system pfSense-default-config-serial""", timeout=430)
+    qemu = restart(qemu)
+    assert command(qemu, "cat /etc/version") == "2.9.2-RELEASE"
+    assert command(qemu, "pkg query '%v' pfSense-base") == "2.9.2"
+    assert command(qemu, "pkg query '%v' pfSense-kernel-pfSense") == "2.9.2"
+    assert command(qemu, "pkg query '%v' pfSense-pkg-SDWAN") == version
+    command(qemu, "pkg check -s pfSense-pkg-SDWAN")
+    assert command(qemu, f"php {LAB}/ce291-guest.php capture_config") == config_hash
+    management("after OS transaction", certificate)
+    mode = command(qemu, f"php {LAB}/ce291-guest.php mode")
+    print(f"OS_PACKAGE_TRANSACTION 2.9.1->2.9.2 adapter_after_reboot={mode}", flush=True)
+    if mode == "ABI=0":
+        assert command(qemu, "sha256 -q /etc/inc/filter.inc") == stock_hash
+        assert_rules(loaded(qemu), primary)
+        tcp_pair("stock after OS transaction", (A, A))
+        command(qemu, f"cp {LAB}/filter*.inc /etc/inc/; /usr/local/etc/rc.d/sdwand.sh restart")
+    else:
+        assert mode == "ABI=2", mode
+    wait_paths(qemu, "recovered after OS transaction", primary)
+    tcp_pair("recovered after OS transaction", (A, A))
+    assert route_and_nat(qemu) == reference
+
+    command(qemu, f"php {LAB}/ce291-guest.php restore_remapped")
+    qemu = restart(qemu, model="e1000")
+    wait_lease(qemu, B, GATEWAYS["GW_B"][1], "em2")
+    assert command(qemu, f"php {LAB}/ce291-guest.php capture_config") == config_hash
+    management("restored on em interfaces", certificate)
+    # Exercise a service-only failure and confirm the new physical devices in PF.
+    fault(f'iifname "sw-wire0" ip saddr {A} ip daddr {{ {ERP}, 192.0.2.164 }} tcp dport 7 drop')
+    try:
+        deadline = time.monotonic() + 135
+        while time.monotonic() < deadline:
+            state = observations(qemu)
+            if state["pf"] == {"G": "applied", "B": "applied"} and state["receipt"].get("confirmed"):
+                rules = loaded(qemu)
+                if ("route-to (em2 203.0.113.2)" in rules.get("41001", "") and
+                        "route-to (em0 198.51.100.2)" in rules.get("41003", "")):
+                    break
+            time.sleep(1)
+        else:
+            diagnostics(qemu)
+            raise RuntimeError("PF did not converge on the remapped interfaces")
+        tcp_pair("after interface remap", (B, A))
+    finally:
+        fault()
+    print("NATIVE_CONFIG_RESTORE_VIRTIO_TO_E1000_OK", flush=True)
+
+    qemu = restart(qemu, disk=backup)
+    wait_lease(qemu, B, GATEWAYS["GW_B"][1])
+    assert command(qemu, "cat /etc/version") == "2.9.1-RELEASE"
+    assert command(qemu, f"php {LAB}/ce291-guest.php capture_config") == config_hash
+    wait_paths(qemu, "after disk rollback", primary)
+    tcp_pair("after disk rollback", (A, A))
+    management("after disk rollback", certificate)
+    assert route_and_nat(qemu) == reference
+    print("OS_DISK_ROLLBACK_OK", flush=True)
+
+
+def appliance(image, ce_version, scenario=acceptance):
     assert os.geteuid() == 0 and Path(image).is_file()
     lab = {"2.9.1": "ce291", "2.9.2": "ce292"}[ce_version]
     with ExitStack() as cleanup:
         nets = wire(cleanup)
         provider = serve_lease(cleanup, B, GATEWAYS["GW_B"][1])
         log = cleanup.enter_context(open(f"{lab}-console.log", "w", encoding="utf-8"))
-        qemu = pexpect.spawn("qemu-system-x86_64", [
-            "-machine", "q35,accel=kvm:tcg", "-m", "3072", "-smp", "2",
-            "-drive", f"file={image},format=raw,if=virtio", "-display", "none",
-            "-serial", "stdio", "-monitor", "none", *nets,
-        ], encoding="utf-8", codec_errors="replace", timeout=120)
-        cleanup.callback(stop_vm, qemu)
-        qemu.logfile_read = log
+        def spawn(disconnected=(), disk=image, model="virtio-net-pci"):
+            control_dir = cleanup.enter_context(tempfile.TemporaryDirectory(prefix="sdwan-qmp-"))
+            control = Path(control_dir) / "control.sock"
+            process = pexpect.spawn("qemu-system-x86_64", [
+                "-machine", "q35,accel=kvm:tcg", "-m", "3072", "-smp", "2",
+                "-drive", f"file={disk},format=raw,if=virtio", "-display", "none",
+                "-serial", "stdio", "-monitor", "none", "-qmp", f"unix:{control},server=on,wait=off",
+                "-S", *(arg.replace("virtio-net-pci,", model + ",") for arg in nets),
+            ], encoding="utf-8", codec_errors="replace", timeout=120)
+            cleanup.callback(stop_vm, process)
+            process.logfile_read = log
+            process.sdwan_qmp = control
+            deadline = time.monotonic() + 10
+            while not control.exists():
+                if not process.isalive() or time.monotonic() >= deadline:
+                    raise RuntimeError("Could not open the QEMU control socket")
+                time.sleep(.05)
+            for name in disconnected:
+                qmp_command(control, "set_link", name=name, up=False)
+            qmp_command(control, "cont")
+            return process
+
+        def restart(previous, disconnected=(), disk=image, model="virtio-net-pci", copy_to=None):
+            previous.sendline("shutdown -p now")
+            previous.expect(pexpect.EOF, timeout=180)
+            previous.close()
+            if copy_to is not None:
+                subprocess.run(["cp", "--sparse=always", "--reflink=auto", image, copy_to],
+                               check=True, timeout=120)
+            restarted = spawn(disconnected, disk, model)
+            console_shell(restarted)
+            return restarted
+
+        qemu = spawn()
         first_boot(qemu, ce_version)
         wait_lease(qemu, B, GATEWAYS["GW_B"][1])
-        acceptance(qemu, cleanup, provider)
-        print(f"CE_{ce_version.replace('.', '')}_TWO_WAN_APPLIANCE_ACCEPTED", flush=True)
+        if scenario is acceptance:
+            acceptance(qemu, cleanup, provider, cold_restart=lambda previous: restart(previous, ("lan0", "lan2")))
+            print(f"CE_{ce_version.replace('.', '')}_TWO_WAN_APPLIANCE_ACCEPTED", flush=True)
+        elif scenario is recovery:
+            recovery(qemu, cleanup, provider, restart=restart, image=image)
+        else:
+            scenario(qemu, cleanup, provider)
 
 
 if __name__ == "__main__":
@@ -779,4 +936,7 @@ if __name__ == "__main__":
         ce_version = sys.argv[2] if len(sys.argv) > 2 else "2.9.1"
         if ce_version not in ("2.9.1", "2.9.2"):
             raise SystemExit(f"Unsupported pfSense CE release: {ce_version}")
-        appliance(Path(sys.argv[1]).resolve(), ce_version)
+        scenario = sys.argv[3] if len(sys.argv) > 3 else "acceptance"
+        if scenario not in ("acceptance", "recovery") or (scenario == "recovery" and ce_version != "2.9.1"):
+            raise SystemExit(f"Unsupported scenario for CE {ce_version}: {scenario}")
+        appliance(Path(sys.argv[1]).resolve(), ce_version, recovery if scenario == "recovery" else acceptance)

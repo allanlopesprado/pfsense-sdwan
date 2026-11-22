@@ -23,10 +23,23 @@ on:
         type: choice
         default: '2.9.1'
         options: ['2.9.1', '2.9.2']
+      scenario:
+        description: Acceptance, application benchmark, or operating system recovery
+        type: choice
+        default: acceptance
+        options: [acceptance, benchmark, recovery]
+      pairs:
+        description: Number of native versus SD-WAN pairs for the benchmark
+        type: number
+        default: 2
+      soak_hours:
+        description: Optional continuous observation after benchmarking, for up to 3 hours
+        type: number
+        default: 0
 permissions:
   contents: read
 concurrency:
-  group: ce-native-${{ inputs.ce_version || '2.9.1' }}-${{ github.ref }}
+  group: ce-native-${{ inputs.ce_version || '2.9.1' }}-${{ inputs.scenario || 'acceptance' }}-${{ github.ref }}
   cancel-in-progress: true
 jobs:
   package:
@@ -34,22 +47,33 @@ jobs:
   appliance:
     needs: package
     runs-on: ubuntu-24.04
-    timeout-minutes: 35
+    timeout-minutes: ${{ inputs.scenario == 'benchmark' && 300 || 45 }}
     env:
       CE_VERSION: ${{ inputs.ce_version == '2.9.2' && '2.9.2' || '2.9.1' }}
       CE_LAB: ${{ inputs.ce_version == '2.9.2' && 'ce292' || 'ce291' }}
+      CE_SCENARIO: ${{ inputs.scenario || 'acceptance' }}
+      CE_PAIRS: ${{ inputs.pairs }}
+      CE_SOAK_HOURS: ${{ inputs.soak_hours }}
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
       - name: Configure Ubuntu package mirror
         run: bash .github/scripts/ubuntu-archive.sh
+      - name: Validate scenario inputs
+        run: |
+          set -eu
+          if [ "$CE_SCENARIO" = recovery ]; then
+            test "$CE_VERSION" = 2.9.1
+          elif [ "$CE_SCENARIO" = benchmark ]; then
+            python3 -c 'import os; assert 1 <= int(os.environ["CE_PAIRS"]) <= 5; assert 0 <= float(os.environ["CE_SOAK_HOURS"]) <= 3'
+          fi
       - name: Recover the disposable disk for this pinned input
         id: disk
         uses: actions/cache/restore@v4
         with:
           path: ${{ env.CE_LAB }}.raw.gz
-          key: ${{ env.CE_LAB }}-candidate-disk-v4-${{ hashFiles('.github/workflows/ce291-appliance.yml', '.github/workflows/build-package.yml', 'tests/lab/ce291-disk.sh', 'tests/lab/ce291-guest.php', 'tests/lab/ce291-source.py', 'core/**', 'tools/prepare-core.py', 'tools/build-lab-pkg.py', 'tools/previous-dist-package.sh', 'files/**', 'Makefile', 'pkg-descr', 'pkg-plist', 'dist/pfSense-pkg-SDWAN-*.pkg*') }}
+          key: ${{ env.CE_LAB }}-candidate-disk-v5-${{ env.CE_SCENARIO == 'recovery' && 'recovery' || 'base' }}-${{ hashFiles('.github/workflows/ce291-appliance.yml', '.github/workflows/build-package.yml', 'tests/lab/ce291-disk.sh', 'tests/lab/ce291-guest.php', 'tests/lab/ce291-source.py', 'core/**', 'tools/prepare-core.py', 'tools/build-lab-pkg.py', 'tools/previous-dist-package.sh', 'files/**', 'Makefile', 'pkg-descr', 'pkg-plist', 'dist/pfSense-pkg-SDWAN-*.pkg*') }}
       - uses: actions/download-artifact@v4
         if: steps.disk.outputs.cache-hit != 'true'
         with:
@@ -78,7 +102,7 @@ jobs:
             env ASSUME_ALWAYS_YES=yes pkg bootstrap
           run: |
             set -eu
-            sh tests/lab/ce291-disk.sh "$PWD" '${{ env.CE_VERSION }}'
+            sh tests/lab/ce291-disk.sh "$PWD" '${{ env.CE_VERSION }}' '${{ env.CE_SCENARIO }}'
       - name: Cache the unbooted disk
         if: steps.disk.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
@@ -92,11 +116,23 @@ jobs:
           set -euo pipefail
           gunzip "$CE_LAB.raw.gz"
           printf 'CANDIDATE_GIT_SHA=%s\nTARGET_CE=%s\n' "$GITHUB_SHA" "$CE_VERSION" | tee "$CE_LAB-result.log"
-          sudo /usr/bin/python3 tests/lab/ce291-appliance.py "$CE_LAB.raw" "$CE_VERSION" | tee -a "$CE_LAB-result.log"
+          case "$CE_SCENARIO" in
+            acceptance)
+              sudo /usr/bin/python3 tests/lab/ce291-appliance.py "$CE_LAB.raw" "$CE_VERSION" | tee -a "$CE_LAB-result.log"
+              ;;
+            benchmark)
+              sudo /usr/bin/python3 tests/lab/ce-ab-benchmark.py "$CE_LAB.raw" "$CE_VERSION" \
+                --pairs "$CE_PAIRS" --soak-hours "$CE_SOAK_HOURS" --output ce-ab-results | tee -a "$CE_LAB-result.log"
+              ;;
+            recovery)
+              sudo /usr/bin/python3 tests/lab/ce291-appliance.py "$CE_LAB.raw" "$CE_VERSION" recovery | tee -a "$CE_LAB-result.log"
+              ;;
+          esac
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: ${{ env.CE_LAB }}-result
+          name: ${{ env.CE_LAB }}-${{ env.CE_SCENARIO }}-result
           path: |
             ${{ env.CE_LAB }}-result.log
             ${{ env.CE_LAB }}-console.log
+            ce-ab-results/

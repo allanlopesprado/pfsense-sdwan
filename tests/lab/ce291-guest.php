@@ -118,6 +118,52 @@ if ($action === 'floating_erp_block') {
     write_config('Toggle the disposable Floating ERP block');
     exit;
 }
+if ($action === 'package_fib_probe') {
+    require_once('/usr/local/pkg/sdwan_probe.inc');
+    $tables = ($argv[2] ?? '') === 'reversed' ? [2, 1] : [1, 2];
+    $config = sdwan_empty_config();
+    $observations = [];
+    foreach (['GW_A', 'GW_B'] as $index => $gateway) {
+        $config['members'][] = ['name' => $gateway, 'gateway' => $gateway, 'cost' => '10',
+            'probe_primary' => "fib={$tables[$index]} tcp://192.0.2.168:7"];
+        $observations[$gateway] = ['status' => 'online'];
+    }
+    $inventory = sdwan_gateways();
+    if (sdwan_validate_config($config, $inventory)) {
+        throw new RuntimeException('The package refused a valid layout of distinct FIBs');
+    }
+    echo json_encode(sdwan_probe_observe($config['members'], $inventory, $observations), JSON_THROW_ON_ERROR), PHP_EOL;
+    exit;
+}
+if ($action === 'capture_config') {
+    if (!copy('/cf/conf/config.xml', __DIR__ . '/nic-backup.xml') || !chmod(__DIR__ . '/nic-backup.xml', 0600)) {
+        throw new RuntimeException('Could not capture the disposable appliance backup');
+    }
+    $settings = [];
+    foreach (['installedpackages/sdwan', 'gateways/sdwan_bindings', 'filter/rule', 'nat'] as $path) {
+        $settings[$path] = config_get_path($path);
+    }
+    echo hash('sha256', serialize($settings)), PHP_EOL;
+    exit;
+}
+if ($action === 'restore_remapped') {
+    $backup = simplexml_load_file(__DIR__ . '/nic-backup.xml', SimpleXMLElement::class, LIBXML_NONET);
+    if ($backup === false) {
+        throw new RuntimeException('Could not open the appliance backup for interface reassignment');
+    }
+    foreach (['wan' => ['vtnet0', 'em0'], 'lan' => ['vtnet1', 'em1'], 'opt1' => ['vtnet2', 'em2']] as
+        $name => [$previous, $replacement]) {
+        if ((string)$backup->interfaces->{$name}->if !== $previous) {
+            throw new RuntimeException('Backup does not have the expected laboratory interface assignments');
+        }
+        $backup->interfaces->{$name}->if = $replacement;
+    }
+    $remapped = __DIR__ . '/nic-remapped.xml';
+    if (!$backup->asXML($remapped) || !chmod($remapped, 0600) || config_install($remapped) !== 0) {
+        throw new RuntimeException('Could not restore the configuration with reassigned interfaces');
+    }
+    exit;
+}
 if ($action === 'renew_wan2') {
     require_once('interfaces.inc');
     require_once('pfsense-utils.inc');
