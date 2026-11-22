@@ -192,6 +192,10 @@ def run(binary, load_filter_extension):
             assert receipt.exists()
             retry_due()
             exchange(b"OK\n")
+            assert read_receipt()["withdrawal"]["trackers"] == ["301"]
+            assert not read_receipt()["confirmed"]
+            config["fixture_pf_rules"] = []
+            assert not observe().get("steering")
             assert not receipt.exists() and not observe().get("steering")
         print("ok - stock and boot stay passive; rejected and acknowledged requests have a bounded retry budget")
         print("ok - PF confirmation resets the budget; divergent rules and expired receipts are reported")

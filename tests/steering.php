@@ -254,6 +254,29 @@ $states = [
 ];
 verify(sdwan_steering_state_ids($states, ['301'], 'igb0', '192.0.2.1') === ['000000010000000a/12345678'],
     'state recovery matches the stable tracker, exact interface, next hop and unique state identity');
+$before_unbind = $disk;
+$receipt_path = SDWAN_SNAPSHOT_PATH . '.forwarded';
+$before_requests = $pending;
+$before_writes = $writes;
+$current = $disk;
+$fail = true;
+verify(sdwan_steering_unbind('G', sdwan_steering_revision()) !== [] && $current === $disk &&
+    !is_file($receipt_path) && $pending === $before_requests,
+    'a failed binding save rolls back the withdrawal receipt without requesting native reload');
+$fail = false;
+verify(sdwan_steering_unbind('G', sdwan_steering_revision()) === [] && !sdwan_steering_bindings() &&
+    $pending === $before_requests + 1, 'the binding editor requests native reload when removing a binding');
+$withdrawal = sdwan_steering_read_receipt($receipt_path);
+verify($withdrawal['trackers'] === ['301'] && $withdrawal['withdrawal']['trackers'] === ['301'] &&
+    !$withdrawal['withdrawal']['unknown'] && !$withdrawal['confirmed'],
+    'the editor retains removed trackers before the observer runs again');
+verify(sdwan_steering_withdrawal($withdrawal, ['301']) === null &&
+    !sdwan_steering_withdrawal_confirmed($withdrawal['withdrawal'], [], null),
+    'reattached trackers cancel a pending withdrawal and unavailable PF cannot confirm it');
+unlink($receipt_path);
+$disk = $current = $before_unbind;
+$pending = $before_requests;
+$writes = $before_writes;
 $abi = 0;
 $current = $disk;
 verify(sdwan_steering_unbind('G', sdwan_steering_revision()) === [] && !sdwan_steering_bindings() &&
