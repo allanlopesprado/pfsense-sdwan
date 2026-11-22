@@ -151,6 +151,7 @@ def screenshots(directory, www, pages):
                             before, sample('revision', '3000000000', '3'),
                             before, sample('changed', '3000000000', '9007199254990993')];
                         window.fetch = async () => ({ok: true, json: async () => samples.shift()});
+                        document.documentElement.lang = 'pt_BR';
                         events.forEach(callback => callback());
                         const button = document.getElementById('sdwan-traffic-measure');
                         const results = document.getElementById('sdwan-traffic-results');
