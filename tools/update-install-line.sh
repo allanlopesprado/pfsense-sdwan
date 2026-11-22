@@ -20,7 +20,7 @@ for candidate in dist/pfSense-pkg-SDWAN-*.pkg; do
 	number=${number%.pkg}
 	printf '%s\n' "$number" | grep -Eq '^(0|[1-9][0-9]{0,8})(\.(0|[1-9][0-9]{0,8})){2}$' || continue
 	if [ -n "$version" ]; then
-		compare=$(pkg version -t "$number" "$version") || die "Cannot compare package versions."
+		compare=$(pkg version -t "$number" "$version" 2>/dev/null) || die "Cannot compare package versions."
 		[ "$compare" = '>' ] || continue
 	fi
 	version=$number

@@ -25,6 +25,8 @@ python3 tools/update-release-index.py --artifact-commit "$(git rev-parse HEAD)"
 python3 tools/update-release-index.py --check
 ```
 
+To refresh only the README after committing the package, run [`sh tools/update-install-line.sh`](../tools/update-install-line.sh) in a full Git checkout on `FreeBSD:16:amd64`.
+
 4. Include the generated files in the publishing commit and use the subject `Release X.Y.Z` or `Release X.Y.Z <description>`. Push to `main`. The workflow checks the WebGUI, FreeBSD, IPsec, and the validation matrix, requires a version newer than published releases, then creates the tag and release.
 5. After publication, verify the version, package, and SHA-256 on the release page. On an upgraded appliance, run [`verify-appliance.sh`](../tools/verify-appliance.sh) with the expected version.
 

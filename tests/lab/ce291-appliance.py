@@ -215,7 +215,7 @@ def console_shell(qemu, timeout=300):
     expect_console(qemu, r"\r+\n__SDWAN_SHELL__\r+\n", 15)
 
 
-def first_boot(qemu):
+def first_boot(qemu, ce_version):
     qemu.expect("Enter full pathname of shell", timeout=180)
     qemu.sendline("")
     qemu.expect(r"# ")
@@ -239,7 +239,8 @@ def first_boot(qemu):
         pwd_mkdb -p /etc/master.passwd; getent passwd nobody""")
     version = command(qemu, "uname -a; pkg query '%n %v' pfSense-base pfSense-kernel-pfSense")
     print(version, flush=True)
-    assert "pfSense-kernel-pfSense 2.9.1" in version, version
+    for package in ("pfSense-base", "pfSense-kernel-pfSense"):
+        assert f"{package} {ce_version}" in version.splitlines(), version
     command(qemu, "mkdir -p /root/netgate-repos; cp /root/sdwan-lab/pfsense.conf /root/netgate-repos/")
     result = command(qemu, "env ABI=FreeBSD:16:amd64 OSVERSION=1600018 REPOS_DIR=/root/netgate-repos "
                      "pkg-static install -Uy pfSense pfSense-default-config-serial", timeout=360)
@@ -251,8 +252,8 @@ def first_boot(qemu):
     command(qemu, """sed -i '' '/^boot_single=/d' /boot/loader.conf.local; sync""")
     qemu.sendline("exit")
     console_shell(qemu)
-    identity = command(qemu, "cat /etc/version; uname -a; test -S /var/run/check_reload_status")
-    assert identity.splitlines()[0] == "2.9.1-RELEASE", identity
+    identity = command(qemu, "cat /etc/version; pkg config ABI; uname -a; test -S /var/run/check_reload_status")
+    assert identity.splitlines()[:2] == [f"{ce_version}-RELEASE", "FreeBSD:16:amd64"], identity
     print(identity, flush=True)
 
 
@@ -713,12 +714,13 @@ def acceptance(qemu, cleanup, provider):
     print("NATIVE_AND_PACKAGE_ROLLBACK_OK", flush=True)
 
 
-def appliance(image):
+def appliance(image, ce_version):
     assert os.geteuid() == 0 and Path(image).is_file()
+    lab = {"2.9.1": "ce291", "2.9.2": "ce292"}[ce_version]
     with ExitStack() as cleanup:
         nets = wire(cleanup)
         provider = serve_lease(cleanup, B, GATEWAYS["GW_B"][1])
-        log = cleanup.enter_context(open("ce291-console.log", "w", encoding="utf-8"))
+        log = cleanup.enter_context(open(f"{lab}-console.log", "w", encoding="utf-8"))
         qemu = pexpect.spawn("qemu-system-x86_64", [
             "-machine", "q35,accel=kvm:tcg", "-m", "3072", "-smp", "2",
             "-drive", f"file={image},format=raw,if=virtio", "-display", "none",
@@ -726,10 +728,10 @@ def appliance(image):
         ], encoding="utf-8", codec_errors="replace", timeout=120)
         cleanup.callback(stop_vm, qemu)
         qemu.logfile_read = log
-        first_boot(qemu)
+        first_boot(qemu, ce_version)
         wait_lease(qemu, B, GATEWAYS["GW_B"][1])
         acceptance(qemu, cleanup, provider)
-        print("CE_291_TWO_WAN_APPLIANCE_ACCEPTED", flush=True)
+        print(f"CE_{ce_version.replace('.', '')}_TWO_WAN_APPLIANCE_ACCEPTED", flush=True)
 
 
 if __name__ == "__main__":
@@ -744,4 +746,7 @@ if __name__ == "__main__":
     elif sys.argv[1] in ("flow", "held"):
         client(sys.argv[2], held=sys.argv[1] == "held")
     else:
-        appliance(Path(sys.argv[1]).resolve())
+        ce_version = sys.argv[2] if len(sys.argv) > 2 else "2.9.1"
+        if ce_version not in ("2.9.1", "2.9.2"):
+            raise SystemExit(f"Unsupported pfSense CE release: {ce_version}")
+        appliance(Path(sys.argv[1]).resolve(), ce_version)

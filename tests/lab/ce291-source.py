@@ -1,23 +1,26 @@
 #!/usr/bin/env python3
-"""Extract only audited generator inputs for the CE 2.9.1 policy lab."""
+"""Extract only audited generator inputs for the CE policy lab."""
 import argparse
 import hashlib
 import json
 from pathlib import Path
 import tarfile
 
-PACKAGE_HASH = "c3f3d904d78b050c256da9e4e7702f8a98ced66891fd092236c6db98e2b9073c"
+PACKAGE_HASHES = {
+    "2.9.1": "c3f3d904d78b050c256da9e4e7702f8a98ced66891fd092236c6db98e2b9073c",
+    "2.9.2": "3c45a06b6019aeea28ebe0855d61ad95adc8ec96b4b9fa2d4602d9a3bb9c49c4",
+}
 
 
-def stage(archive, output):
+def stage(archive, output, ce_version):
     with archive.open("rb") as source:
-        if hashlib.file_digest(source, "sha256").hexdigest() != PACKAGE_HASH:
-            raise SystemExit("Expected the audited pfSense-system-2.9.1 archive")
+        if hashlib.file_digest(source, "sha256").hexdigest() != PACKAGE_HASHES[ce_version]:
+            raise SystemExit(f"Expected the audited pfSense-system-{ce_version} archive")
     output.mkdir()
     with tarfile.open(archive, mode="r:*") as package:
         manifest = json.load(package.extractfile("+MANIFEST"))
-        if manifest["name"] != "pfSense-system" or manifest["version"] != "2.9.1":
-            raise SystemExit("The archive does not identify itself as pfSense-system 2.9.1")
+        if manifest["name"] != "pfSense-system" or manifest["version"] != ce_version:
+            raise SystemExit(f"The archive does not identify itself as pfSense-system {ce_version}")
         for name in ("filter.inc", "globals.inc", "util.inc"):
             matching = [item for item in package.getmembers() if item.name.lstrip("./") == f"etc/inc/{name}"]
             if len(matching) != 1 or not matching[0].isfile():
@@ -31,4 +34,5 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("archive", type=Path)
     parser.add_argument("output", type=Path)
+    parser.add_argument("--ce-version", choices=PACKAGE_HASHES, default="2.9.1")
     stage(**vars(parser.parse_args()))

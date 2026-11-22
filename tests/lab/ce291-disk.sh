@@ -4,7 +4,13 @@ set -eu
 test "$(uname -s)" = FreeBSD
 test "$(id -u)" = 0
 out=$(realpath "$1")
-set -- "$out"/ce291-package/*.pkg
+version=${2:-2.9.1}
+case "$version" in
+    2.9.1) lab=ce291; series=2_9_1 ;;
+    2.9.2) lab=ce292; series=2_9_2 ;;
+    *) echo "Unsupported pfSense CE release: $version" >&2; exit 2 ;;
+esac
+set -- "$out"/ce-candidate-package/*.pkg
 test "$#" -eq 1
 test -f "$1"
 candidate=$1
@@ -12,9 +18,9 @@ rollback="$out/dist/pfSense-pkg-SDWAN-0.4.27.pkg"
 for package in "$candidate" "$rollback"; do
     test "$(sha256 -q "$package")" = "$(awk 'NR == 1 {print $1}' "$package.sha256")"
 done
-work=$(mktemp -d /tmp/ce291.XXXXXX)
+work=$(mktemp -d "/tmp/$lab.XXXXXX")
 root="$work/root"
-image="$work/ce291.raw"
+image="$work/$lab.raw"
 device=
 mounted=
 cleanup() {
@@ -33,16 +39,16 @@ cat > "$work/keys/trusted/netgate" <<'KEY'
 function: sha256
 fingerprint: 30be9cc2e7b2b3ba1ff3b2be1795f3f0719ab9a65322695703dc7b8f004035a8
 KEY
-mirror=https://pkg01-atx.netgate.com/pfSense_v2_9_1_amd64
+mirror="https://pkg01-atx.netgate.com/pfSense_v${series}_amd64"
 cat > "$work/repos/pfsense.conf" <<REPO
 ce-core: { url: "$mirror-core", enabled: yes, signature_type: "fingerprints", fingerprints: "/root/netgate-keys" }
-ce-system: { url: "$mirror-pfSense_v2_9_1", enabled: yes, signature_type: "fingerprints", fingerprints: "/root/netgate-keys" }
+ce-system: { url: "$mirror-pfSense_v$series", enabled: yes, signature_type: "fingerprints", fingerprints: "/root/netgate-keys" }
 REPO
 truncate -s 4G "$image"
 device=$(mdconfig -a -t vnode -f "$image")
 gpart create -s GPT "$device"
 gpart add -a 4k -s 512k -t freebsd-boot "$device"
-gpart add -a 1m -l sdwan291 -t freebsd-ufs "$device"
+gpart add -a 1m -l "$lab" -t freebsd-ufs "$device"
 newfs -U "/dev/${device}p2"
 mount "/dev/${device}p2" "$root"
 mounted=yes
@@ -67,7 +73,7 @@ cp "$rollback" "$root/root/sdwan-lab/"
 test -s "$root/boot/gptboot"
 test -s "$root/boot/kernel/kernel"
 gpart bootcode -b "$root/boot/pmbr" -p "$root/boot/gptboot" -i 1 "$device"
-printf '/dev/gpt/sdwan291 / ufs rw 1 1\n' > "$root/etc/fstab"
+printf '/dev/gpt/%s / ufs rw 1 1\n' "$lab" > "$root/etc/fstab"
 cat > "$root/boot/loader.conf.local" <<'LOADER'
 boot_single="YES"
 console="comconsole"
@@ -80,4 +86,4 @@ umount "$root"
 mounted=
 mdconfig -d -u "${device#md}"
 device=
-gzip -1c "$image" > "$out/ce291.raw.gz"
+gzip -1c "$image" > "$out/$lab.raw.gz"

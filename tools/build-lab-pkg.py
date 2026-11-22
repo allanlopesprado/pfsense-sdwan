@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import re
 import subprocess
+import sys
 import tarfile
 import tempfile
 
@@ -87,11 +88,16 @@ def build(metadata, pkg, output, epoch):
             payload = [m for m in archive.getmembers() if not m.name.startswith("+")]
             if len(payload) != len(expected):
                 raise ValueError("Unexpected payload count")
+            owner_ids = {(0, 0)}
+            # Native pkg uses 65534 for deterministic tar IDs on FreeBSD.
+            # pkg add resolves the owner and group from the required names.
+            if sys.platform.startswith("freebsd"):
+                owner_ids.add((65534, 65534))
             for member in payload:
                 path = "/" + member.name.lstrip("/")
                 data, mode = expected[path]
                 if (not member.isfile() or archive.extractfile(member).read() != data or
-                        (member.mode & 0o7777) != mode or member.uid != 0 or member.gid != 0 or
+                        (member.mode & 0o7777) != mode or (member.uid, member.gid) not in owner_ids or
                         member.uname != "root" or member.gname != "wheel"):
                     raise ValueError(f"Invalid payload, ownership or mode: {path} {member.mode:o} {member.uid} {member.gid} {member.uname} {member.gname}")
         output.mkdir(parents=True, exist_ok=True)

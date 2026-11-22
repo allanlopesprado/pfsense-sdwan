@@ -1,4 +1,4 @@
-name: CE 2.9.1 two-WAN appliance
+name: CE two-WAN appliance
 on:
   push:
     branches: ['lab/ce291-candidate', 'fix/multiwan-reconciliation']
@@ -16,10 +16,16 @@ on:
       - 'tools/build-lab-pkg.py'
       - 'dist/pfSense-pkg-SDWAN-0.4.27.pkg*'
   workflow_dispatch:
+    inputs:
+      ce_version:
+        description: pfSense CE release for the isolated appliance
+        type: choice
+        default: '2.9.1'
+        options: ['2.9.1', '2.9.2']
 permissions:
   contents: read
 concurrency:
-  group: ce291-native-${{ github.ref }}
+  group: ce-native-${{ inputs.ce_version || '2.9.1' }}-${{ github.ref }}
   cancel-in-progress: true
 jobs:
   package:
@@ -28,6 +34,9 @@ jobs:
     needs: package
     runs-on: ubuntu-24.04
     timeout-minutes: 35
+    env:
+      CE_VERSION: ${{ inputs.ce_version == '2.9.2' && '2.9.2' || '2.9.1' }}
+      CE_LAB: ${{ inputs.ce_version == '2.9.2' && 'ce292' || 'ce291' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -38,25 +47,26 @@ jobs:
         id: disk
         uses: actions/cache/restore@v4
         with:
-          path: ce291.raw.gz
-          key: ce291-candidate-disk-v2-${{ hashFiles('.github/workflows/build-package.yml', 'tests/lab/ce291-disk.sh', 'tests/lab/ce291-guest.php', 'tests/lab/ce291-source.py', 'core/**', 'tools/prepare-core.py', 'tools/build-lab-pkg.py', 'files/**', 'Makefile', 'pkg-descr', 'pkg-plist', 'dist/pfSense-pkg-SDWAN-0.4.27.pkg*') }}
+          path: ${{ env.CE_LAB }}.raw.gz
+          key: ${{ env.CE_LAB }}-candidate-disk-v3-${{ hashFiles('.github/workflows/ce291-appliance.yml', '.github/workflows/build-package.yml', 'tests/lab/ce291-disk.sh', 'tests/lab/ce291-guest.php', 'tests/lab/ce291-source.py', 'core/**', 'tools/prepare-core.py', 'tools/build-lab-pkg.py', 'files/**', 'Makefile', 'pkg-descr', 'pkg-plist', 'dist/pfSense-pkg-SDWAN-0.4.27.pkg*') }}
       - uses: actions/download-artifact@v4
         if: steps.disk.outputs.cache-hit != 'true'
         with:
           name: sdwan-package
-          path: ce291-package
-      - name: Prepare the audited CE 2.9.1 adapter
+          path: ce-candidate-package
+      - name: Prepare the audited CE adapter
         if: steps.disk.outputs.cache-hit != 'true'
         run: |
           set -euo pipefail
-          archive="$RUNNER_TEMP/pfSense-system-2.9.1.pkg"
+          series=${CE_VERSION//./_}
+          archive="$RUNNER_TEMP/pfSense-system-$CE_VERSION.pkg"
           curl --fail --silent --show-error --retry 2 --max-time 150 --proto '=https' \
             --output "$archive" \
-            'https://pkg01-atx.netgate.com/pfSense_v2_9_1_amd64-pfSense_v2_9_1/All/pfSense-system-2.9.1.pkg'
-          python3 tests/lab/ce291-source.py "$archive" lab-ce291
-          sha256sum lab-ce291/src/etc/inc/filter.inc
-          # The verified CE 2.9.1 package ships the same audited generator as CE 2.9.2.
-          python3 tools/prepare-core.py --ce-292-lab --source lab-ce291 --out lab-overlay
+            "https://pkg01-atx.netgate.com/pfSense_v${series}_amd64-pfSense_v${series}/All/pfSense-system-${CE_VERSION}.pkg"
+          python3 tests/lab/ce291-source.py "$archive" lab-source --ce-version "$CE_VERSION"
+          sha256sum "$archive" lab-source/src/etc/inc/filter.inc
+          # Both verified system packages ship the same audited generator.
+          python3 tools/prepare-core.py --ce-292-lab --source lab-source --out lab-overlay
       - name: Create a disk from signed Netgate packages
         if: steps.disk.outputs.cache-hit != 'true'
         uses: vmactions/freebsd-vm@4441bea20b31bfa77329a5af583199362489567e # v1.4.9
@@ -67,25 +77,25 @@ jobs:
             env ASSUME_ALWAYS_YES=yes pkg bootstrap
           run: |
             set -eu
-            sh tests/lab/ce291-disk.sh "$PWD"
+            sh tests/lab/ce291-disk.sh "$PWD" '${{ env.CE_VERSION }}'
       - name: Cache the unbooted disk
         if: steps.disk.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
-          path: ce291.raw.gz
+          path: ${{ env.CE_LAB }}.raw.gz
           key: ${{ steps.disk.outputs.cache-primary-key }}
       - name: Install QEMU for the isolated appliance
         run: sudo apt-get install -y --no-install-recommends qemu-system-x86 nftables python3-pexpect dnsmasq-base
       - name: Run native installation, PF reload, reboot and rollback
         run: |
           set -euo pipefail
-          gunzip ce291.raw.gz
-          printf 'CANDIDATE_GIT_SHA=%s\n' "$GITHUB_SHA" | tee ce291-result.log
-          sudo /usr/bin/python3 tests/lab/ce291-appliance.py ce291.raw | tee -a ce291-result.log
+          gunzip "$CE_LAB.raw.gz"
+          printf 'CANDIDATE_GIT_SHA=%s\nTARGET_CE=%s\n' "$GITHUB_SHA" "$CE_VERSION" | tee "$CE_LAB-result.log"
+          sudo /usr/bin/python3 tests/lab/ce291-appliance.py "$CE_LAB.raw" "$CE_VERSION" | tee -a "$CE_LAB-result.log"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: ce291-result
+          name: ${{ env.CE_LAB }}-result
           path: |
-            ce291-result.log
-            ce291-console.log
+            ${{ env.CE_LAB }}-result.log
+            ${{ env.CE_LAB }}-console.log

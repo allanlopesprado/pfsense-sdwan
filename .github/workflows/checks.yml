@@ -184,6 +184,8 @@ jobs:
             mkdir -p "$candidate/root/var/db/pkg" "$candidate/root/var/cache/pkg"
             /usr/local/sbin/pkg-static -r "$candidate/root" -o ABI=FreeBSD:16:amd64 -o OSVERSION=1600018 add -I "$candidate"/artifacts/*.pkg
             /usr/local/sbin/pkg-static -r "$candidate/root" -o ABI=FreeBSD:16:amd64 -o OSVERSION=1600018 check -s pfSense-pkg-SDWAN
+            test "$(stat -f '%u:%g %Lp' "$candidate/root/etc/inc/priv/sdwan.priv.inc")" = '0:0 644'
+            test "$(stat -f '%u:%g %Lp' "$candidate/root/usr/local/etc/rc.d/sdwand.sh")" = '0:0 755'
             python3 -B tests/steering_daemon.py php --load-filter-extension
             sh tests/freebsd-install.sh
             sh tests/lab/freebsd-system-log.sh "$PWD/lab-syslog/syslog.inc" --source-only
