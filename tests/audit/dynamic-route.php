@@ -27,6 +27,12 @@ foreach ($sources as $name) {
             [var_export($directory . '/snapshot.json', true), 'fixture_time()'],
             $code,
         );
+    } elseif ($name === 'sdwan_probe.inc') {
+        $code = str_replace(
+            ["!is_executable('/sbin/route')", "!is_executable('/bin/timeout')", "exec('/bin/timeout 0.3 /sbin/route"],
+            ['false', 'false', "fixture_route_get('/bin/timeout 0.3 /sbin/route"],
+            $code,
+        );
     }
     file_put_contents($directory . '/' . $name, $code);
 }
@@ -52,6 +58,19 @@ function get_interface_gateway($interface): ?string {
 
 function find_interface_ip($device, $refresh): ?string {
     return config_get_path('fixture/source/' . $device);
+}
+
+function interface_isppp_type($interface): bool {
+    return (config_get_path('interfaces', [])[$interface]['ipaddr'] ?? null) === 'pppoe';
+}
+
+function pfSense_get_ifaddrs($device): ?array {
+    return config_get_path('fixture/interface/' . $device);
+}
+
+function fixture_route_get(string $command, &$lines, &$result): void {
+    $lines = explode("\n", config_get_path('fixture/route-output', ''));
+    $result = config_get_path('fixture/route-exit', 0);
 }
 
 function fixture_append(
@@ -193,6 +212,52 @@ fixture_append($result, 'probe_ipv6_infers_omitted_zone_from_device', 'matching'
     sdwan_probe_route_matches(str_replace('%em0', '', $linkLocalRoute), 'em0', 'fe80::1%em0') ? 'matching' : 'rejected');
 fixture_append($result, 'probe_ipv6_global_next_hop_has_no_zone', 'rejected',
     sdwan_probe_route_matches(str_replace('fe80::1', '2001:db8::1', $linkLocalRoute), 'em0', '2001:db8::1') ? 'matching' : 'rejected');
+$directRoute = "   route to: 203.0.113.53\n destination: 203.0.113.53\n  interface: pppoe0\n      flags: <UP,HOST,DONE,STATIC>";
+$directCases = [
+    'ppp_direct_host_route' => [$directRoute, 'pppoe0', '203.0.113.53', 'matching'],
+    'ppp_config_without_live_point_to_point' => [$directRoute, 'pppoe0', null, 'rejected'],
+    'ppp_interface_mismatch' => [$directRoute, 'pppoe1', '203.0.113.53', 'rejected'],
+    'ppp_destination_mismatch' => [$directRoute, 'pppoe0', '203.0.113.54', 'rejected'],
+    'ppp_route_to_is_not_destination' => [str_replace('destination:', 'lookup:', $directRoute), 'pppoe0', '203.0.113.53', 'rejected'],
+    'ppp_connected_network' => [str_replace('HOST,', '', $directRoute), 'pppoe0', '203.0.113.53', 'rejected'],
+    'ppp_route_not_up' => [str_replace('UP,', '', $directRoute), 'pppoe0', '203.0.113.53', 'rejected'],
+    'ppp_route_rejects' => [str_replace('STATIC', 'STATIC,REJECT', $directRoute), 'pppoe0', '203.0.113.53', 'rejected'],
+    'ppp_route_is_blackhole' => [str_replace('STATIC', 'STATIC,BLACKHOLE', $directRoute), 'pppoe0', '203.0.113.53', 'rejected'],
+    'ppp_gateway_flag_missing_address' => [str_replace('UP,', 'UP,GATEWAY,', $directRoute), 'pppoe0', '203.0.113.53', 'rejected'],
+    'ppp_gateway_field_is_link_metadata' => [$directRoute . "\ngateway: link#12", 'pppoe0', '203.0.113.53', 'rejected'],
+    'ppp_gateway_field_is_empty' => [$directRoute . "\ngateway: ", 'pppoe0', '203.0.113.53', 'rejected'],
+    'ppp_ipv6_direct_host_route' => [str_replace('203.0.113.53', '2001:0db8:0:0::53', $directRoute), 'pppoe0', '2001:db8::53', 'matching'],
+];
+foreach ($directCases as $case => [$route, $device, $destination, $expected]) {
+    $nextHop = str_contains($destination ?? '', ':') ? 'fe80::1%pppoe0' : '192.0.2.1';
+    fixture_append($result, $case, $expected,
+        sdwan_probe_route_matches($route, $device, $nextHop, $destination) ? 'matching' : 'rejected',
+        $expected === 'matching' ? 'rejected' : null);
+}
+$beforePpp = $current;
+$current['interfaces']['wan'] = ['enable' => '', 'if' => 'pppoe0', 'ipaddr' => 'pppoe'];
+$current['fixture/source/pppoe0'] = '192.0.2.10';
+$current['fixture/interface/pppoe0'] = ['pointtopoint' => 1, 'status' => 'up'];
+$current['fixture/route-output'] = $directRoute;
+$target = sdwan_probe_target('tcp://203.0.113.53:443');
+$probeGateway = ['interface' => 'wan', 'address' => 'dynamic', 'family' => 'inet'];
+$originalPath = sdwan_probe_path($target, $probeGateway);
+fixture_append($result, 'ppp_live_route_path', 'pppoe0/192.0.2.10/192.0.2.1',
+    $originalPath === null ? 'rejected' : implode('/', $originalPath), 'rejected');
+$current['fixture/gateway/wan'] = '192.0.2.2';
+fixture_append($result, 'ppp_reconnected_peer_changes_path', 'changed',
+    sdwan_probe_path($target, $probeGateway) !== $originalPath ? 'changed' : 'unchanged', 'unchanged');
+$current['fixture/interface/pppoe0']['status'] = 'down';
+fixture_append($result, 'ppp_direct_route_on_down_interface', 'rejected',
+    sdwan_probe_path($target, $probeGateway) === null ? 'rejected' : 'matching');
+$current['fixture/interface/pppoe0'] = ['status' => 'up'];
+fixture_append($result, 'ppp_direct_route_on_broadcast_interface', 'rejected',
+    sdwan_probe_path($target, $probeGateway) === null ? 'rejected' : 'matching');
+$current['fixture/interface/pppoe0']['pointtopoint'] = 1;
+$current['interfaces']['wan']['ipaddr'] = 'dhcp';
+fixture_append($result, 'ppp_unmanaged_point_to_point_route', 'rejected',
+    sdwan_probe_path($target, $probeGateway) === null ? 'rejected' : 'matching');
+$current = $beforePpp;
 $current['staticroutes/route'][] = ['network' => '203.0.113.78/32', 'gateway' => 'B'];
 fixture_append($result, 'unrelated_route_change_control', 'current/A', fixture_decision($settings, $wire, $rule));
 $current['staticroutes/route'][0]['gateway'] = 'B';

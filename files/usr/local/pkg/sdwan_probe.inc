@@ -44,7 +44,7 @@ function sdwan_probe_tcp_status($socket): ?bool {
 	return $ready === 0 ? null : ($ready === 1 && @stream_socket_get_name($socket, true) !== false);
 }
 
-function sdwan_probe_route_matches(string $output, string $device, string $next_hop): bool {
+function sdwan_probe_route_matches(string $output, string $device, string $next_hop, ?string $direct_target = null): bool {
 	if (!preg_match('/^[ \t]*flags:[ \t]*<([^>\r\n]+)>/m', $output, $route_flags)) {
 		return false;
 	}
@@ -53,10 +53,17 @@ function sdwan_probe_route_matches(string $output, string $device, string $next_
 	    in_array('REJECT', $flags, true) || in_array('BLACKHOLE', $flags, true)) {
 		return false;
 	}
-	return preg_match('/^\s*interface:\s*(\S+)\s*$/m', $output, $route_device) &&
-	    $route_device[1] === $device &&
-	    preg_match('/^\s*gateway:\s*(\S+)\s*$/m', $output, $route_gateway) &&
-	    sdwan_next_hop_matches($route_gateway[1], $next_hop, $device);
+	if (!preg_match('/^[ \t]*interface:[ \t]*(\S+)[ \t]*\r?$/m', $output, $route_device) || $route_device[1] !== $device) {
+		return false;
+	}
+	if (preg_match('/^[ \t]*gateway:([^\r\n]*)/m', $output, $route_gateway)) {
+		return sdwan_next_hop_matches(trim($route_gateway[1]), $next_hop, $device);
+	}
+	/* route(8) omits the gateway field for interface routes. Only a live PPP
+	 * device can use this form, and the route must pin the exact destination. */
+	return $direct_target !== null && !in_array('GATEWAY', $flags, true) &&
+	    preg_match('/^[ \t]*destination:[ \t]*(\S+)[ \t]*\r?$/m', $output, $route_destination) &&
+	    sdwan_next_hop_matches($route_destination[1], $direct_target, $device);
 }
 
 function sdwan_probe_dns_question(string $name): string {
@@ -148,8 +155,8 @@ function sdwan_probe_dns_answer(string $reply, int $id, string $question): bool 
 	return isset($addresses[$name]);
 }
 
-/* All sockets are bound to the live interface source. Require an exact native
- * host route via the same gateway, and check it again before accepting results. */
+/* All sockets are bound to the live interface source. Require a native host
+ * route pinned to the gateway or its PPP link, and check it again before accepting results. */
 function sdwan_probe_path(array $target, array $gateway): ?array {
 	$family = $target['family'];
 	if ($family !== $gateway['family'] || !function_exists('exec') ||
@@ -175,7 +182,18 @@ function sdwan_probe_path(array $target, array $gateway): ?array {
 		return null;
 	}
 	exec('/bin/timeout 0.3 /sbin/route -n get -' . $family . ' ' . escapeshellarg($target['address']) . ' 2>/dev/null', $lines, $result);
-	return $result === 0 && sdwan_probe_route_matches(implode("\n", $lines), $device, $next)
+	if ($result !== 0) {
+		return null;
+	}
+	$output = implode("\n", $lines);
+	$direct_target = null;
+	if (function_exists('interface_isppp_type') && interface_isppp_type($interface) && function_exists('pfSense_get_ifaddrs')) {
+		$interface_data = pfSense_get_ifaddrs($device);
+		if (($interface_data['pointtopoint'] ?? null) === 1 && ($interface_data['status'] ?? null) === 'up') {
+			$direct_target = $target['address'];
+		}
+	}
+	return sdwan_probe_route_matches($output, $device, $next, $direct_target)
 	    ? ['device' => $device, 'source' => $source, 'next_hop' => $next] : null;
 }
 
