@@ -107,6 +107,7 @@ verify(sdwan_steering_decode($stored_binding) === null, 'Ambiguous XML group is 
 echo "ok - native XML restores a forwarding binding without accepting ambiguous group names\n";
 
 require_once $local . '/pkg/sdwan_engine.inc';
+$system['installedpackages']['sdwan'] = sdwan_encode_config($single);
 $system['interfaces'] = ['wan' => ['enable' => '', 'if' => 'em0']];
 $system['gateways']['gateway_item'] = [['name' => 'GW', 'interface' => 'wan', 'gateway' => '192.0.2.1']];
 $import = static function (array $system) use ($temp): void {

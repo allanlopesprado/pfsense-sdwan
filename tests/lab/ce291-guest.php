@@ -120,8 +120,8 @@ if ($action === 'observations') {
         $signature = sdwan_steering_runtime_signature($snapshot, $inventory);
         $native = sdwan_steering_native($inventory);
         $rules = sdwan_steering_pf_rules();
-        if ($rules !== null) {
-            $ruleset = sdwan_steering_loaded_ruleset($rules);
+        if ($rules !== null && function_exists('filter_sdwan_ruleset_hash')) {
+            $ruleset = filter_sdwan_ruleset_hash($rules);
         }
         foreach (sdwan_steering_bindings() as $group => $binding) {
             $check = sdwan_steering_preflight($package_settings, $binding['policy'], $group, $native);

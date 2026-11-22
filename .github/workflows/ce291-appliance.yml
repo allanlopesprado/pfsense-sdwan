@@ -4,6 +4,7 @@ on:
     branches: ['lab/ce291-candidate', 'fix/multiwan-reconciliation']
     paths:
       - '.github/workflows/ce291-appliance.yml'
+      - '.github/workflows/build-package.yml'
       - '.github/scripts/ubuntu-archive.sh'
       - 'tests/lab/ce291-*'
       - 'core/**'
@@ -21,7 +22,10 @@ concurrency:
   group: ce291-native-${{ github.ref }}
   cancel-in-progress: true
 jobs:
+  package:
+    uses: ./.github/workflows/build-package.yml
   appliance:
+    needs: package
     runs-on: ubuntu-24.04
     timeout-minutes: 35
     steps:
@@ -35,7 +39,12 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: ce291.raw.gz
-          key: ce291-candidate-disk-v1-${{ hashFiles('tests/lab/ce291-disk.sh', 'tests/lab/ce291-guest.php', 'tests/lab/ce291-source.py', 'core/**', 'tools/prepare-core.py', 'tools/build-lab-pkg.py', 'files/**', 'Makefile', 'pkg-descr', 'pkg-plist', 'dist/pfSense-pkg-SDWAN-0.4.27.pkg*') }}
+          key: ce291-candidate-disk-v2-${{ hashFiles('.github/workflows/build-package.yml', 'tests/lab/ce291-disk.sh', 'tests/lab/ce291-guest.php', 'tests/lab/ce291-source.py', 'core/**', 'tools/prepare-core.py', 'tools/build-lab-pkg.py', 'files/**', 'Makefile', 'pkg-descr', 'pkg-plist', 'dist/pfSense-pkg-SDWAN-0.4.27.pkg*') }}
+      - uses: actions/download-artifact@v4
+        if: steps.disk.outputs.cache-hit != 'true'
+        with:
+          name: sdwan-package
+          path: ce291-package
       - name: Prepare the audited CE 2.9.1 adapter
         if: steps.disk.outputs.cache-hit != 'true'
         run: |
@@ -48,7 +57,7 @@ jobs:
           sha256sum lab-ce291/src/etc/inc/filter.inc
           # The verified CE 2.9.1 package ships the same audited generator as CE 2.9.2.
           python3 tools/prepare-core.py --ce-292-lab --source lab-ce291 --out lab-overlay
-      - name: Build the checked-out package and create a disk from signed Netgate packages
+      - name: Create a disk from signed Netgate packages
         if: steps.disk.outputs.cache-hit != 'true'
         uses: vmactions/freebsd-vm@4441bea20b31bfa77329a5af583199362489567e # v1.4.9
         with:
@@ -56,10 +65,8 @@ jobs:
           usesh: true
           prepare: |
             env ASSUME_ALWAYS_YES=yes pkg bootstrap
-            pkg install -y python311
           run: |
             set -eu
-            /usr/local/bin/python3.11 tools/build-lab-pkg.py --pkg /usr/local/sbin/pkg-static --output ce291-package
             sh tests/lab/ce291-disk.sh "$PWD"
       - name: Cache the unbooted disk
         if: steps.disk.outputs.cache-hit != 'true'
