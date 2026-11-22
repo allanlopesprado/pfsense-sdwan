@@ -45,7 +45,9 @@ jobs:
             --output "$archive" \
             'https://pkg01-atx.netgate.com/pfSense_v2_9_1_amd64-pfSense_v2_9_1/All/pfSense-system-2.9.1.pkg'
           python3 tests/lab/ce291-source.py "$archive" lab-ce291
-          python3 tools/prepare-core.py --ce-291-lab --source lab-ce291 --out lab-overlay
+          sha256sum lab-ce291/src/etc/inc/filter.inc
+          # The verified CE 2.9.1 package ships the same audited generator as CE 2.9.2.
+          python3 tools/prepare-core.py --ce-292-lab --source lab-ce291 --out lab-overlay
       - name: Build the checked-out package and create a disk from signed Netgate packages
         if: steps.disk.outputs.cache-hit != 'true'
         uses: vmactions/freebsd-vm@4441bea20b31bfa77329a5af583199362489567e # v1.4.9
