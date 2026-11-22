@@ -24,10 +24,10 @@ on:
         default: '2.9.1'
         options: ['2.9.1', '2.9.2']
       scenario:
-        description: Acceptance, focused path checks, application benchmark, or system recovery
+        description: Appliance acceptance, diagnostics, recovery, or package security inventory
         type: choice
         default: acceptance
-        options: [acceptance, paths, benchmark, recovery, shared-target, inspection, activation-guard]
+        options: [acceptance, paths, benchmark, recovery, shared-target, inspection, activation-guard, security]
       pairs:
         description: Number of native versus SD-WAN pairs for the benchmark
         type: number
@@ -85,6 +85,7 @@ jobs:
             python3 -c 'import os; pairs = int(os.environ["CE_PAIRS"]); soak = float(os.environ["CE_SOAK_HOURS"]); assert 0 <= pairs <= 5 and 0 <= soak <= 3 and (pairs or soak >= 6/3600); assert 6 <= int(os.environ["CE_FAULT_INTERVAL"]) <= 86400; assert 0 <= int(os.environ["CE_RECOVERY_HOLD"]) <= 300'
           fi
       - name: Recover the disposable disk for this pinned input
+        if: env.CE_SCENARIO != 'security'
         id: disk
         uses: actions/cache/restore@v4
         with:
@@ -96,7 +97,7 @@ jobs:
           name: sdwan-package
           path: ce-candidate-package
       - name: Prepare the audited CE adapter
-        if: steps.disk.outputs.cache-hit != 'true'
+        if: env.CE_SCENARIO != 'security' && steps.disk.outputs.cache-hit != 'true'
         run: |
           set -euo pipefail
           series=${CE_VERSION//./_}
@@ -108,7 +109,7 @@ jobs:
           sha256sum "$archive" lab-source/src/etc/inc/filter.inc
           # Both verified system packages ship the same audited generator.
           python3 tools/prepare-core.py --ce-292-lab --source lab-source --out lab-overlay
-      - name: Create a disk from signed Netgate packages
+      - name: Prepare and verify signed Netgate packages
         if: steps.disk.outputs.cache-hit != 'true'
         uses: vmactions/freebsd-vm@4441bea20b31bfa77329a5af583199362489567e # v1.4.9
         with:
@@ -120,14 +121,16 @@ jobs:
             set -eu
             sh tests/lab/ce291-disk.sh "$PWD" '${{ env.CE_VERSION }}' '${{ env.CE_SCENARIO }}'
       - name: Cache the unbooted disk
-        if: steps.disk.outputs.cache-hit != 'true'
+        if: env.CE_SCENARIO != 'security' && steps.disk.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
           path: ${{ env.CE_LAB }}.raw.gz
           key: ${{ steps.disk.outputs.cache-primary-key }}
       - name: Install QEMU for the isolated appliance
+        if: env.CE_SCENARIO != 'security'
         run: sudo apt-get install -y --no-install-recommends qemu-system-x86 nftables python3-pexpect dnsmasq-base openssl tcpdump
       - name: Run native installation, PF reload, reboot and rollback
+        if: env.CE_SCENARIO != 'security'
         run: |
           set -euo pipefail
           gunzip "$CE_LAB.raw.gz"
@@ -162,4 +165,19 @@ jobs:
           path: |
             ${{ env.CE_LAB }}-result.log
             ${{ env.CE_LAB }}-console.log
+            ${{ env.CE_LAB }}-security/
             ce-ab-results/
+      - name: Check the VuXML report
+        if: env.CE_SCENARIO == 'security'
+        run: |
+          set -euo pipefail
+          report="$CE_LAB-security"
+          test "$(wc -l < "$report/packages.txt")" -gt 1
+          matches=$(jq -er '.pkg_count | select(type == "number" and . >= 0)' "$report/vuxml.json")
+          printf 'CE %s · %s packages audited · %s VuXML package matches\n' \
+            "$CE_VERSION" "$(wc -l < "$report/packages.txt")" "$matches" | tee -a "$GITHUB_STEP_SUMMARY"
+          if [ "$matches" -ne 0 ]; then
+            jq -r '.packages | keys[]' "$report/vuxml.json"
+            exit 1
+          fi
+          grep -qx 'PKG_AUDIT_EXIT=0' "$report/metadata.txt"
