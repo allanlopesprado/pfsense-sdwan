@@ -9,6 +9,7 @@ from pathlib import Path
 TARGET = "192.0.2.168"
 NO_PATH = "No matching host route or source"
 PROTOCOLS = {"dns": "udp dport 53", "https": "tcp dport 443 tcp flags & (syn | ack) == syn"}
+PATH_CHECKS = ("dns", "dns_aaaa", "https")
 MONITOR = {"GW_A": ("sw-wire0", "a"), "GW_B": ("sw-wire2", "b")}
 
 
@@ -54,7 +55,7 @@ def remove_routes(ce, qemu):
 
 
 def measure(ce, qemu, protocol, expected, expected_sends, *, mode="normal", renewed=False):
-    name = "https" if protocol.startswith("https") else protocol
+    name = protocol.split("_", 1)[0]
     wan2_source = "renewed" if renewed else "expected"
     labels = [f"shared-{name}-a-total", f"shared-{name}-a-expected",
               f"shared-{name}-b-total", f"shared-{name}-b-{wan2_source}"]
@@ -80,11 +81,11 @@ def renew_wan2(ce, qemu, cleanup, provider):
     try:
         ce.command(qemu, f"php {ce.LAB}/ce291-guest.php renew_wan2", timeout=90)
         ce.wait_lease(qemu, renewed_ip, renewed_hop)
-        for protocol in PROTOCOLS:
+        for protocol in PATH_CHECKS:
             measure(ce, qemu, protocol, ("Passed", NO_PATH), (True, False), renewed=True)
         remove_route(ce, qemu, 2, original_hop)
         configure_route(ce, qemu, 2, device, renewed_hop)
-        for protocol in PROTOCOLS:
+        for protocol in PATH_CHECKS:
             measure(ce, qemu, protocol, ("Passed", "Passed"), (True, True), renewed=True)
     finally:
         remove_route(ce, qemu, 2, renewed_hop)
@@ -96,28 +97,35 @@ def renew_wan2(ce, qemu, cleanup, provider):
 
 
 def exercise(ce, benchmark, qemu, cleanup, provider):
-    ce.install_bound_candidate(qemu)
+    version, _ = ce.install_bound_candidate(qemu)
+    ce.wait_paths(qemu, "before installed package verification", {"G": "GW_A", "B": "GW_A"})
+    verification = ce.command(qemu, f"sh {ce.LAB}/verify-appliance.sh {version} --forwarding", timeout=90)
+    for group, policy in (("G", "ERP"), ("B", "Backup")):
+        assert any(line.startswith(f"Group {group}, policy {policy}, trackers ") and line.endswith(": applied.")
+                   for line in verification.splitlines()), verification
+    print(verification, flush=True)
     benchmark.setup_probes(ce, qemu, cleanup, shared_host=TARGET)
     install_counters(ce)
     reference = ce.route_and_nat(qemu)
     certificate = ce.management("before shared target tests")
     try:
         configure_routes(ce, qemu)
-        for protocol in PROTOCOLS:
+        for protocol in PATH_CHECKS:
             measure(ce, qemu, protocol, ("Passed", "Passed"), (True, True))
             measure(ce, qemu, protocol, (NO_PATH, NO_PATH), (False, False), mode="reversed")
+        measure(ce, qemu, "dns_aaaa_missing", ("DNS check failed", "DNS check failed"), (True, True))
         measure(ce, qemu, "https_expected_marker", ("Passed", "Passed"), (True, True))
         mismatch = "HTTPS response marker mismatch"
         measure(ce, qemu, "https_wrong_marker", (mismatch, mismatch), (True, True))
         measure(ce, qemu, "https_wrong_name", ("HTTPS check failed", "HTTPS check failed"), (True, True))
         ce.command(qemu, f"route -n delete -host {TARGET} -fib 2")
         ce.command(qemu, f"route -n add -host {TARGET} -iface vtnet0 -fib 2")
-        for protocol in PROTOCOLS:
+        for protocol in PATH_CHECKS:
             measure(ce, qemu, protocol, ("Passed", NO_PATH), (True, False))
         device, hop = ce.GATEWAYS["GW_B"]
         remove_route(ce, qemu, 2, hop)
         configure_route(ce, qemu, 2, device, hop)
-        for protocol in PROTOCOLS:
+        for protocol in PATH_CHECKS:
             measure(ce, qemu, protocol, ("Passed", "Passed"), (True, True))
         renew_wan2(ce, qemu, cleanup, provider)
         assert ce.route_and_nat(qemu) == reference
@@ -131,12 +139,12 @@ def exercise(ce, benchmark, qemu, cleanup, provider):
     ce.console_shell(qemu)
     ce.wait_lease(qemu, ce.B, ce.GATEWAYS["GW_B"][1])
     ce.management("after shared target reboot", certificate)
-    for protocol in PROTOCOLS:
+    for protocol in PATH_CHECKS:
         measure(ce, qemu, protocol, (NO_PATH, NO_PATH), (False, False))
     assert ce.route_and_nat(qemu) == reference
     try:
         configure_routes(ce, qemu)
-        for protocol in PROTOCOLS:
+        for protocol in PATH_CHECKS:
             measure(ce, qemu, protocol, ("Passed", "Passed"), (True, True))
         assert ce.route_and_nat(qemu) == reference
     finally:

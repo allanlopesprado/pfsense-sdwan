@@ -106,6 +106,8 @@ if ($action === 'package_fib_probe') {
     $target = match ($argv[3] ?? 'tcp') {
         'tcp' => 'tcp://192.0.2.168:7',
         'dns' => 'dns://service.sdwan.test 192.0.2.168',
+        'dns_aaaa' => 'dns://service.sdwan.test 192.0.2.168 type=AAAA',
+        'dns_aaaa_missing' => 'dns://ipv4only.service.sdwan.test 192.0.2.168 type=AAAA',
         'https' => 'https://service.sdwan.test/healthz 192.0.2.168',
         'https_expected_marker' => 'https://service.sdwan.test/healthz 192.0.2.168 expect=ok',
         'https_wrong_marker' => 'https://service.sdwan.test/healthz 192.0.2.168 expect=ready',
