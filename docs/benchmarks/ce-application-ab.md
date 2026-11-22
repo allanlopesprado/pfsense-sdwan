@@ -27,3 +27,20 @@ For a prolonged run, use a dedicated Linux runner with persistent storage and ke
 sudo /usr/bin/python3 tests/lab/ce-ab-benchmark.py ./ce292-soak.raw 2.9.2 \
   --pairs 0 --soak-hours 48 --sample-seconds 60 --output ./ce-soak-results
 ```
+
+## Measured application recovery
+
+Times are seconds from the phase start to the first reply from the expected WAN. Each test window lasts 40 seconds during loss and 65 seconds during recovery. A 40-second censored result means that the application supplied no valid reply during the loss window. Reply percentiles for individual successful transactions are recorded in the artifacts.
+
+| CE lab | Phase | Native | SD-WAN |
+| --- | --- | ---: | ---: |
+| 2.9.1 | ERP on first-WAN loss | 3.06 s | 3.98 s |
+| 2.9.1 | ERP return to the first WAN | 13.78 s | 44.69 s |
+| 2.9.1 | ERP-only failure on first WAN | 40 s, censored | 11.91 s |
+| 2.9.2 | ERP on first-WAN loss | 3.22–3.56 s | 4.01–5.72 s |
+| 2.9.2 | ERP return to the first WAN | 12.95–13.29 s | 36.43–44.72 s |
+| 2.9.2 | ERP-only failure on first WAN | 40 s, censored twice | 3.66–11.94 s |
+
+The CE 2.9.1 run observed 80 ERP attempts in the service-only loss window. Native forwarding lost 80 and SD-WAN lost 23. The backup lost zero of 80 attempts in each mode. The short stable observation completed 720 transactions in 180 seconds with zero loss. The artifact contains one native/SD-WAN pair. [Raw CE 2.9.1 evidence](https://github.com/allanlopesprado/pfsense-sdwan/actions/runs/45048873467)
+
+The CE 2.9.2 run observed two pairs with alternating order. During the service-only loss, native forwarding completed zero of 159 ERP attempts and SD-WAN completed 130 of 160. Backup completed 160 of 160 attempts on WAN1 in each mode. During return after full WAN loss, ERP completed all 260 attempts in each mode, including replies via the still-working standby while the preferred path was being qualified. The 360-second stable observation completed 1,440 transactions without a lost reply, unexpected source, or observer PID change. The resource samples showed a peak worker RSS of 63,240 KiB in both modes. [Raw CE 2.9.2 evidence](https://github.com/allanlopesprado/pfsense-sdwan/actions/runs/45048303655)

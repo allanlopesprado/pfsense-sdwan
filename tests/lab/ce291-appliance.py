@@ -61,14 +61,14 @@ def stop_vm(qemu):
     raise RuntimeError("The disposable QEMU process did not stop")
 
 
-def qmp_command(path, name, **arguments):
+def qmp_command(path, command_name, **arguments):
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
         connection.settimeout(10)
         connection.connect(str(path))
         with connection.makefile("rb") as stream:
             if "QMP" not in json.loads(stream.readline()):
                 raise RuntimeError("QEMU did not send its QMP greeting")
-            for request in ({"execute": "qmp_capabilities"}, {"execute": name, "arguments": arguments}):
+            for request in ({"execute": "qmp_capabilities"}, {"execute": command_name, "arguments": arguments}):
                 connection.sendall(json.dumps(request).encode() + b"\n")
                 while True:
                     result = json.loads(stream.readline())
