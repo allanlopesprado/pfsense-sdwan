@@ -128,14 +128,8 @@ def verify_activation_guard(ce, qemu):
 
     ce.command(qemu, f"kill -STOP {worker}")
     try:
-        ce.command(qemu, f"php {ce.LAB}/ce291-guest.php bind G")
-        deadline = time.monotonic() + 25
-        while True:
-            loaded = ce.loaded(qemu)
-            if loaded.get("41001", "").startswith("block "):
-                break
-            assert time.monotonic() < deadline, loaded
-            time.sleep(1)
+        ce.command(qemu, f"php {ce.LAB}/ce291-guest.php bind G; /etc/rc.filter_configure_sync")
+        loaded = ce.loaded(qemu)
         ce.assert_rules(loaded, {"G": None, "B": "GW_A"})
         assert loaded["41003"] == native["41003"], (loaded, native)
         print(f"ERP awaiting its first observation PF {loaded['41001']}", flush=True)
