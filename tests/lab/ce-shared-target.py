@@ -3,6 +3,7 @@
 import argparse
 import importlib.util
 import json
+import time
 from pathlib import Path
 
 
@@ -11,6 +12,7 @@ NO_PATH = "No matching host route or source"
 PROTOCOLS = {"dns": "udp dport 53", "https": "tcp dport 443 tcp flags & (syn | ack) == syn"}
 PATH_CHECKS = ("dns", "dns_aaaa", "https")
 MONITOR = {"GW_A": ("sw-wire0", "a"), "GW_B": ("sw-wire2", "b")}
+NATIVE_PATHS = {"G": "GW_A", "B": "GW_A"}
 
 
 def load_benchmark():
@@ -52,6 +54,17 @@ def remove_route(ce, qemu, table, hop):
 def remove_routes(ce, qemu):
     for table, (_, hop) in enumerate(ce.GATEWAYS.values(), 1):
         remove_route(ce, qemu, table, hop)
+
+
+def assert_native_routing(ce, qemu, expected, *, settle_seconds=0):
+    deadline = time.monotonic() + settle_seconds
+    while True:
+        current = ce.route_and_nat(qemu)
+        if current == expected:
+            return
+        # The lease address and next hop can appear before WAN NAT is rebuilt.
+        assert current[0] == expected[0] and time.monotonic() < deadline, (current, expected)
+        time.sleep(1)
 
 
 def measure(ce, qemu, protocol, expected, expected_sends, *, mode="normal", renewed=False):
@@ -98,7 +111,7 @@ def renew_wan2(ce, qemu, cleanup, provider):
 
 def exercise(ce, benchmark, qemu, cleanup, provider):
     version, _ = ce.install_bound_candidate(qemu)
-    ce.wait_paths(qemu, "before installed package verification", {"G": "GW_A", "B": "GW_A"})
+    ce.wait_paths(qemu, "before installed package verification", NATIVE_PATHS)
     verification = ce.command(qemu, f"sh {ce.LAB}/verify-appliance.sh {version} --forwarding", timeout=90)
     for group, policy in (("G", "ERP"), ("B", "Backup")):
         assert any(line.startswith(f"Group {group}, policy {policy}, trackers ") and line.endswith(": applied.")
@@ -128,7 +141,8 @@ def exercise(ce, benchmark, qemu, cleanup, provider):
         for protocol in PATH_CHECKS:
             measure(ce, qemu, protocol, ("Passed", "Passed"), (True, True))
         renew_wan2(ce, qemu, cleanup, provider)
-        assert ce.route_and_nat(qemu) == reference
+        ce.wait_paths(qemu, "after native DHCP reload", NATIVE_PATHS)
+        assert_native_routing(ce, qemu, reference, settle_seconds=30)
     finally:
         remove_routes(ce, qemu)
 
@@ -138,15 +152,16 @@ def exercise(ce, benchmark, qemu, cleanup, provider):
     qemu.sendline("shutdown -r now")
     ce.console_shell(qemu)
     ce.wait_lease(qemu, ce.B, ce.GATEWAYS["GW_B"][1])
+    ce.wait_paths(qemu, "after shared target reboot", NATIVE_PATHS)
     ce.management("after shared target reboot", certificate)
     for protocol in PATH_CHECKS:
         measure(ce, qemu, protocol, (NO_PATH, NO_PATH), (False, False))
-    assert ce.route_and_nat(qemu) == reference
+    assert_native_routing(ce, qemu, reference, settle_seconds=30)
     try:
         configure_routes(ce, qemu)
         for protocol in PATH_CHECKS:
             measure(ce, qemu, protocol, ("Passed", "Passed"), (True, True))
-        assert ce.route_and_nat(qemu) == reference
+        assert_native_routing(ce, qemu, reference)
     finally:
         remove_routes(ce, qemu)
     print("SHARED_TARGET_DNS_HTTPS_REBOOT_OK", flush=True)
