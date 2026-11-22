@@ -5,6 +5,7 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack
 from copy import deepcopy
 import json
+import os
 from pathlib import Path
 import re
 import shutil
@@ -33,7 +34,9 @@ def render_harness(work, core):
     target.parent.mkdir(parents=True)
     shutil.copyfile(core / relative, target)
     original = target.read_text()
-    subprocess.run(["git", "apply", str(ROOT / "core/filter-sdwan.patch")], cwd=work, check=True)
+    patch = (ROOT / "core/filter-sdwan.patch").read_bytes().replace(b"\r\n", b"\n")
+    subprocess.run(["git", "apply", "-"], input=patch, cwd=work, check=True,
+                   env={**os.environ, "GIT_CEILING_DIRECTORIES": str(work.parent)})
     patched = target.read_text()
     methods = ["filter_generate_gateways", "array_from_filter_lines", "filter_generate_address",
                "filter_generate_port", "filter_generate_user_rule"]
@@ -211,6 +214,8 @@ def run(php, core, output, replay, family, links, vti=False):
               f"agreed across all {1 << links} availability combinations")
 
         if family == "inet" and links == 2 and not vti:
+            assert compile_rule("withdrawal-proof") == "confirmed"
+            print("ok - the native filter publishes a withdrawal proof on successful apply or a verified no-op")
             primary = config["reload_gateways"]["GW_A"]
             config["reload_groups"] = {"G": [{"gw": "GW_A", "int": primary["interface"],
                                               "gwip": primary["address"], "weight": 1}]}

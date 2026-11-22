@@ -8,7 +8,26 @@
  require_once("openvpn.inc");
  require_once("captiveportal.inc");
  require_once('/etc/inc/pfsense-utils.inc');
-@@ -1718,7 +1719,9 @@
+@@ -248,6 +249,10 @@
+ 		return $this->hash['string'];
+ 	}
+ 
++	public function sdwan_withdrawal_ruleset_hash(): ?string {
++		return $this->get_generated_hash();
++	}
++
+ 	/**
+ 	 * Reset the configuration hash.
+ 	 */
+@@ -1093,6 +1098,7 @@
+ 	} else {
+ 		update_filter_reload_status(gettext("Skipping filter configuration reload"));
+ 	}
++	filter_sdwan_publish_withdrawal_proof($reload_filter_result, $PFConfig->sdwan_withdrawal_ruleset_hash());
+ 	reload_filterdns();
+ 	filter_run_commands_late();
+ 
+@@ -1718,7 +1724,9 @@
  }
  
  function filter_generate_gateways() {
@@ -19,7 +38,7 @@
  
  	$rules = '';
  
-@@ -1758,2 +1761,8 @@
+@@ -1758,2 +1766,8 @@
 +		if ($route !== '') {
 +			$path = filter_sdwan_gateway_route($gateway, $gwip);
 +			if ($path !== null) {
@@ -28,7 +47,7 @@
 +		}
  		$rules .= "GW{$gwname} = \" {$route} \"\n";
  	}
-@@ -4273,6 +4282,7 @@
+@@ -4273,6 +4287,7 @@
  }
  
  function filter_generate_user_rule($rule) {
@@ -36,7 +55,7 @@
  	global $g, $FilterIflist, $GatewaysList, $vpns_list, $use_floating_states_for_ipsec;
  	global $dummynet_name_list, $vlanprio_values, $time_based_rules;
  
-@@ -4408,6 +4418,22 @@
+@@ -4408,6 +4423,22 @@
  		$type = "pass";
  	}
  
@@ -59,7 +78,7 @@
  	if (array_path_enabled($rule, 'nat')) {
  		$nat_type = match ($rule['ipprotocol']) {
  			'inet6' => '64',
-@@ -4467,7 +4493,10 @@
+@@ -4467,7 +4498,10 @@
  	}
  	/* if user has selected a custom gateway, lets work with it */
  	else if ($rule['gateway'] <> "" && $type == "pass") {

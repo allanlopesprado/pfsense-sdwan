@@ -26,7 +26,7 @@ function get_interface_gateway_v6($interface) { return '2001:db8:20::2'; }
 // This format matches printing rules on the WebGUI. Optional unused fields in
 // the pinned upstream generator may be absent in config.xml.
 set_error_handler(static function ($level, $message, $file) use ($work) {
-	return $file === $work . '/native-renderer.inc' && $level === E_WARNING &&
+	return str_replace('\\', '/', $file) === str_replace('\\', '/', $work) . '/native-renderer.inc' && $level === E_WARNING &&
 	    (str_starts_with($message, 'Undefined array key') || str_starts_with($message, 'Undefined variable'));
 });
 $PFConfig = new class {
@@ -94,6 +94,51 @@ if ($operation === 'render') {
 		throw new RuntimeException('Unbinding did not restore the native gateway rule.');
 	}
 	echo $rendered;
+} elseif ($operation === 'withdrawal-proof') {
+	$hash = 'cb65f7d1dae49b63';
+	$active = [
+	    'Status: Enabled for 0 days 00:01:00',
+	    "block drop in log inet all label \"descr=Default deny rule IPv4\" label \"tags=ruleset:{$hash}\" ridentifier 1000000103",
+	    "block drop out log inet6 all label \"descr=Default deny rule IPv6\" label \"tags=ruleset:{$hash}\" ridentifier 1000000106",
+	];
+	$proof = filter_sdwan_withdrawal_proof([true, ''], $hash, $active);
+	if (filter_sdwan_binding_api() !== 2 || filter_sdwan_withdrawal_proof_api() !== 1 ||
+	    ($proof['trackers'] ?? null) !== ['41001', '41003'] || ($proof['ruleset'] ?? null) !== $hash ||
+	    !is_int($proof['started_ns'] ?? null) || $proof['started_ns'] <= 0) {
+		throw new RuntimeException('The native proof did not identify the compiled tracker set.');
+	}
+	$disabled = $active;
+	$disabled[0] = 'Status: Disabled';
+	$conflict = $active;
+	$conflict[2] = str_replace($hash, '1111111111111111', $conflict[2]);
+	foreach ([
+	    [[false, 1], $hash, $active], [[true, 'native error'], $hash, $active],
+	    [null, '1111111111111111', $active], [null, $hash, $disabled],
+	    [null, $hash, $conflict], [null, $hash, [$active[0]]],
+	] as [$result, $expected, $observed]) {
+		if (filter_sdwan_withdrawal_proof($result, $expected, $observed) !== null) {
+			throw new RuntimeException('Incomplete native evidence produced a withdrawal proof.');
+		}
+	}
+	$path = $work . '/fixture.json';
+	$config = json_decode(file_get_contents($path), true, 512, JSON_THROW_ON_ERROR);
+	$config['gateways/sdwan_bindings/item'] = [];
+	file_put_contents($path, json_encode($config, JSON_THROW_ON_ERROR));
+	if (filter_sdwan_withdrawal_proof(null, $hash, $active) !== $proof) {
+		throw new RuntimeException('An ongoing native generation picked up the newer binding set.');
+	}
+	filter_generate_gateways();
+	$withdrawn = filter_sdwan_withdrawal_proof(null, $hash, $active);
+	$receipt = $work . '/filter-commit.json';
+	filter_sdwan_write_withdrawal_proof($receipt, $proof);
+	filter_sdwan_write_withdrawal_proof($receipt, $withdrawn ?? []);
+	if (($withdrawn['trackers'] ?? null) !== [] || $withdrawn['started_ns'] <= $proof['started_ns'] ||
+	    $withdrawn['ruleset'] !== $hash || json_decode(file_get_contents($receipt), true) !== $withdrawn ||
+	    (PHP_OS_FAMILY !== 'Windows' && (fileperms($receipt) & 0777) !== 0644) ||
+	    glob($work . '/.sdwan-filter-*') !== []) {
+		throw new RuntimeException('The identical native ruleset did not record a new, complete unbound generation.');
+	}
+	echo 'confirmed';
 } else {
 	throw new InvalidArgumentException('Unknown renderer test operation.');
 }

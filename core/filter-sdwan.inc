@@ -1,8 +1,14 @@
 <?php
 // Core-side interface for a laboratory pfSense build. This file is not a package payload.
 
+const SDWAN_FILTER_PROVIDER = '/usr/local/pkg/sdwan_steering.inc';
+
 function filter_sdwan_binding_api(): int {
 	return 2;
+}
+
+function filter_sdwan_withdrawal_proof_api(): int {
+	return 1;
 }
 
 /* Derive route-to solely from the gateway inventory used by this filter reload.
@@ -73,7 +79,88 @@ function filter_sdwan_tracker_index(): array {
 }
 
 function filter_sdwan_begin_reload(): void {
-	$GLOBALS['sdwan_filter_cycle'] = ['bindings' => filter_sdwan_tracker_index(), 'choices' => []];
+	$started = hrtime(true);
+	$bindings = filter_sdwan_tracker_index();
+	$trackers = array_map('strval', array_keys($bindings));
+	sort($trackers, SORT_STRING);
+	$GLOBALS['sdwan_filter_cycle'] = [
+	    'bindings' => $bindings, 'choices' => [], 'started_ns' => $started, 'trackers' => $trackers,
+	];
+}
+
+/* The native generator labels its default deny rules with the ruleset hash. */
+function filter_sdwan_ruleset_hash(array $rules): ?string {
+	$hash = null;
+	foreach ($rules as $rule) {
+		if (!str_starts_with($rule, 'block ') ||
+		    !preg_match('/(?:^|\s)label "descr=Default deny rule IPv[46]"(?:\s|$)/', $rule)) {
+			continue;
+		}
+		foreach (get_label_tags_from_rule_string($rule) as $tag) {
+			if (!str_starts_with($tag, 'ruleset:')) {
+				continue;
+			}
+			if (!preg_match('/\Aruleset:([a-f0-9]{16})\z/', $tag, $matches) ||
+			    ($hash !== null && $hash !== $matches[1])) {
+				return null;
+			}
+			$hash = $matches[1];
+		}
+	}
+	return $hash;
+}
+
+function filter_sdwan_withdrawal_proof(?array $reload_result, ?string $generated_hash, array $active_rules): ?array {
+	$cycle = $GLOBALS['sdwan_filter_cycle'] ?? [];
+	$started = $cycle['started_ns'] ?? null;
+	if (($reload_result !== null && $reload_result !== [true, '']) ||
+	    !is_int($started) || $started <= 0 || $generated_hash === null ||
+	    !preg_match('/\A[a-f0-9]{16}\z/', $generated_hash) ||
+	    !preg_match('/^Status:\s+Enabled(?:\s|$)/', $active_rules[0] ?? '') ||
+	    filter_sdwan_ruleset_hash($active_rules) !== $generated_hash) {
+		return null;
+	}
+	$trackers = $cycle['trackers'];
+	foreach ($trackers as $tracker) {
+		if (!preg_match('/\A[1-9][0-9]{0,9}\z/', $tracker)) {
+			return null;
+		}
+	}
+	return ['started_ns' => $started, 'trackers' => $trackers, 'ruleset' => $generated_hash];
+}
+
+function filter_sdwan_write_withdrawal_proof(string $path, array $proof): void {
+	$data = json_encode($proof);
+	if ($data === false) {
+		return;
+	}
+	$temp = @tempnam(dirname($path), '.sdwan-filter-');
+	if ($temp === false) {
+		return;
+	}
+	try {
+		if (@file_put_contents($temp, $data) === strlen($data) && @chmod($temp, 0644)) {
+			@rename($temp, $path);
+		}
+	} finally {
+		if (is_file($temp)) {
+			@unlink($temp);
+		}
+	}
+}
+
+/* Invoked while the native filter lock is held. Keep this readback independent
+ * of the observer lock and leave the native reload outcome intact. */
+function filter_sdwan_publish_withdrawal_proof(?array $reload_result, ?string $generated_hash): void {
+	if (($reload_result !== null && $reload_result !== [true, '']) || $generated_hash === null ||
+	    !is_file(SDWAN_FILTER_PROVIDER) || !function_exists('exec') ||
+	    !is_executable('/bin/timeout') || !is_executable('/sbin/pfctl')) {
+		return;
+	}
+	exec("/bin/timeout 2 /bin/sh -c '/sbin/pfctl -si && /sbin/pfctl -sr' 2>/dev/null", $rules, $status);
+	if ($status === 0 && ($proof = filter_sdwan_withdrawal_proof($reload_result, $generated_hash, $rules)) !== null) {
+		filter_sdwan_write_withdrawal_proof('/var/run/sdwan-filter-commit.json', $proof);
+	}
 }
 
 /* Look up by tracker even after the regular gateway group editor has removed the
@@ -106,12 +193,11 @@ function filter_sdwan_rule_route(array $rule, array $routes): array|false|null {
 		return false;
 	}
 	try {
-		$provider = '/usr/local/pkg/sdwan_steering.inc';
-		if (!is_file($provider)) {
+		if (!is_file(SDWAN_FILTER_PROVIDER)) {
 			return false;
 		}
 		if (!function_exists('sdwan_steering_gateway_for_rule')) {
-			require_once($provider);
+			require_once(SDWAN_FILTER_PROVIDER);
 		}
 		/* Snapshot publication may race a reload. Keep all trackers in one
 		 * binding on the same choice for this ruleset, including a denial. */
