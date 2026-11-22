@@ -51,9 +51,12 @@ def observer(binary, *, two_bindings=False):
             "file_put_contents(SDWAN_SNAPSHOT_PATH . '.attempts', 'x', FILE_APPEND);"
             "return config_get_path('fixture_reload_accepted', false);")
         steering.write_text(source)
+        shutil.copy(ROOT / "core" / "filter-sdwan.inc", work)
         (work / "filter.inc").write_text(
-            "<?php function filter_sdwan_binding_api(): int { return 1; }\n"
-            "function filter_sdwan_withdrawal_proof_api(): int { return 1; }\n"
+            "<?php require_once __DIR__ . '/filter-sdwan.inc';\n"
+            "function get_label_tags_from_rule_string($rule) {\n"
+            "    return preg_match('/ label \"tags=([^\"]+)\"/', $rule, $m) ? explode(' ', $m[1]) : [];\n"
+            "}\n"
             "function g_get($key, $default) { return $key === 'varrun_path' ? __DIR__ : $default; }\n"
             "function is_platform_booting(): bool { return config_get_path('booting', false); }\n")
 

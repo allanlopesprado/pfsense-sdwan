@@ -534,27 +534,6 @@ function sdwan_steering_withdrawal(array $previous, array $trackers): ?array {
 	return ['trackers' => $affected, 'unknown' => $unknown, 'since_ns' => hrtime(true)];
 }
 
-/* Native PF puts the generated ruleset hash in its root default-deny labels. */
-function sdwan_steering_loaded_ruleset(array $rules): ?string {
-	$hash = null;
-	foreach ($rules as $line) {
-		if (!str_starts_with($line, 'block ') ||
-		    !preg_match('/\blabel "descr=Default deny rule IPv[46]"/', $line) ||
-		    !preg_match('/\blabel "tags=([^"]+)"/', $line, $tags)) {
-			continue;
-		}
-		foreach (explode(' ', $tags[1]) as $tag) {
-			if (preg_match('/\Aruleset:([a-f0-9]{16})\z/', $tag, $parts)) {
-				if ($hash !== null && $hash !== $parts[1]) {
-					return null;
-				}
-				$hash = $parts[1];
-			}
-		}
-	}
-	return $hash;
-}
-
 function sdwan_steering_withdrawal_confirmed(array $withdrawal, array $trackers, ?array $rules): bool {
 	if ($rules === null) {
 		return false;
@@ -573,14 +552,15 @@ function sdwan_steering_withdrawal_confirmed(array $withdrawal, array $trackers,
 	}
 	/* On older adapters, a native rule may reuse the tracker and route. Its
 	 * presence alone cannot identify the generation that produced it. */
-	if (!function_exists('filter_sdwan_withdrawal_proof_api') || filter_sdwan_withdrawal_proof_api() !== 1) {
+	if (!function_exists('filter_sdwan_withdrawal_proof_api') || filter_sdwan_withdrawal_proof_api() !== 1 ||
+	    !function_exists('filter_sdwan_ruleset_hash')) {
 		return false;
 	}
 	$path = g_get('varrun_path', '/var/run') . '/sdwan-filter-commit.json';
 	$raw = @file_get_contents($path, false, null, 0, 65537);
 	$proof = is_string($raw) && strlen($raw) <= 65536 ? json_decode($raw, true, 8) : null;
 	$started = $proof['started_ns'] ?? null;
-	$hash = sdwan_steering_loaded_ruleset($rules);
+	$hash = filter_sdwan_ruleset_hash($rules);
 	return is_int($started) && $started >= $withdrawal['since_ns'] && $started <= hrtime(true) &&
 	    ($proof['trackers'] ?? null) === $trackers && $hash !== null && ($proof['ruleset'] ?? null) === $hash;
 }
