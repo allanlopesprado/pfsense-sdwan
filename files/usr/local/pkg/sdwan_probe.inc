@@ -20,14 +20,17 @@ function sdwan_probe_target($value): ?array {
 			return null;
 		}
 		$target = ['protocol' => 'tcp', 'port' => $port];
-	} elseif (preg_match('~\A(https|dns)://([A-Za-z0-9.-]+)(/[^ \x00-\x20\x7f#]*)? ([A-Fa-f0-9:.]+)\z~D', $value, $parts)) {
+	} elseif (preg_match('~\A(https|dns)://([A-Za-z0-9.-]+)(/[^ \x00-\x20\x7f#]*)? ([A-Fa-f0-9:.]+)(?: expect=([A-Za-z0-9._:-]{1,64}))?\z~D', $value, $parts)) {
 		[, $protocol, $host, $path, $address] = $parts;
 		if (strlen($host) > 253 || !preg_match('/\A(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?\z/iD', $host) ||
-		    ($protocol === 'dns' && $path !== '') ||
+		    ($protocol === 'dns' && ($path !== '' || isset($parts[5]))) ||
 		    ($protocol === 'https' && !sdwan_probe_https_path_valid($path))) {
 			return null;
 		}
 		$target = ['protocol' => $protocol, 'host' => strtolower($host), 'path' => $path ?: '/'];
+		if (isset($parts[5])) {
+			$target['expect'] = $parts[5];
+		}
 	} else {
 		return null;
 	}
@@ -56,6 +59,10 @@ function sdwan_probe_https_path_valid(string $value): bool {
 	return !str_starts_with($path, '//') &&
 	    !preg_match('~%(?:25|2f|3f|23|5c)~i', $path) &&
 	    !preg_match('~(?:^|/)\.{1,2}(?:/|;|$)~', rawurldecode($path));
+}
+
+function sdwan_probe_https_marker_matches(string $body, string $marker): bool {
+	return $body === $marker || $body === $marker . "\n" || $body === $marker . "\r\n";
 }
 
 /* A writable asynchronous socket can signal either a connection or a refusal. */
@@ -301,7 +308,8 @@ function sdwan_probe_collect_ready(array &$jobs, array &$results, $curl, int $de
 			sdwan_probe_fib_close($job['worker'], $job['worker_output'], false);
 			$results[$job['member']][$job['field']] = $status['exitcode'] === 0 && is_string($reply) &&
 			    in_array($reply, ["Passed\n", "Unavailable\n", "No matching host route or source\n",
-			    "Path not verified\n", "TCP check failed\n", "DNS check failed\n", "HTTPS check failed\n", "Timed out\n"], true)
+			    "Path not verified\n", "TCP check failed\n", "DNS check failed\n", "HTTPS check failed\n",
+			    "HTTPS response marker mismatch\n", "Timed out\n"], true)
 			    ? rtrim($reply, "\n") : 'Routing table unavailable';
 			unset($jobs[$index]);
 			continue;
@@ -340,7 +348,13 @@ function sdwan_probe_collect_ready(array &$jobs, array &$results, $curl, int $de
 			    inet_pton($peer) === inet_pton($job['target']['address']) &&
 			    is_string($source) && filter_var($source, FILTER_VALIDATE_IP) !== false &&
 			    inet_pton($source) === inet_pton($job['path']['source']);
-			$results[$job['member']][$job['field']] = sdwan_probe_result($job, $replied, 'HTTPS check failed', $deadline);
+			$failure = 'HTTPS check failed';
+			if ($replied && isset($job['target']['expect']) &&
+			    ($job['body']->oversized || !sdwan_probe_https_marker_matches($job['body']->value, $job['target']['expect']))) {
+				$replied = false;
+				$failure = 'HTTPS response marker mismatch';
+			}
+			$results[$job['member']][$job['field']] = sdwan_probe_result($job, $replied, $failure, $deadline);
 			curl_multi_remove_handle($curl, $job['curl']);
 			unset($jobs[$index]);
 			break;
@@ -440,6 +454,8 @@ function sdwan_probe_observe(array $members, array $inventory, array $observatio
 				$jobs[] = $job + ['socket' => $socket, 'id' => $id, 'question' => $question];
 			} elseif ($curl !== null && $remaining >= 1000) {
 				$host = $target['host'];
+				$body = isset($target['expect']) ? (object)['value' => '', 'oversized' => false] : null;
+				$marker_limit = $body === null ? 0 : strlen($target['expect']) + 2;
 				$handle = curl_init('https://' . $host . ':443' . $target['path']);
 				if ($handle === false) {
 					continue;
@@ -453,15 +469,22 @@ function sdwan_probe_observe(array $members, array $inventory, array $observatio
 					CURLOPT_CONNECTTIMEOUT_MS => min(900, intdiv($remaining, 1000)),
 					CURLOPT_TIMEOUT_MS => min(1800, intdiv($remaining, 1000)),
 					CURLOPT_NOPROGRESS => true, CURLOPT_NOSIGNAL => true,
-					CURLOPT_WRITEFUNCTION => static function ($handle, string $chunk): int {
+					CURLOPT_WRITEFUNCTION => static function ($handle, string $chunk) use ($body, $marker_limit): int {
 						static $bytes = 0;
 						$bytes += strlen($chunk);
+						if ($body !== null) {
+							if ($bytes <= $marker_limit) {
+								$body->value .= $chunk;
+							} else {
+								$body->oversized = true;
+							}
+						}
 						return $bytes <= 65536 ? strlen($chunk) : 0;
 					},
 				]) || curl_multi_add_handle($curl, $handle) !== CURLM_OK) {
 					continue;
 				}
-				$jobs[] = $job + ['curl' => $handle];
+				$jobs[] = $job + ['curl' => $handle, 'body' => $body];
 			}
 		}
 	}

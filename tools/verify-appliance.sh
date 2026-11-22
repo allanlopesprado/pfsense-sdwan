@@ -69,8 +69,14 @@ if ($argv[2] === "--forwarding") {
     if (is_file($steering)) {
         require_once($steering);
     }
-    if (!function_exists("sdwan_steering_pf_status") || !sdwan_steering_supported()) {
-        fwrite(STDERR, "Native SD-WAN forwarding verification is unavailable.\n");
+    if (!function_exists("sdwan_steering_supported") || !sdwan_steering_supported()) {
+        fwrite(STDERR, "Native SD-WAN forwarding is unavailable on this appliance.\n");
+        exit(1);
+    }
+    if (!function_exists("sdwan_steering_pf_status") ||
+        (new ReflectionFunction("sdwan_steering_pf_status"))->getNumberOfParameters() < 5 ||
+        !function_exists("sdwan_steering_preflight_matches")) {
+        fwrite(STDERR, "The installed package cannot verify the loaded PF match scope and fallback guard.\n");
         exit(1);
     }
     try {
@@ -84,10 +90,18 @@ if ($argv[2] === "--forwarding") {
         exit(1);
     }
     $rules = sdwan_steering_pf_rules();
+    $native = sdwan_steering_native($inventory);
     $verified = true;
     foreach ($bindings as $group => $binding) {
         $state = $snapshot["steering"][$group] ?? [];
-        $status = sdwan_steering_pf_status($binding, is_array($state) ? $state : [], $inventory, $rules);
+        $approval = sdwan_steering_preflight($sdwan_settings, $binding["policy"], $group, $native);
+        $status = "binding_changed";
+        if (sdwan_steering_preflight_matches($binding, $approval) &&
+            $binding["policy_revision"] === sdwan_steering_policy_revision($sdwan_settings, $binding["policy"]) &&
+            !empty($approval["rule_pairs"])) {
+            $status = sdwan_steering_pf_status($binding, is_array($state) ? $state : [], $inventory, $rules,
+                $approval["rule_pairs"]);
+        }
         printf("Group %s, policy %s, trackers %s: %s.\n", $group, $binding["policy"],
             implode(", ", $binding["trackers"]), $status);
         $verified = $verified && in_array($status, ["applied", "blocked"], true);

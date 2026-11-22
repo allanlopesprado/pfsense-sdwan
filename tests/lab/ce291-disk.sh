@@ -65,6 +65,9 @@ ce_pkg install -Iy -U pfSense-base pfSense-kernel-pfSense pkg
 # The official base package ships the native FreeBSD userland as a release set.
 tar -xpf "$root/usr/local/share/pfSense/base.txz" -C "$root"
 ce_pkg fetch -dy -U pfSense pfSense-default-config-serial
+if [ "$scenario" = inspection ]; then
+    ce_pkg fetch -dy -U suricata
+fi
 mkdir -p "$root/root/sdwan-lab"
 cp "$work/repos/pfsense.conf" "$root/root/sdwan-lab/pfsense.conf"
 if [ "$scenario" = recovery ]; then

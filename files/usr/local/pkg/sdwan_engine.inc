@@ -207,7 +207,7 @@ function sdwan_service_reason(array $checks, ?array $requirements): string {
 	$passed = count(array_keys($checks, 'Passed', true));
 	$minimum = $required ? count($required) : (int)(bool)($requirements ?? $checks);
 	if ($passed < $minimum) {
-		$measured = ['Timed out', 'TCP check failed', 'DNS check failed', 'HTTPS check failed'];
+		$measured = ['Timed out', 'TCP check failed', 'DNS check failed', 'HTTPS check failed', 'HTTPS response marker mismatch'];
 		if ($required) {
 			return array_intersect($checks, $measured) ?
 			    'Required service check failed' : 'No verified required service measurement';

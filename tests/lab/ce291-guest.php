@@ -103,11 +103,20 @@ require_once('/usr/local/pkg/sdwan_steering.inc');
 if ($action === 'package_fib_probe') {
     require_once('/usr/local/pkg/sdwan_probe.inc');
     $tables = ($argv[2] ?? '') === 'reversed' ? [2, 1] : [1, 2];
+    $target = match ($argv[3] ?? 'tcp') {
+        'tcp' => 'tcp://192.0.2.168:7',
+        'dns' => 'dns://service.sdwan.test 192.0.2.168',
+        'https' => 'https://service.sdwan.test/healthz 192.0.2.168',
+        'https_expected_marker' => 'https://service.sdwan.test/healthz 192.0.2.168 expect=ok',
+        'https_wrong_marker' => 'https://service.sdwan.test/healthz 192.0.2.168 expect=ready',
+        'https_wrong_name' => 'https://other.sdwan.test/healthz 192.0.2.168',
+        default => throw new InvalidArgumentException('Unknown FIB probe fixture protocol'),
+    };
     $probe_config = sdwan_empty_config();
     $observations = [];
     foreach (['GW_A', 'GW_B'] as $index => $gateway) {
         $probe_config['members'][] = ['name' => $gateway, 'gateway' => $gateway, 'cost' => '10',
-            'probe_primary' => "fib={$tables[$index]} tcp://192.0.2.168:7"];
+            'probe_primary' => "fib={$tables[$index]} {$target}"];
         $observations[$gateway] = ['status' => 'online'];
     }
     $inventory = sdwan_gateways();
