@@ -159,13 +159,27 @@ def verify_interface_traffic(ce, qemu, active):
         response = ce.command(qemu, """php <<'PHP'
 <?php
 require_once('config.inc');
+require_once('interfaces.inc');
 define('SDWAN_GUI', true);
 require '/usr/local/www/sdwan/ui.inc.php';
+if (!function_exists('get_real_interface') || !function_exists('pfSense_get_interface_stats')) {
+    throw new RuntimeException('Native interface lookup or statistics API missing in the guest CLI');
+}
 $settings = sdwan_get_config();
 $policy = array_column($settings['policies'], null, 'name')['ERP'];
 $members = array_column($settings['members'], null, 'name');
-echo json_encode(sdwan_ui_traffic_sample($policy, $members, sdwan_gateways(),
-    sdwan_config_revision($settings)), JSON_THROW_ON_ERROR), PHP_EOL;
+$sample = sdwan_ui_traffic_sample($policy, $members, sdwan_gateways(), sdwan_config_revision($settings));
+if (!(array)$sample['interfaces']) {
+    $native = [];
+    foreach (['wan', 'opt1'] as $interface) {
+        $device = get_real_interface($interface, 'inet', false, true);
+        $stats = is_string($device) ? pfSense_get_interface_stats($device) : null;
+        $native[$interface] = ['device' => $device, 'inbytes' => $stats['inbytes'] ?? null,
+            'outbytes' => $stats['outbytes'] ?? null];
+    }
+    throw new RuntimeException('Collector returned no counters. Native API: ' . json_encode($native, JSON_THROW_ON_ERROR));
+}
+echo json_encode($sample, JSON_THROW_ON_ERROR), PHP_EOL;
 PHP""")
         sample = json.loads(response.splitlines()[-1])
         assert sample["revision"] == active["snapshot"]["config_revision"], sample
