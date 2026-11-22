@@ -6,8 +6,8 @@ require_once(__DIR__ . '/ui.inc.php');
 $inventory = sdwan_gateways();
 $policies = array_column($sdwan['policies'], null, 'name');
 $requested = sdwan_ui_choice_value(sdwan_ui_scalar($_GET, 'policy'));
-$current = $requested !== '' ? $requested : ($sdwan['policies'][0]['name'] ?? '');
-$policy = $policies[$current] ?? null;
+$selected_policy = $requested !== '' ? $requested : ($sdwan['policies'][0]['name'] ?? '');
+$policy = $policies[$selected_policy] ?? null;
 $members = array_column($sdwan['members'], null, 'name');
 if (sdwan_ui_scalar($_GET, 'traffic') === 'sample') {
 	header('Content-Type: application/json; charset=utf-8');
@@ -24,7 +24,7 @@ if (sdwan_ui_scalar($_GET, 'traffic') === 'sample') {
 	exit;
 }
 $snapshot = sdwan_ui_snapshot($sdwan, $inventory);
-$result = $snapshot['policies'][$current] ?? null;
+$result = $snapshot['policies'][$selected_policy] ?? null;
 $slas = array_column($sdwan['slas'], null, 'name');
 $pgtitle = [gettext('Services'), gettext('SD-WAN'), gettext('Diagnostics')];
 include('head.inc');
@@ -40,7 +40,7 @@ if (!$policies) {
 		$options[sdwan_ui_choice($entry['name'])] = $entry['name'];
 	}
 	sdwan_ui_filter('/sdwan/diagnostics.php', [
-		'policy' => [gettext('Policy'), $policy === null ? '' : sdwan_ui_choice($current), $options],
+		'policy' => [gettext('Policy'), $policy === null ? '' : sdwan_ui_choice($selected_policy), $options],
 	], gettext('Inspect'));
 }
 if ($policy !== null):
@@ -177,7 +177,7 @@ if ($policy !== null):
 </div>
 <?php if (function_exists('pfSense_get_interface_stats')):
 	$traffic_url = '/sdwan/diagnostics.php?' . http_build_query([
-		'policy' => sdwan_ui_choice($current), 'traffic' => 'sample',
+		'policy' => sdwan_ui_choice($selected_policy), 'traffic' => 'sample',
 	], '', '&', PHP_QUERY_RFC3986);
 ?>
 <div class="panel panel-default">
