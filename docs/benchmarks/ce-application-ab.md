@@ -10,9 +10,10 @@ Each successful transaction includes the return path. The time origin for an int
 | --- | --- |
 | `summary.json` | Candidate digest, loss, application reply p95, time to first reply from the expected WAN p95, censored runs, steady-state source anomalies, and observer resource samples. |
 | `phases.csv` | Per-phase raw counts, expected source, addresses seen by the peer, first successful reply, and first reply from the expected WAN. |
-| `erp.ndjson` and `backup.ndjson` | Start/end timestamps, errors, and observed source for each application attempt. |
+| `erp.ndjson` and `backup.ndjson` | Start/end timestamps, observed source, and the connection, send, or reply stage for socket errors. |
 | `phases.ndjson` | Fault and recovery boundaries, loaded PF rules, and the observer snapshot at the end of each phase. |
 | `resources.ndjson` | Periodic worker PID, `ps` CPU percentage, and resident memory in KiB. |
+| `sw-out*-erp.pcap*` | Optional bounded captures of synthetic ERP TCP on the LAN and both WANs. Use `wall_start_ns` to correlate a socket error with packets. |
 
 To run locally, use an unbooted raw disk made by the signed Netgate package lab. Copy the disk before running since the lab writes to it.
 
@@ -27,6 +28,8 @@ For a prolonged run, use a dedicated Linux runner with persistent storage and ke
 sudo /usr/bin/python3 tests/lab/ce-ab-benchmark.py ./ce292-soak.raw 2.9.2 \
   --pairs 0 --soak-hours 48 --sample-seconds 60 --output ./ce-soak-results
 ```
+
+Use `--fault-interval-seconds` to change the healthy interval between simulated incidents. Use `--recovery-hold-seconds` to compare preferred-path requalification settings without changing the package defaults. Both settings are also available as workflow inputs. Compare runs on the same CE version and topology with the same observation windows.
 
 ## Measured application recovery
 
@@ -44,3 +47,19 @@ Times are seconds from the phase start to the first reply from the expected WAN.
 The CE 2.9.1 run observed 80 ERP attempts in the service-only loss window. Native forwarding lost 80 and SD-WAN lost 23. The backup lost zero of 80 attempts in each mode. The short stable observation completed 720 transactions in 180 seconds with zero loss. The artifact contains one native/SD-WAN pair. [Raw CE 2.9.1 evidence](https://github.com/allanlopesprado/pfsense-sdwan/actions/runs/45048873467)
 
 The CE 2.9.2 run observed two pairs with alternating order. During the service-only loss, native forwarding completed zero of 159 ERP attempts and SD-WAN completed 130 of 160. Backup completed 160 of 160 attempts on WAN1 in each mode. During return after full WAN loss, ERP completed all 260 attempts in each mode, including replies via the still-working standby while the preferred path was being qualified. The 360-second stable observation completed 1,440 transactions without a lost reply, unexpected source, or observer PID change. The resource samples showed a peak worker RSS of 63,240 KiB in both modes. [Raw CE 2.9.2 evidence](https://github.com/allanlopesprado/pfsense-sdwan/actions/runs/45048303655)
+
+## CE 2.9.2 with a 15-second preferred-path hold
+
+One A/B pair used a 15-second requalification hold. During the service-only failure, ERP completed 57 of 80 SD-WAN attempts and zero of 80 native attempts. Its first successful response via WAN2 arrived at 11.924 s. Backup completed 80 of 80 attempts in each mode via WAN1. Full WAN1 loss moved ERP to WAN2 in 2.998 s with SD-WAN and 3.056 s with the native group. When WAN1 returned, ERP returned to it in 34.707 s with SD-WAN and 12.792 s natively, with zero lost replies in either return window.
+
+The continuous observation measured 1,255.6 seconds and four simulated WAN1 outages. All 3,344 transactions in the stable periods succeeded on the expected WAN, with no observer restart. ERP's response p95 was 2.266 ms and backup's was 1.778 ms in those periods. Each application lost 49 of 320 attempts in the four outage windows and completed all 520 attempts in the return windows. Management HTTPS and the reference NAT and default route checks passed after every incident.
+
+The workflow reported a failure for two ERP timeouts in the six-second baseline immediately after SD-WAN activation. The other ten ERP attempts and all twelve backup attempts succeeded. The PF sample showed both trackers applied and the next ERP attempt succeeded after each timeout. The captured data did not identify the connection stage or root cause. The raw results retain the timeouts. [A/B and continuous observation](https://github.com/allanlopesprado/pfsense-sdwan/actions/runs/45057850498/artifacts/14768949982)
+
+Across the three 15-second A/B pairs, service-only failure yielded 169 of 240 ERP replies with SD-WAN and zero of 239 with native forwarding. The backup completed all 479 transactions on WAN1 across both modes. The first ERP reply via WAN2 took 11.924–12.888 s. After full WAN1 loss, its first reply via WAN2 took 2.536–3.056 s natively and 2.998–4.988 s with SD-WAN. Return to WAN1 took 12.792–13.787 s natively and 25.178–34.707 s with SD-WAN.
+
+The instrumented A/B-only run passed. The other repeat completed the baseline without timeouts, then recorded two ERP timeouts in the return window, around 26 seconds after ERP had already returned to WAN1. Its separate six-minute continuous observation completed the single planned outage and all 1,014 stable-period transactions. All four unexpected timeouts across the two failing runs occurred near 590 seconds of host uptime. The available evidence does not establish causation. [Repeated A/B and continuous observation](https://github.com/allanlopesprado/pfsense-sdwan/actions/runs/45061393300) · [Socket-instrumented A/B](https://github.com/allanlopesprado/pfsense-sdwan/actions/runs/45061580413)
+
+Two separate 648-second controls then kept WAN1 healthy and captured ERP TCP on the LAN and both WANs. Each control completed all 2,592 measured requests. Each also included eight ERP and eight backup attempts inside the original 587–591 s host-uptime window, with zero losses. ERP response p95 was 2.343 ms in the native control and 1.737 ms in the SD-WAN control. These lab measurements bound the observed behavior and leave the earlier intermittent failures unresolved.
+
+Before the measured interval, while activating the SD-WAN bindings, each client recorded 19 connection timeouts over approximately 9.4 seconds. The ERP capture shows the 19 SYN packets at the LAN and none on either WAN during that interval. The native control recorded no connection timeout before its measurement. Keep activation traffic and stable forwarding separate when assessing availability. [Native control and captures](https://github.com/allanlopesprado/pfsense-sdwan/actions/runs/45063455624) · [SD-WAN control and captures](https://github.com/allanlopesprado/pfsense-sdwan/actions/runs/45063455711)

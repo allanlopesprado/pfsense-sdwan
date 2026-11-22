@@ -150,6 +150,10 @@ Run the [CE two-WAN workflow](../.github/workflows/ce291-appliance.yml) with `sc
 
 Run `scenario=benchmark` for repeated application transactions and short continuous observations. A 48–72 hour observation uses the [Linux benchmark procedure](benchmarks/ce-application-ab.md) and a persistent isolated host. GitHub-hosted jobs have a six-hour execution limit. [GitHub Actions limits](https://docs.github.com/en/actions/reference/limits)
 
+Run `scenario=shared-target` on each CE version to verify installed forwarding and exercise DNS and HTTPS to the same destination IP from both WANs. The peer records packet counts for the ingress interface and expected source. The experiment crosses the FIBs, renews the DHCP lease with a new address and next hop, and restarts the appliance. It also tests an absent AAAA record and an HTTP 200 response with the wrong readiness marker.
+
+Run `scenario=inspection` on each version for the Netgate-distributed Suricata engine on two VirtIO WANs. The lab attaches the engine directly to netmap in the disposable guest and correlates EVE with peer captures, application replies, and the loaded PF rules. Test configuration through the Suricata package WebGUI separately.
+
 ## Sources
 
 - [Developing pfSense packages](https://docs.netgate.com/pfsense/en/latest/development/develop-packages.html)
