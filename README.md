@@ -23,6 +23,8 @@ The dashboard shows gateway health and backup availability, with verified egress
 
 ## Install from Diagnostics → Command Prompt
 
+The command below installs the published lab package. The changelog also covers source versions awaiting publication.
+
 1. Open **Diagnostics → Command Prompt** on a lab clone with administrative access. Run `cat /etc/version && pkg config ABI` to confirm **CE 2.9.1 or 2.9.2** and **FreeBSD:16:amd64**.
 2. Run the pinned install command. It verifies the package's SHA-256 before calling `pkg add`.
 

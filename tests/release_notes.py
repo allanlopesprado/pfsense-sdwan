@@ -38,5 +38,6 @@ assert re.sub(r"[^a-z0-9 -]", "", heading.casefold()).strip().replace(" ", "-") 
 history = (root / "CHANGELOG.md").read_text(encoding="utf-8")
 versions = re.findall(r"^\| (\d+\.\d+\.\d+) \|", history, re.M)
 packages = [path.stem.removeprefix("pfSense-pkg-SDWAN-") for path in (root / "dist").glob("pfSense-pkg-SDWAN-*.pkg")]
-assert versions == sorted(set(packages), key=lambda version: tuple(map(int, version.split("."))), reverse=True)
+source = re.search(r"^PORTVERSION=\s*(\S+)$", (root / "Makefile").read_text(), re.M)[1]
+assert versions == sorted({source, *packages}, key=lambda version: tuple(map(int, version.split("."))), reverse=True)
 print("ok - numeric version ordering, downgrade refusal, version links and complete changelog")

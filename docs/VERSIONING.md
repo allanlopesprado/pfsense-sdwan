@@ -6,13 +6,15 @@ The project uses `MAJOR.MINOR.PATCH` version numbers and `vMAJOR.MINOR.PATCH` ta
 
 | File or reference | Information |
 | --- | --- |
-| `Makefile` | The port version in `PORTVERSION`. |
+| `Makefile` | The current source and development build version in `PORTVERSION`. |
 | `dist/pfSense-pkg-SDWAN-<version>.pkg` and `.sha256` | The package and its checksum. |
 | `dist/release.json` | The version, maturity, and SHA-256 that the WebGUI checks. |
 | `docs/releases/v<version>.md` | The changes in English. The workflow uses this text to render the release notes. |
 | GitHub tag | The tested revision that contains the package for that version. |
 
 GitHub Releases distributes the latest version. The release index and notes identify the package as **experimental**. The **Updates** tab checks the published release and verifies that the asset's SHA-256 matches the index and the file at the release tag. [GitHub Releases](https://github.com/allanlopesprado/pfsense-sdwan/releases)
+
+A development build can advance `PORTVERSION` and the changelog before the distribution is updated. The installer and Updates continue to use the published package. The publication workflow requires the archive, hooks and version to match the source.
 
 ## Prepare a release
 

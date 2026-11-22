@@ -12,10 +12,9 @@ ROOT = Path(__file__).resolve().parents[1]
 PACKAGE = "pfSense-pkg-SDWAN"
 
 
-def index_contents():
-    makefile = (ROOT / "Makefile").read_text()
-    version = re.search(r"^PORTVERSION=\s*(\S+)$", makefile, re.MULTILINE)[1]
-    if not re.fullmatch(r"(?:0|[1-9][0-9]{0,8})(?:\.(?:0|[1-9][0-9]{0,8})){2}", version):
+def index_contents(version):
+    if not isinstance(version, str) or not re.fullmatch(
+            r"(?:0|[1-9][0-9]{0,8})(?:\.(?:0|[1-9][0-9]{0,8})){2}", version):
         raise SystemExit("Unsupported release version")
     artifact = ROOT / "dist" / f"{PACKAGE}-{version}.pkg"
     digest = hashlib.sha256(artifact.read_bytes()).hexdigest()
@@ -76,12 +75,17 @@ if __name__ == "__main__":
     mode.add_argument("--artifact-commit", help="also refresh the README installer using this committed package")
     args = parser.parse_args()
     index = ROOT / "dist/release.json"
-    expected = index_contents()
     if args.check:
-        if not index.is_file() or index.read_text() != expected:
+        if not index.is_file():
+            raise SystemExit("GitHub release index is missing")
+        contents = index.read_text(encoding="utf-8")
+        if contents != index_contents(json.loads(contents).get("version")):
             raise SystemExit("GitHub release index differs from the distributed package")
         print("ok - GitHub release index, artifact and checksum agree")
     else:
+        makefile = (ROOT / "Makefile").read_text()
+        version = re.search(r"^PORTVERSION=\s*(\S+)$", makefile, re.MULTILINE)[1]
+        expected = index_contents(version)
         readme = readme_with_installer(json.loads(expected), args.artifact_commit) if args.artifact_commit else None
         index.write_text(expected, encoding="utf-8", newline="\n")
         if readme is not None:

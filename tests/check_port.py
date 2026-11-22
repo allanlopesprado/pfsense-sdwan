@@ -36,15 +36,22 @@ def read_plist():
 
 
 def check_distributed_package(installed, archive_parity):
-    version = re.search(r"^PORTVERSION=\s*(\S+)$", (ROOT / "Makefile").read_text(), re.M)[1]
+    source_version = re.search(r"^PORTVERSION=\s*(\S+)$", (ROOT / "Makefile").read_text(), re.M)[1]
     versions = {
         tuple(map(int, match.groups())) for artifact in (ROOT / "dist").glob("*.pkg")
         if (match := re.fullmatch(r"pfSense-pkg-SDWAN-(\d+)\.(\d+)\.(\d+)\.pkg", artifact.name))
     }
     latest_changelog = re.search(r"^\| (\d+\.\d+\.\d+) \|", (ROOT / "CHANGELOG.md").read_text(encoding="utf-8"), re.M)
-    if not versions or tuple(map(int, version.split("."))) != max(versions) or (
-            not latest_changelog or latest_changelog[1] != version):
-        fail("Makefile, latest distributed package and changelog versions differ")
+    if not latest_changelog or latest_changelog[1] != source_version:
+        fail("Makefile and latest changelog versions differ")
+    if not versions or max(versions) > tuple(map(int, source_version.split("."))):
+        fail("The latest distributed package cannot be newer than the source version")
+    version = ".".join(map(str, max(versions)))
+    release_index = json.loads((ROOT / "dist/release.json").read_text(encoding="utf-8"))
+    if release_index.get("version") != version:
+        fail("The release index must identify the latest distributed package")
+    if archive_parity and source_version != version:
+        fail("Publishing requires the source and distributed package versions to agree")
     path = ROOT / "dist" / f"pfSense-pkg-SDWAN-{version}.pkg"
     digest = hashlib.sha256(path.read_bytes()).hexdigest()
     checksum = path.with_suffix(".pkg.sha256").read_text().split()
@@ -69,7 +76,7 @@ def check_distributed_package(installed, archive_parity):
         if sorted(contents) != sorted(manifest["files"]) or packaged_info.findtext(".//version") != version:
             fail("Distributed package manifest, archive contents and info.xml disagree")
         if not archive_parity:
-            print("ok - version, package ABI, README commit and SHA-256 verified")
+            print(f"ok - source {source_version}; published {version} ABI, README commit and SHA-256 verified")
             return
         if sorted(contents) != sorted("/" + str(p) for p in installed):
             fail("Distributed package file list differs from current source")

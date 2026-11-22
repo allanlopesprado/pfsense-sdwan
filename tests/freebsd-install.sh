@@ -33,7 +33,9 @@ if PATH="$root/bin:$PATH" sh -c "$installer"; then exit 1; fi
 rm "$root/bin/fetch"
 # The prior published release remains installed after a rejected upgrade.
 package=pfSense-pkg-SDWAN
-version=$(awk '$1=="PORTVERSION="{print $2}' Makefile)
+# PHP expands its argument variable inside the script.
+# shellcheck disable=SC2016
+version=$(php -n -r 'echo json_decode(file_get_contents($argv[1]), true, 512, JSON_THROW_ON_ERROR)["version"];' dist/release.json)
 test -n "$version"
 head -c 80 "$PWD/dist/$package-$version.pkg" > "$root/interrupted.pkg"
 previous=$(sh tools/previous-dist-package.sh "$version")
