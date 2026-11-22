@@ -172,6 +172,15 @@ $result = sdwan_evaluate($requirements, $gateways, 1700000000, $inventory, $prob
 check('policy and member service check requirements survive the XML list shape',
     sdwan_validate_config($requirements, $inventory) === [] &&
     sdwan_decode_config(sdwan_encode_config($requirements)) === $requirements);
+$ambiguous = sdwan_encode_config($requirements);
+$ambiguous['policies']['item'][2]['probe_requirements']['item'][0]['member'][] = 'b';
+try {
+    sdwan_decode_config($ambiguous);
+    $rejected_override = false;
+} catch (UnexpectedValueException) {
+    $rejected_override = true;
+}
+check('an XML override must identify exactly one member', $rejected_override);
 check('a passing optional probe does not override a failed required probe',
     $result['calls']['selected'] === 'b' && $result['calls']['candidates']['a'] === 'Required service check failed');
 check('two policies sharing the same WAN can require different services',

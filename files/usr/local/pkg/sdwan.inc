@@ -30,7 +30,13 @@ function sdwan_encode_config(array $config): array {
 			if ($section === 'policies') {
 				$row['members'] = ['item' => $row['members']];
 				if (isset($row['probe_requirements'])) {
-					$row['probe_requirements'] = ['item' => $row['probe_requirements']];
+					// Native pfSense XML also reserves the member tag as a list.
+					$items = [];
+					foreach ($row['probe_requirements'] as $override) {
+						$override['member'] = [$override['member']];
+						$items[] = $override;
+					}
+					$row['probe_requirements'] = ['item' => $items];
 				}
 			}
 			$stored[$section]['item'][] = $row;
@@ -64,6 +70,17 @@ function sdwan_decode_config($stored): array {
 				$row['members'] = $row['members']['item'] ?? null;
 				if (array_key_exists('probe_requirements', $row)) {
 					$row['probe_requirements'] = $row['probe_requirements']['item'] ?? null;
+					if (is_array($row['probe_requirements'])) {
+						foreach ($row['probe_requirements'] as &$override) {
+							$member = is_array($override) ? ($override['member'] ?? null) : null;
+							if (is_array($member) && array_is_list($member) && count($member) === 1) {
+								$override['member'] = $member[0];
+							} elseif (is_array($override)) {
+								$override['member'] = null;
+							}
+						}
+						unset($override);
+					}
 				}
 			}
 			$config[$section][] = $row;
