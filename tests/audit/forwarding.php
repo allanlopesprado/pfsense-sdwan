@@ -234,6 +234,8 @@ $preflight = static fn(array $fixture): array => sdwan_steering_preflight($pair_
 // Dynamic gateways must be left to the native resolver.
 $hop_cases = [
 	'valid_ipv4' => ['192.0.2.1', true],
+	'ipv4_private' => ['10.0.0.1', true],
+	'ipv4_shared' => ['100.64.0.1', true],
 	'ipv4_unspecified' => ['0.0.0.0', false],
 	'ipv4_loopback' => ['127.0.0.1', false],
 	'ipv4_multicast' => ['224.0.0.1', false],
@@ -256,6 +258,39 @@ foreach (['GW0' => 'em0', 'GW1' => 'em2'] as $key => $device) {
 	$ipv6_pair['gateways'][$key]['address'] = "fe80::1%{$device}";
 	$ipv6_pair['gateways'][$key]['monitor'] = "fe80::a%{$device}";
 }
+$ipv6_hops = [
+	'ipv6_ula' => ['fd00::1', true],
+	'ipv6_link_local_unscoped' => ['fe80::1', true],
+	'ipv6_link_local_scoped' => ['fe80::1%em0', true],
+	'ipv6_wrong_scope' => ['fe80::1%em9', false],
+	'ipv6_unspecified' => ['::', false],
+	'ipv6_loopback' => ['::1', false],
+	'ipv6_multicast' => ['ff02::1%em0', false],
+];
+foreach ($ipv6_hops as $case => [$hop, $usable]) {
+	$fixture = $ipv6_pair;
+	$fixture['gateways']['GW0']['address'] = $hop;
+	$rows[] = audit_case("static_hop_preflight_{$case}", $usable, $preflight($fixture)['errors'] === []);
+	$rows[] = audit_case("static_hop_renderer_{$case}", $usable,
+	    filter_sdwan_gateway_route(['interface' => 'em0', 'ipprotocol' => 'inet6'], $hop) !== null);
+}
+
+$fixture = $pair;
+$fixture['gateways']['GW0']['address'] = $fixture['gateways']['GW0']['monitor'] = 'dynamic';
+$rows[] = audit_case('preflight_pending_dynamic_gateway_and_monitor', true, $preflight($fixture)['errors'] === []);
+$fixture['gateways']['GW0']['monitor'] = '100.64.1.20';
+$rows[] = audit_case('preflight_dynamic_gateway_with_shared_monitor', true, $preflight($fixture)['errors'] === []);
+$fixture['gateways']['GW0']['monitor'] = '10.11.0.20';
+$rows[] = audit_case('preflight_dynamic_gateway_with_private_monitor', true, $preflight($fixture)['errors'] === []);
+
+$pppoe = $ipv6_pair;
+$pppoe['interfaces']['wan']['if'] = 'pppoe0';
+// The IPv6 path uses the Ethernet parent while IPv4 uses PPPoE.
+$pppoe['gateways'] = sdwan_steering_native($pppoe['gateways'])['gateways'];
+$rows[] = audit_case('preflight_ipv6_pppoe_parent_scope', true, $preflight($pppoe)['errors'] === []);
+$pppoe['gateways']['GW0']['monitor'] = 'fe80::a%pppoe0';
+$rows[] = audit_case('preflight_ipv6_pppoe_wrong_scope', false, $preflight($pppoe)['errors'] === []);
+
 $running_monitor = ['targetip' => 'fe80::a%em0', 'srcip' => 'fe80::b%em0'];
 $monitor_cases = [
 	'correct_scope' => ['fe80::a%em0', true, true],

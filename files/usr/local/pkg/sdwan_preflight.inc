@@ -1,9 +1,27 @@
 <?php
 
+require_once(__DIR__ . '/sdwan_engine.inc');
+
 /* Read-only checks for delegating existing, identified ingress rules to the
  * native steering integration. No lookup here may apply routing or PF. */
 function sdwan_preflight_error(string $message): array {
 	return ['errors' => [$message], 'binding' => null];
+}
+
+/* Native gateways can be pending DHCP or PPP negotiation. Validate literals
+ * with the same family and zone checks as the observer and the PF renderer. */
+function sdwan_preflight_address(mixed $value, string $family, string $device): bool {
+	if ($value === null || $value === '' || $value === 'dynamic') {
+		return true;
+	}
+	$address = is_string($value) ? sdwan_monitor_address($value, $family, $device, true) : null;
+	if ($address === null) {
+		return false;
+	}
+	$packed = inet_pton(explode('%', $address, 2)[0]);
+	$first = ord($packed[0]);
+	return $family === 'inet' ? $first > 0 && $first !== 127 && $first < 224 :
+	    $address !== '::' && $address !== '::1' && $first !== 255;
 }
 
 /* Native monitor setup deduplicates targets, including those outside a group. */
@@ -410,6 +428,13 @@ function sdwan_steering_preflight(array $config, string $policy, string $group, 
 		    ($gateway['monitor_disabled'] ?? true) || ($gateway['action_disabled'] ?? true) ||
 		    !in_array($gateway['family'] ?? '', ['inet', 'inet6'], true)) {
 			return sdwan_preflight_error('The policy must match enabled, monitored group gateways with gateway actions enabled.');
+		}
+		$route_device = $gateway['route_device'] ?? $device;
+		if (!sdwan_preflight_address($gateway['address'] ?? null, $gateway['family'], $route_device)) {
+			return sdwan_preflight_error("Gateway {$name} requires a usable next hop for its address family and interface.");
+		}
+		if (!sdwan_preflight_address($gateway['monitor'] ?? null, $gateway['family'], $route_device)) {
+			return sdwan_preflight_error("Gateway {$name} requires a usable Monitor IP for its address family and interface.");
 		}
 		$monitor = sdwan_preflight_monitor_key($gateway);
 		if ($monitor !== null && $monitor_usage[$monitor] > 1) {

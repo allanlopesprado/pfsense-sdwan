@@ -87,6 +87,13 @@ function sdwan_steering_native(?array $inventory = null): array {
 		if (!$gateway['monitor_disabled'] && $gateway['monitor'] === 'dynamic') {
 			$gateway['resolved_monitor'] = sdwan_gateway_monitor($gateway);
 		}
+		if (($gateway['family'] ?? '') === 'inet6' && function_exists('get_real_interface') &&
+		    (str_contains($gateway['address'] ?? '', '%') || str_contains($gateway['monitor'] ?? '', '%'))) {
+			$device = get_real_interface($gateway['interface'], 'inet6', false, false);
+			if (is_string($device) && $device !== '') {
+				$gateway['route_device'] = $device;
+			}
+		}
 	}
 	unset($gateway);
 	$native['default4'] = config_get_path('gateways/defaultgw4', '');
