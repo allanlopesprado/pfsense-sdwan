@@ -102,30 +102,55 @@ function sdwan_can_edit_forwarding(): bool {
 	    isAllowedPage('/system_gateway_groups_edit.php');
 }
 
-/* A direct Phase 1 interface or a VIP chain can identify the assigned transport.
- * A gateway group or unresolved VIP has no known single transport. */
-function sdwan_vti_transports(array $interfaces, array $phases1, array $phases2, array $vips = []): array {
-	$vip_parents = [];
+/* An IP Alias can use a CARP VIP as its parent. Keep only the configuration
+ * fields which identify the endpoint and how it is presented on the link. */
+function sdwan_vti_vip_index(array $vips): array {
+	$index = [];
 	foreach ($vips as $vip) {
 		if (isset($vip['uniqid'], $vip['interface']) &&
 		    in_array($vip['mode'] ?? '', ['carp', 'ipalias'], true)) {
 			$key = '_vip' . $vip['uniqid'];
-			$vip_parents[$key] = array_key_exists($key, $vip_parents) ? '' : $vip['interface'];
+			$fields = ['uniqid', 'mode', 'interface', 'subnet', 'subnet_bits'];
+			if ($vip['mode'] === 'carp') {
+				$fields[] = 'vhid';
+			}
+			$index[$key] = array_key_exists($key, $index) ? null :
+			    array_filter(array_intersect_key($vip, array_flip($fields)), 'is_scalar');
 		}
 	}
+	return $index;
+}
+
+function sdwan_vti_vip_path(array $index, mixed $interface): ?array {
+	$chain = [];
+	while (is_string($interface) && array_key_exists($interface, $index)) {
+		$vip = $index[$interface];
+		if ($vip === null || isset($chain[$interface])) {
+			return null;
+		}
+		$chain[$interface] = $vip;
+		$interface = $vip['interface'] ?? null;
+	}
+	return is_string($interface) ? ['interface' => $interface, 'vips' => array_values($chain)] : null;
+}
+
+function sdwan_vti_uses_split_connections(array $phase): bool {
+	return ($phase['iketype'] ?? '') === 'ikev1' || isset($phase['splitconn']);
+}
+
+/* A direct Phase 1 interface or a VIP chain can identify the assigned transport.
+ * A gateway group or unresolved VIP has no known single transport. */
+function sdwan_vti_transports(array $interfaces, array $phases1, array $phases2, array $vips = []): array {
+	$vip_index = sdwan_vti_vip_index($vips);
 	$parents = [];
 	foreach ($phases1 as $phase) {
-		$interface = $phase['interface'] ?? 'wan';
-		$visited = [];
-		while (is_string($interface) && isset($vip_parents[$interface]) && !isset($visited[$interface])) {
-			$visited[$interface] = true;
-			$interface = $vip_parents[$interface];
-		}
-		if (is_string($interface) && isset($phase['ikeid'], $interfaces[$interface]['enable']) &&
+		$path = sdwan_vti_vip_path($vip_index, $phase['interface'] ?? 'wan');
+		$interface = $path['interface'] ?? null;
+		if ($interface !== null && isset($phase['ikeid'], $interfaces[$interface]['enable']) &&
 		    !isset($phase['disabled']) && !isset($phase['mobile'])) {
 			$parents[$phase['ikeid']] = [
 				'interface' => $interface,
-				'split' => ($phase['iketype'] ?? '') === 'ikev1' || isset($phase['splitconn']),
+				'split' => sdwan_vti_uses_split_connections($phase),
 			];
 		}
 	}

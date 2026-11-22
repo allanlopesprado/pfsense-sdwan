@@ -377,4 +377,73 @@ $fixture = $vti;
 $fixture['phase2'][0]['disabled'] = '';
 $rows[] = audit_case('vti_preflight_rejects_disabled_phase2', true, $preflight($fixture)['errors'] !== []);
 
+$stacked = $vti;
+$stacked['phase1'][0]['interface'] = '_vipalias_a';
+$stacked['vips'][] = ['uniqid' => 'alias_a', 'mode' => 'ipalias', 'interface' => '_viprouted_a',
+	'subnet' => '203.0.113.8', 'subnet_bits' => '32'];
+$stacked_approval = $preflight($stacked)['binding'];
+$rows[] = audit_case('vti_stacked_vip_accepted', true, $stacked_approval !== null);
+foreach (['parent_vhid' => [0, 'vhid', '9'], 'alias_endpoint' => [1, 'subnet', '203.0.113.9']] as
+    $case => [$offset, $field, $value]) {
+	$fixture = $stacked;
+	$fixture['vips'][$offset][$field] = $value;
+	$updated_binding = $preflight($fixture)['binding'];
+	$rows[] = audit_case("vti_stacked_vip_{$case}_changes_revision", true,
+	    $updated_binding !== null && $updated_binding !== $stacked_approval);
+}
+$fixture = $stacked;
+$fixture['phase1'][0]['descr'] = 'Renamed VTI';
+$fixture['phase1'][0]['pre-shared-key'] = 'fixture-psk';
+$fixture['phase2'][0]['localid']['descr'] = 'Renamed local endpoint';
+$fixture['phase2'][0]['rekey_time'] = '7200';
+$fixture['vips'][0]['password'] = 'fixture-carp-password';
+$fixture['vips'][0]['advskew'] = '100';
+$fixture['vips'][1]['descr'] = 'Renamed alias';
+$fixture['vips'][] = ['uniqid' => 'unrelated', 'mode' => 'carp', 'interface' => 'wan', 'subnet' => '203.0.113.10', 'vhid' => '10'];
+$rows[] = audit_case('vti_keeps_approval_for_cosmetic_and_secret_fields', true,
+	$stacked_approval !== null && $preflight($fixture)['binding'] === $stacked_approval);
+$fixture = $vti;
+$fixture['phase2'][0]['localid']['address'] = '2001:0db8:0013:0000:0000:0000:0000:0001';
+$rows[] = audit_case('vti_equivalent_ipv6_endpoint_keeps_revision', true,
+	$preflight($fixture)['binding'] === $vti_approved['binding']);
+
+$merged = $vti;
+$merged['phase2'][] = ['ikeid' => '13', 'reqid' => '220', 'mode' => 'vti',
+	'localid' => ['type' => 'address', 'address' => '198.51.100.33'],
+	'remoteid' => ['type' => 'address', 'address' => '198.51.100.34']];
+$merged_approval = $preflight($merged)['binding'];
+$rows[] = audit_case('vti_merged_uses_first_reqid_for_both_families', true, $merged_approval !== null);
+$fixture = $merged;
+$fixture['phase2'][2]['remoteid']['address'] = '198.51.100.35';
+$updated_binding = $preflight($fixture)['binding'];
+$rows[] = audit_case('vti_merged_secondary_endpoint_changes_revision', true,
+	$updated_binding !== null && $updated_binding !== $merged_approval);
+$fixture = $merged;
+[$fixture['phase2'][0], $fixture['phase2'][2]] = [$fixture['phase2'][2], $fixture['phase2'][0]];
+$rows[] = audit_case('vti_merged_new_first_reqid_retires_old_device', true, $preflight($fixture)['errors'] !== []);
+
+$merged_aliases = $merged;
+$extra_alias = $merged['phase2'][2];
+$extra_alias['reqid'] = '221';
+$extra_alias['localid']['address'] = '198.51.100.37';
+$extra_alias['remoteid']['address'] = '198.51.100.38';
+$merged_aliases['phase2'][] = $extra_alias;
+$ordered = $preflight($merged_aliases)['binding'];
+[$merged_aliases['phase2'][2], $merged_aliases['phase2'][3]] = [$merged_aliases['phase2'][3], $merged_aliases['phase2'][2]];
+$updated_binding = $preflight($merged_aliases)['binding'];
+$rows[] = audit_case('vti_merged_ipv4_alias_order_changes_default_peer', true,
+	$updated_binding !== null && $updated_binding !== $ordered);
+
+foreach (['ikev1', 'ikev2'] as $ike) {
+	$split = $merged;
+	$split['phase1'][0]['iketype'] = $ike;
+	if ($ike === 'ikev2') {
+		$split['phase1'][0]['splitconn'] = '';
+	}
+	$split_approval = $preflight($split)['binding'];
+	$split['phase2'][2]['remoteid']['address'] = '198.51.100.35';
+	$rows[] = audit_case("vti_{$ike}_other_split_device_keeps_revision", true,
+	    $split_approval !== null && $preflight($split)['binding'] === $split_approval);
+}
+
 echo json_encode($rows, JSON_THROW_ON_ERROR | JSON_PRETTY_PRINT), PHP_EOL;

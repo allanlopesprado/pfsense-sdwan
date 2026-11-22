@@ -42,10 +42,25 @@ function sdwan_preflight_monitor_key(array $gateway): ?string {
 	return inet_ntop($packed) . ($scope === null ? '' : '%' . $scope);
 }
 
-/* An ipsecX VTI uses a Phase 2 reqid for X. For merged IKEv2 children,
- * pfSense uses the first child's reqid. Pin the identifiers and traffic paths,
- * allowing a normal rekey or a cosmetic configuration edit. */
-function sdwan_preflight_vti_peer(array $native, string $device): ?array {
+function sdwan_preflight_vti_endpoint(mixed $endpoint): array {
+	if (!is_array($endpoint)) {
+		return [];
+	}
+	$fields = match ($endpoint['type'] ?? null) {
+		'address' => ['type', 'address'],
+		'network' => ['type', 'address', 'netbits'],
+		default => ['type'],
+	};
+	$result = array_filter(array_intersect_key($endpoint, array_flip($fields)), 'is_scalar');
+	if (is_string($result['address'] ?? null) && ($packed = @inet_pton($result['address'])) !== false) {
+		$result['address'] = inet_ntop($packed);
+	}
+	return $result;
+}
+
+/* The transport map has already confirmed that this ipsecX is usable. Its
+ * reqid identifies the Phase 1 peer even for merged IKEv2 children. */
+function sdwan_preflight_vti_scope(array $native, string $device): ?array {
 	$ids = [];
 	foreach ($native['phase2'] as $child) {
 		if (isset($child['reqid'], $child['ikeid']) && 'ipsec' . $child['reqid'] === $device) {
@@ -54,12 +69,41 @@ function sdwan_preflight_vti_peer(array $native, string $device): ?array {
 	}
 	$peers = [];
 	foreach ($native['phase1'] as $peer) {
-		if (isset($ids[$peer['ikeid'] ?? '']) && !isset($peer['disabled'])) {
-			$peers[] = array_intersect_key($peer, array_flip(['ikeid', 'interface', 'remote-gateway',
-			    'iketype', 'splitconn', 'gw_duplicates', 'peerid_type', 'peerid_data']));
+		if (isset($ids[$peer['ikeid'] ?? '']) && !isset($peer['disabled']) && !isset($peer['mobile'])) {
+			$peers[] = $peer;
 		}
 	}
-	return count($peers) === 1 ? $peers[0] : null;
+	if (count($peers) !== 1) {
+		return null;
+	}
+	$peer = $peers[0];
+	$vip_path = sdwan_vti_vip_path(sdwan_vti_vip_index($native['vips']), $peer['interface'] ?? 'wan');
+	if ($vip_path === null) {
+		return null;
+	}
+	$split = sdwan_vti_uses_split_connections($peer);
+	$children = [];
+	foreach ($native['phase2'] as $child) {
+		$reqid = (string)($child['reqid'] ?? '');
+		if ((string)($child['ikeid'] ?? '') !== (string)$peer['ikeid'] || ($child['mode'] ?? '') !== 'vti' ||
+		    isset($child['disabled']) || !preg_match('/^[1-9][0-9]*$/D', $reqid) ||
+		    ($split && 'ipsec' . $reqid !== $device)) {
+			continue;
+		}
+		/* In a merged VTI the first active address per family supplies the
+		 * native gateway. Preserve child order rather than sorting by reqid. */
+		$children[] = [$reqid, sdwan_preflight_vti_endpoint($child['localid'] ?? null),
+		    sdwan_preflight_vti_endpoint($child['remoteid'] ?? null)];
+	}
+	if (!$children) {
+		return null;
+	}
+	return [
+	    'phase1' => array_filter(array_intersect_key($peer, array_flip(['ikeid', 'interface', 'remote-gateway',
+	        'protocol', 'iketype', 'splitconn', 'gw_duplicates', 'peerid_type', 'peerid_data'])), 'is_scalar'),
+	    'phase2' => $children,
+	    'vips' => $vip_path['vips'],
+	];
 }
 
 /* The native XML stores stacked interfaces and aggregates separately from
@@ -455,7 +499,7 @@ function sdwan_steering_preflight(array $config, string $policy, string $group, 
 		    $gateway['address'] ?? '', $gateway['monitor'] ?? ''];
 		$weights[] = max(1, min(30, (int)($gateway['weight'] ?? 1)));
 		if ($is_vti) {
-			$peer = sdwan_preflight_vti_peer($native, $device);
+			$peer = sdwan_preflight_vti_scope($native, $device);
 			if ($peer === null) {
 				return sdwan_preflight_error('The assigned VTI does not identify a unique Phase 1 peer.');
 			}
