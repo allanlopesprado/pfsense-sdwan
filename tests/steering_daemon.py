@@ -120,8 +120,8 @@ def run(binary, load_filter_extension):
                 assert event.result() == result, "event fired before snapshot publication"
 
             bad_rule = 'pass in quick on igb0 inet all ridentifier 301'
-            block_rule = 'block drop in quick on igb0 inet all ridentifier 301'
-            guard_rule = 'block drop in quick on igb0 inet all ridentifier 302'
+            block_rule = 'block drop in quick on igb0 inet from 10.23.0.0/24 to any ridentifier 301'
+            guard_rule = 'block drop in quick on igb0 inet from 10.23.0.0/24 to any ridentifier 302'
             config["fixture_pf_rules"] = [bad_rule]
 
             # Refusal and EOF consume attempts even without an acknowledgement.
