@@ -45,9 +45,16 @@ function sdwan_probe_tcp_status($socket): ?bool {
 }
 
 function sdwan_probe_route_matches(string $output, string $device, string $next_hop): bool {
+	if (!preg_match('/^[ \t]*flags:[ \t]*<([^>\r\n]+)>/m', $output, $route_flags)) {
+		return false;
+	}
+	$flags = array_map('trim', explode(',', $route_flags[1]));
+	if (!in_array('UP', $flags, true) || !in_array('HOST', $flags, true) ||
+	    in_array('REJECT', $flags, true) || in_array('BLACKHOLE', $flags, true)) {
+		return false;
+	}
 	return preg_match('/^\s*interface:\s*(\S+)\s*$/m', $output, $route_device) &&
 	    $route_device[1] === $device &&
-	    preg_match('/^\s*flags:\s*<[^>]*\bHOST\b[^>]*>/m', $output) &&
 	    preg_match('/^\s*gateway:\s*(\S+)\s*$/m', $output, $route_gateway) &&
 	    ($expected = @inet_pton(explode('%', $next_hop, 2)[0])) !== false &&
 	    @inet_pton(explode('%', $route_gateway[1], 2)[0]) === $expected;

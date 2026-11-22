@@ -4,15 +4,19 @@ declare(strict_types=1);
 namespace SdwanAuditProbeFixture {
     /* Only these functions are shadowed inside a copy of the production
      * probe functions. No route table, network socket, or real clock is used. */
-    final class Clock {
+    final class ProbeFixture {
+        public const DEFAULT_ROUTE_FLAGS = 'UP,GATEWAY,HOST,DONE,STATIC';
         public static int $now = 0;
         public static int $routeLatency = 0;
+        public static array $routeFlags = [];
+        public static int $routeLookups = 0;
+        public static int $tcpAttempts = 0;
     }
 
     function hrtime(bool $asNumber = false): int|array {
-        return $asNumber ? Clock::$now : [
-            intdiv(Clock::$now, 1_000_000_000),
-            Clock::$now % 1_000_000_000,
+        return $asNumber ? ProbeFixture::$now : [
+            intdiv(ProbeFixture::$now, 1_000_000_000),
+            ProbeFixture::$now % 1_000_000_000,
         ];
     }
 
@@ -26,13 +30,15 @@ namespace SdwanAuditProbeFixture {
             throw new \RuntimeException('Unexpected route lookup in the no-network probe fixture.');
         }
         $maximum = (int)round((float)$timeout[1] * 1_000_000_000);
-        Clock::$now += min($maximum, Clock::$routeLatency);
-        if (Clock::$routeLatency > $maximum) {
+        ProbeFixture::$now += min($maximum, ProbeFixture::$routeLatency);
+        if (ProbeFixture::$routeLatency > $maximum) {
             $result = 124;
             return '';
         }
         $wan = (int)$target[1] - 100;
-        $output = ["gateway: 198.18.{$wan}.2", "interface: em{$wan}", 'flags: <UP,GATEWAY,HOST,DONE,STATIC>'];
+        $lookup = ProbeFixture::$routeLookups++;
+        $flags = ProbeFixture::$routeFlags[$lookup] ?? ProbeFixture::DEFAULT_ROUTE_FLAGS;
+        $output = ["gateway: 198.18.{$wan}.2", "interface: em{$wan}", "flags: <{$flags}>"];
         $result = 0;
         return $output[2];
     }
@@ -54,6 +60,7 @@ namespace SdwanAuditProbeFixture {
             '198.18.' . ((int)$target[1] - 100) . '.10:0') {
             throw new \RuntimeException('The probe did not bind to its expected synthetic source.');
         }
+        ++ProbeFixture::$tcpAttempts;
         return fopen('php://memory', 'w+b');
     }
 
@@ -66,12 +73,12 @@ namespace SdwanAuditProbeFixture {
     }
 
     function usleep(int $microseconds): void {
-        Clock::$now += $microseconds * 1_000;
+        ProbeFixture::$now += $microseconds * 1_000;
     }
 }
 
 namespace {
-    use SdwanAuditProbeFixture\Clock;
+    use SdwanAuditProbeFixture\ProbeFixture;
 
     if (PHP_SAPI !== 'cli') {
         exit(64);
@@ -119,11 +126,26 @@ namespace {
 
     function observe_bounded_probes(int $members, int $routeMs): array {
         [$paths, $inventory, $observations] = path_config($members);
-        Clock::$now = 0;
-        Clock::$routeLatency = $routeMs * 1_000_000;
+        ProbeFixture::$now = 0;
+        ProbeFixture::$routeLatency = $routeMs * 1_000_000;
         $observed = SdwanAuditProbeFixture\sdwan_probe_observe($paths, $inventory, $observations);
         $labels = array_merge(...array_values(array_map('array_values', $observed)));
-        return [intdiv(Clock::$now, 1_000_000), count(array_keys($labels, 'Passed', true)), $labels];
+        return [intdiv(ProbeFixture::$now, 1_000_000), count(array_keys($labels, 'Passed', true)), $labels];
+    }
+
+    function observe_tcp_route_change(string $initialFlags, string $finalFlags): string {
+        [$paths, $inventory, $observations] = path_config(1);
+        unset($paths[0]['probe_secondary']);
+        ProbeFixture::$now = 0;
+        ProbeFixture::$routeLatency = 0;
+        ProbeFixture::$routeLookups = ProbeFixture::$tcpAttempts = 0;
+        ProbeFixture::$routeFlags = [$initialFlags, $finalFlags];
+        $observed = SdwanAuditProbeFixture\sdwan_probe_observe($paths, $inventory, $observations);
+        return implode(' / ', [
+            $observed['WAN1']['probe_primary'],
+            ProbeFixture::$tcpAttempts . ' TCP attempts',
+            ProbeFixture::$routeLookups . ' route lookups',
+        ]);
     }
 
     [$paths, $inventory, $observations] = path_config(3);
@@ -165,6 +187,8 @@ namespace {
     $slowThree = $slowThreeMs <= 2500 ? 'within_2500ms' : "{$slowThreeMs}ms";
     $slowFive = $slowFivePass > 0 ? 'at_least_one_healthy_result' :
         "0_passed/" . count(array_keys($slowFiveLabels, 'Timed out', true)) . "_timed_out/{$slowFiveMs}ms";
+    $routeFlags = ProbeFixture::DEFAULT_ROUTE_FLAGS;
+    $rejectFlags = 'UP,GATEWAY,HOST,REJECT,DONE,STATIC';
     $result = [
         audit_case('sla_boundary_triple', 'Eligible|RTT exceeds the SLA|RTT standard deviation exceeds the SLA or is unavailable',
             implode('|', $qualityLabels)),
@@ -174,6 +198,20 @@ namespace {
             "{$fastPass}_passed/" . count($fastLabels) . '_checks/' . ($fastMs <= 2500 ? 'within_budget' : 'over_budget')),
         audit_case('probe_three_wan_deadline', 'within_2500ms', $slowThree, '3000ms'),
         audit_case('probe_preparation_starvation', 'at_least_one_healthy_result', $slowFive, '0_passed/10_timed_out/2500ms'),
+        audit_case('probe_route_stays_usable', 'Passed / 1 TCP attempts / 2 route lookups',
+            observe_tcp_route_change($routeFlags, $routeFlags)),
+        audit_case('probe_route_ignores_flag_order', 'Passed / 1 TCP attempts / 2 route lookups',
+            observe_tcp_route_change($routeFlags, 'STATIC,GATEWAY,DONE,HOST,UP')),
+        audit_case('probe_route_loses_host', 'TCP check failed / 1 TCP attempts / 2 route lookups',
+            observe_tcp_route_change($routeFlags, 'UP,GATEWAY,DONE,STATIC')),
+        audit_case('probe_route_becomes_reject', 'TCP check failed / 1 TCP attempts / 2 route lookups',
+            observe_tcp_route_change($routeFlags, $rejectFlags)),
+        audit_case('probe_route_becomes_blackhole', 'TCP check failed / 1 TCP attempts / 2 route lookups',
+            observe_tcp_route_change($routeFlags, 'UP,GATEWAY,HOST,DONE,STATIC,BLACKHOLE')),
+        audit_case('probe_route_loses_up', 'TCP check failed / 1 TCP attempts / 2 route lookups',
+            observe_tcp_route_change($routeFlags, 'GATEWAY,HOST,DONE,STATIC')),
+        audit_case('probe_route_initially_rejects', 'No matching host route or source / 0 TCP attempts / 1 route lookups',
+            observe_tcp_route_change($rejectFlags, $routeFlags)),
     ];
     echo json_encode($result, JSON_THROW_ON_ERROR | JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES), PHP_EOL;
 }
