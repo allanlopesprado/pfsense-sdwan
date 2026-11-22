@@ -77,7 +77,9 @@ jexec "$firewall" sysctl net.inet.ip.forwarding=1
 # returns the observed source IP so each direction and NAT are asserted.
 printf 'echo stream tcp4 nowait root %s tcp-peer\necho stream tcp6 nowait root %s tcp-peer\n' \
     "$work/tcp-peer" "$work/tcp-peer" >"$work/inetd.conf"
-jexec "$remote" inetd -p "$work/inetd.pid" "$work/inetd.conf"
+# Rapid probe polling in the failback test shares this listener with the
+# application flows. Keep the lab below the listener's invocation limit.
+jexec "$remote" inetd -R 1024 -p "$work/inetd.pid" "$work/inetd.conf"
 if ! printf 'listener-test\n' | jexec "$remote" nc -n -N -w 3 192.0.2.162 7 | grep -Eq '^[0-9.]+ listener-test$'; then
     echo 'The test TCP listener failed a local round trip' >&2
     exit 1
