@@ -235,7 +235,9 @@ if [ -n "${SDWAN_RENDERED_RULES:-}" ]; then
     verify_pf "$firewall" A applied
     verify_pf "$firewall" B pending
     echo 'ok - the package distinguishes matching and mismatched native PF rules'
-    sed 's/proto tcp/proto { tcp udp }/g' "$work/selected.pf" >"$work/tcp-udp.pf"
+    # The native renderer emits TCP-only flags for explicit TCP rules.
+    sed -e 's/proto tcp/proto { tcp udp }/g' -e 's/flags S\/SA //g' \
+        "$work/selected.pf" >"$work/tcp-udp.pf"
     cp "$work/tcp-udp.pf" "$work/selected.pf"
     load_rules
     verify_pf "$firewall" A applied tcp/udp
