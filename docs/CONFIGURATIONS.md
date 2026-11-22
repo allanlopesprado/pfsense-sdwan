@@ -1,6 +1,6 @@
 # How native pfSense settings affect SD-WAN
 
-This matrix covers the package's dependencies on pfSense CE 2.9.1. On stock CE, the observer reads dpinger and recommends a path. The experimental core can apply that recommendation to explicitly bound rules. A recommendation reflects the probe's conditions. Verify delivery to the application destination separately. [Integration and forwarding](INTEGRATION.md)
+This matrix covers the package's dependencies on pfSense CE 2.9.1 and 2.9.2. On stock CE, the observer reads dpinger and recommends a path. The experimental core can apply that recommendation to explicitly bound rules. A recommendation reflects the probe's conditions. Verify delivery to the application destination separately. [Integration and forwarding](INTEGRATION.md)
 
 | pfSense settings | Effect on SD-WAN | Evidence |
 | --- | --- | --- |

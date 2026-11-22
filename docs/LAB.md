@@ -1,4 +1,4 @@
-# Acceptance testing on pfSense CE 2.9.1
+# Acceptance lab for pfSense CE
 
 The experimental distribution includes an observer and a lab forwarding integration. Record the package and core revisions separately. Use a stock clone to validate observation and native forwarding. To test the effect of path selection, use a lab image that includes the core integration. [IPsec, CARP, NAT, states, and routing integration](INTEGRATION.md)
 
@@ -10,7 +10,7 @@ One monitored gateway is enough to observe an SLA. To compare alternatives, conf
 
 ## Core dependency for forwarding tests
 
-The package installs its files under `/usr/local` and its privilege definition under `/etc/inc/priv`. The rule generator adapter is part of a **separate lab image**. A package-only installation supports previews. To test rule bindings, check ABI 1 availability in **Forwarding**.
+The package installs its files under `/usr/local` and its privilege definition under `/etc/inc/priv`. Stock CE supports forwarding previews. The separate lab core supplies ABI 1 for single-path steering or ABI 2 for weighted balancing. Check that **Forwarding** offers bindings and record the native ABI reported by [the verification script](../tools/verify-appliance.sh).
 
 The patch uses public commit `9363ac5b8651a1c7a333180425ce7719070f95f9`. Its `src/etc/version` identifies `2.9.0-DEVELOPMENT`. Before building the target image, compare the rule generator and gateway inventory with the exact tree that will produce the clone. In the base **build** checkout, validate the patch with `git apply --check /path/to/filter-sdwan.patch`. Integrate `src/etc/inc/filter-sdwan.inc` alongside the change to `filter.inc`. On the clone, check the core revision, interfaces, and compiled rules. Run traffic tests even if the patch applies cleanly. [Rule generator patch](../core/filter-sdwan.patch) · [ABI 1 adapter](../core/filter-sdwan.inc)
 
@@ -18,11 +18,7 @@ The patch uses public commit `9363ac5b8651a1c7a333180425ce7719070f95f9`. Its `sr
 
 For direct WebGUI download and installation, see [Install from Diagnostics → Command Prompt](../README.md#install-from-diagnostics--command-prompt).
 
-The [dist directory](../dist/) contains lab packages and checksums. Download both files to the same directory on the clone and verify integrity before using `pkg add`. This example uses 0.4.7.
-
-```sh
-sha256 -c "$(awk '{print $1}' pfSense-pkg-SDWAN-0.4.7.pkg.sha256)" pfSense-pkg-SDWAN-0.4.7.pkg
-```
+The [dist directory](../dist/) contains lab packages and checksums. Copy the archive and its checksum to the same directory on the clone before installing.
 
 Use a FreeBSD or pfSense builder with a ports tree, dependencies, and ABI compatible with the target appliance. The directory containing this project's Makefile is the port. Make it available as `net/pfSense-pkg-SDWAN` in the builder's working tree. In that directory, run the following commands.
 
@@ -39,7 +35,8 @@ make -V PKGFILE
 You can reproduce the lab package with Python 3.9+, the official FreeBSD `pkg` v2 tool tested at 2.9.3, and an environment that represents package files as UID 0/GID 0. On Linux, install these dependencies and `fakeroot` before running the build.
 
 ```sh
-fakeroot python3 tools/build-lab-pkg.py --output ./dist
+output=$(mktemp -d)
+fakeroot python3 tools/build-lab-pkg.py --output "$output"
 ```
 
 After packaging, follow the [versioning and publishing workflow](VERSIONING.md#prepare-a-release) to generate the index used by **Updates** and the pinned README command. Starting with 0.4.8, the WebGUI offers installation when the release is published and the tagged package's SHA-256 matches the index.
@@ -48,13 +45,15 @@ The builder includes the files in `pkg-plist`, populates the manifest and hooks,
 
 ### Install on the clone
 
-The final ports build command reports the package path. Record its SHA-256 on the builder and verify the same value after copying the file to the clone. As root on the clone, replace the path below with the exact filename.
+The final ports build command reports the package path. Record its SHA-256 on the builder and verify the same value after copying the file to the clone. As root on the clone, use the exact archive path and its accompanying checksum.
 
 ```sh
 cat /etc/version
 uname -m
-pkg -vv | grep ABI
-pkg add /path/to/package.pkg
+pkg config ABI
+package=/path/to/pfSense-pkg-SDWAN-X.Y.Z.pkg
+sha256 -c "$(awk 'NR == 1 {print $1}' "$package.sha256")" "$package" &&
+    pkg add "$package"
 pkg info -l pfSense-pkg-SDWAN
 /usr/local/etc/rc.d/sdwand.sh status
 ```
@@ -66,7 +65,7 @@ Check the version with `pkg query '%n-%v' pfSense-pkg-SDWAN` and open **Services
 Identify the core image and package revisions separately in the lab. Save a clone snapshot before changing the core, a configuration backup, and the previous package with its SHA-256. The suite covers observer release 0.2.0 and lab release 0.3.0. Track both a new connection and one that was already established during the round-trip test.
 
 1. In **Services → SD-WAN → Forwarding → Configured bindings**, select **Remove binding** for each group to restore native forwarding. Wait for the filter reload. Check the operator's pfSense rules and groups, egress route, and return path for a new connection. For protected prefixes, verify the native block when the tunnel is unavailable.
-2. With the WebGUI available, run `pkg delete -y pfSense-pkg-SDWAN` in Command Prompt. Reopen the dashboard and Services menu. Check files and the process using the README commands. `pkg` removes its registered files and `rc.packages` updates the menu and service registry. If a binding is still registered, the package clears its transient selection and requests a reload. In the experimental core, the binding marker can still block new flows once the reload completes without the provider. Existing states follow native policy. If the package was already removed with bindings, reinstall the compatible package and use **Remove binding** before removing it again. Administrator-created rules, routes, and groups have separate lifecycles.
+2. With native forwarding verified and the WebGUI available, run `pkg delete -y pfSense-pkg-SDWAN` in Command Prompt. Check the dashboard, Services menu, and observer process after removal. If the package was already removed with bindings, reinstall the compatible package and use **Remove binding** before removing it again. In that case, the experimental core can still block new flows after a reload. Existing states and administrator-created rules, routes, and groups follow their native lifecycles.
 3. To test **package** rollback, remove the test version and reinstall the original package. Verify its SHA-256, its version with `pkg query '%n-%v' pfSense-pkg-SDWAN`, and file integrity with `pkg check -s pfSense-pkg-SDWAN`. Check the menu, service, and path of a new connection. [Previous packages](../dist/)
 4. To roll back the **core**, restore the lab image snapshot. Compare the base version, configuration, and first successful transaction with the baseline. In HA, check each node's role and both versions.
 

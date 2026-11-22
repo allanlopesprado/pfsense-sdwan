@@ -1,0 +1,26 @@
+name: Bug report
+description: Report an SD-WAN package problem.
+labels: [bug]
+body:
+  - type: input
+    id: versions
+    attributes:
+      label: pfSense and SD-WAN versions
+      placeholder: pfSense CE 2.9.2, SD-WAN 0.4.28
+    validations:
+      required: true
+  - type: dropdown
+    id: mode
+    attributes:
+      label: Operating mode
+      options:
+        - Stock CE observation
+        - Lab forwarding adapter
+        - Unknown
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Expected result, actual result, and steps
+      description: Include the relevant policy or gateway configuration and any recent SD-WAN System Logs entries. Remove credentials and private keys before posting.
+    validations:
+      required: true

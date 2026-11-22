@@ -8,7 +8,7 @@ The current release notes link to the exact GitHub Actions run. PHP and native f
 
 On a CE 2.9.2 appliance with the matching experimental core and two working WANs, SD-WAN 0.4.27 selected WAN2 for new LAN connections while the default route remained on WAN1. PF showed the rule tracker, next hop and both directions of real TCP and UDP flows. The NAT state translated them to WAN2's address. External HTTPS management and the two port forwards answered on both WANs. The isolated CE 2.9.2 lab observed reboot and restore separately. Physical circuit interruption and combined HA and IPsec interoperability require their own evidence. [Isolated CE 2.9.2 acceptance](benchmarks/ce292-interface-original.md)
 
-[Current release evidence](https://github.com/allanlopesprado/pfsense-sdwan/releases/latest) ? [Compatibility matrix](PACKAGE-COMPATIBILITY.md) ? [Acceptance procedure](LAB.md)
+[Current release evidence](https://github.com/allanlopesprado/pfsense-sdwan/releases/latest) · [Compatibility matrix](PACKAGE-COMPATIBILITY.md) · [Acceptance procedure](LAB.md)
 
 ## Two-WAN interface interruption on CE 2.9.2
 
@@ -48,7 +48,7 @@ The VM ran FreeBSD 15. The public pfSense generator identifies itself as `2.9.0-
 
 The 0.4.0 package on `main` is **28,924 bytes** with SHA-256 `67251efd7fd8841fb26b65dbfead379867ddf5274adfe456766d3db182d8c7d8`. Two independent builds produced identical bytes. The installer verifies this checksum before calling the package manager. [Pinned installer archive](https://github.com/allanlopesprado/pfsense-sdwan/blob/c0372cadc2ce6be6afa7c01c0db85bba23bc26d6/dist/pfSense-pkg-SDWAN-0.4.0.pkg)
 
-Chromium rendered the widget with the light and dark pfSense CSS at 360 and 640 px. Test data and long identifiers fit without horizontal scrolling in all four combinations. Keyboard focus stayed on the selected policy after AJAX refresh. Minimum measured contrast for values and labels was 12:1 in light mode and 10.05:1 in dark mode. Forms and links used navigation, log filters, privilege checks, and CSRF protection from the reference source. [Visual samples and measurements](https://github.com/allanlopesprado/pfsense-sdwan/actions/runs/44461547088/artifacts/14500182251)
+Chromium rendered the widget with the light and dark pfSense CSS at 360 and 640 px. Test data and long identifiers fit without horizontal scrolling in all four combinations. Keyboard focus stayed on the selected policy after AJAX refresh. Minimum measured contrast for values and labels was 12:1 in light mode and 10.05:1 in dark mode. Forms and links used navigation, log filters, privilege checks, and CSRF protection from the reference source. Sign in to GitHub to download the `sdwan-dashboard` artifact while it is retained. [Workflow run](https://github.com/allanlopesprado/pfsense-sdwan/actions/runs/44461547088)
 
 ## System Logs events
 
