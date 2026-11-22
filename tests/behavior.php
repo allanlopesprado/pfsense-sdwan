@@ -179,9 +179,12 @@ $socket = @stream_socket_client($endpoint, $errno, $error, 0, $tcp_flags);
 $status = false;
 if (is_resource($socket)) {
     $status = null;
-    for ($attempt = 0; $attempt < 100 && $status === null; $attempt++) {
+    $deadline = hrtime(true) + 3_000_000_000;
+    while ($status === null && hrtime(true) < $deadline) {
         $status = sdwan_probe_tcp_status($socket);
-        if ($status === null) usleep(1000);
+        if ($status === null) {
+            usleep(10_000);
+        }
     }
     fclose($socket);
 }

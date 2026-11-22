@@ -38,10 +38,11 @@ function sdwan_probe_target($value): ?array {
 
 /* A writable asynchronous socket can signal either a connection or a refusal. */
 function sdwan_probe_tcp_status($socket): ?bool {
-	$read = $except = null;
-	$write = [$socket];
+	$read = null;
+	$write = $except = [$socket];
 	$ready = @stream_select($read, $write, $except, 0, 0);
-	return $ready === 0 ? null : ($ready === 1 && @stream_socket_get_name($socket, true) !== false);
+	return $ready === 0 ? null : ($ready !== false && !$except && $write &&
+	    @stream_socket_get_name($socket, true) !== false);
 }
 
 function sdwan_probe_route_matches(string $output, string $device, string $next_hop, ?string $direct_target = null): bool {

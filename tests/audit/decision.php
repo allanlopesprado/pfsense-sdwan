@@ -14,6 +14,7 @@ namespace SdwanAuditProbeFixture {
         public static int $tcpAttempts = 0;
         public static bool $tcpRefused = false;
         public static bool $tcpUnavailable = false;
+        public static bool $tcpException = false;
     }
 
     function hrtime(bool $asNumber = false): int|array {
@@ -69,6 +70,11 @@ namespace SdwanAuditProbeFixture {
     }
 
     function stream_select(&$read, &$write, &$except, ?int $seconds, ?int $microseconds = null): int {
+        if (ProbeFixture::$tcpException) {
+            $write = [];
+            return count($except ?? []);
+        }
+        $except = [];
         return count($write);
     }
 
@@ -250,5 +256,9 @@ namespace {
     ProbeFixture::$tcpUnavailable = true;
     $result[] = audit_case('probe_tcp_socket_could_not_start', 'Unavailable / 1 TCP attempts / 1 route lookups',
         observe_tcp_route_change($routeFlags, $routeFlags), 'TCP check failed / 1 TCP attempts / 1 route lookups');
+    ProbeFixture::$tcpUnavailable = ProbeFixture::$tcpRefused = false;
+    ProbeFixture::$tcpException = true;
+    $result[] = audit_case('probe_tcp_exception_signals_failed_connect', 'TCP check failed / 1 TCP attempts / 2 route lookups',
+        observe_tcp_route_change($routeFlags, $routeFlags));
     echo json_encode($result, JSON_THROW_ON_ERROR | JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES), PHP_EOL;
 }
