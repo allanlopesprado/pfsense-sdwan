@@ -92,12 +92,13 @@ if [ "$scenario" = security ]; then
     test -s "$work/vuln.xml"
     base="$root/usr/local/share/pfSense/base.txz"
     tar -tf "$base" > "$work/base-files"
-    libcrypto=$(awk '/^(\.\/)?usr\/lib\/libcrypto\.so\.[0-9]+$/ {print; exit}' "$work/base-files")
-    if [ -n "$libcrypto" ]; then
-        tar -xOf "$base" "$libcrypto" > "$work/libcrypto"
-        strings -a "$work/libcrypto" | awk '/^OpenSSL [0-9]+\.[0-9]+\.[0-9]+[[:alnum:]]*([[:space:]]|$)/' \
-            > "$reports/openssl-version-strings.txt"
-    fi
+    awk '/(^|\/)libcrypto\.so\.[0-9.]+$/ || /(^|\/)bin\/openssl$/ {print}' "$work/base-files" \
+        > "$reports/base-crypto-paths.txt"
+    while IFS= read -r crypto_file; do
+        tar -xOf "$base" "$crypto_file" > "$work/crypto-file"
+        strings -a "$work/crypto-file" | awk '/^OpenSSL [0-9]+\.[0-9]+\.[0-9]+[[:alnum:]]*([[:space:]]|$)/'
+    done < "$reports/base-crypto-paths.txt" > "$work/base-versions"
+    LC_ALL=C sort -u "$work/base-versions" > "$reports/openssl-version-strings.txt"
     printf 'TARGET_CE=%s\nSECURITY_PROFILE=%s\nCANDIDATE_SHA256=%s\nBASE_SHA256=%s\nVUXML_URL=%s\nVUXML_SHA256=%s\n' \
         "$version" "$security_profile" "$(sha256 -q "$candidate")" "$(sha256 -q "$base")" \
         "$vuln_site" "$(sha256 -q "$work/vuln.xml")" > "$reports/metadata.txt"
