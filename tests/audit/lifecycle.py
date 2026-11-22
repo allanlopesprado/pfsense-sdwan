@@ -118,7 +118,8 @@ def observer(binary, *, two_bindings=False):
         observe()
         logged = "filter_divergent" in json.loads(events.read_bytes()).get("filter_event_at", {})
         results.append(case("accepted_with_divergent_pf", "reported", "reported" if logged else "silent"))
-        config["fixture_pf_rules"] = ["block drop in quick on igb0 inet all ridentifier 301"]
+        config["fixture_pf_rules"] = ["block drop in quick on igb0 inet all ridentifier 301",
+                                      "block drop in quick on igb0 inet all ridentifier 302"]
         observe()
         current = json.loads(receipt.read_bytes())
         state = "confirmed_with_fresh_budget" if current["confirmed"] and current["attempts"] == 0 else "unconfirmed"
@@ -185,7 +186,9 @@ def unbind_cleanup(observe, config, receipt, events):
 def unbind_one_of_two(observe, config, receipt, retained_binding):
     g_block = "block drop in quick on igb0 inet all ridentifier 301"
     h_block = "block drop in quick on igb0 inet all ridentifier 311"
-    config["fixture_pf_rules"] = [g_block, h_block]
+    g_guard = g_block.replace("301", "302")
+    h_guard = h_block.replace("311", "312")
+    config["fixture_pf_rules"] = [g_block, g_guard, h_block, h_guard]
     observe()
     if not json.loads(receipt.read_bytes())["confirmed"]:
         raise RuntimeError("The fixture did not confirm both original bindings")
@@ -196,20 +199,20 @@ def unbind_one_of_two(observe, config, receipt, retained_binding):
     config["gateways/sdwan_bindings"] = {"item": [retained_binding]}
     config["gateways/sdwan_bindings/item"] = [retained_binding]
     config["fixture_reload_accepted"] = True
-    config["fixture_pf_rules"] = [g_stale, h_block]
+    config["fixture_pf_rules"] = [g_stale, g_guard, h_block, h_guard]
     observe()
     observe()
     state = json.loads(receipt.read_bytes())
     results = [case("unbind_partial_stale_tracker", "pending",
                     "confirmed_while_stale" if state["confirmed"] else "pending", "confirmed_while_stale")]
 
-    config["fixture_pf_rules"] = [g_stale, h_block.replace("311", "399")]
+    config["fixture_pf_rules"] = [g_stale, g_guard, h_block.replace("311", "399"), h_guard]
     observe()
     state = json.loads(receipt.read_bytes())
     results.append(case("unbind_partial_remaining_tracker_changed", "pending",
                         "confirmed" if state["confirmed"] else "pending"))
 
-    config["fixture_pf_rules"] = [g_native, h_block]
+    config["fixture_pf_rules"] = [g_native, g_guard, h_block, h_guard]
     observe()
     state = json.loads(receipt.read_bytes())
     results.append(case("unbind_partial_native_rules_restored", "confirmed",

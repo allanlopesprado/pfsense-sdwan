@@ -87,6 +87,16 @@ function sdwan_can_view_forwarding(): bool {
 	    isAllowedPage('/system_gateway_groups.php');
 }
 
+function sdwan_service_state(): string {
+	static $state;
+	if ($state === null) {
+		require_once('service-utils.inc');
+		$service = find_service_by_name('sdwan');
+		$state = !$service ? 'unregistered' : (get_service_status($service) ? 'running' : 'stopped');
+	}
+	return $state;
+}
+
 function sdwan_can_edit_forwarding(): bool {
 	return sdwan_can_view_forwarding() && isAllowedPage('/firewall_rules_edit.php') &&
 	    isAllowedPage('/system_gateway_groups_edit.php');

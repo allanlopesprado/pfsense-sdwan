@@ -17,7 +17,7 @@ sdwan_ui_tabs('status');
 
 if (!$sdwan['members']) {
 	print_info_box(gettext('Configure a member and a performance SLA to start monitoring a path.'), 'info', false);
-} elseif ($snapshot === null && sdwan_ui_service_state() === 'running') {
+} elseif ($snapshot === null && sdwan_service_state() === 'running') {
 	print_info_box(gettext('Waiting for current gateway measurements. Check Diagnostics for details.'), 'warning', false);
 }
 ?>

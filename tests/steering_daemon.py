@@ -121,6 +121,7 @@ def run(binary, load_filter_extension):
 
             bad_rule = 'pass in quick on igb0 inet all ridentifier 301'
             block_rule = 'block drop in quick on igb0 inet all ridentifier 301'
+            guard_rule = 'block drop in quick on igb0 inet all ridentifier 302'
             config["fixture_pf_rules"] = [bad_rule]
 
             # Refusal and EOF consume attempts even without an acknowledgement.
@@ -136,7 +137,7 @@ def run(binary, load_filter_extension):
 
             # A native reload can repair the rules independently. The observer
             # confirms PF and renews the budget without requesting another reload.
-            config["fixture_pf_rules"] = [block_rule]
+            config["fixture_pf_rules"] = [block_rule, guard_rule]
             observe()
             confirmed = read_receipt()
             assert confirmed["confirmed"] and confirmed["attempts"] == 0
@@ -168,7 +169,7 @@ def run(binary, load_filter_extension):
             observe()
             assert read_receipt() == overdue
 
-            config["fixture_pf_rules"] = [block_rule]
+            config["fixture_pf_rules"] = [block_rule, guard_rule]
             observe()
             assert read_receipt()["confirmed"] and read_receipt()["attempts"] == 0
 

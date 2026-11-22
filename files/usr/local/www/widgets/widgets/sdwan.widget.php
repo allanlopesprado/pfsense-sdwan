@@ -41,12 +41,13 @@ $sdwanRender = static function (): void {
 	}
 
 	$inventory = sdwan_gateways();
-	$snapshot = sdwan_current_snapshot($config, $inventory);
+	$snapshot = sdwan_service_state() === 'running' ? sdwan_current_snapshot($config, $inventory) : null;
 	$members = array_column($config['members'], 'gateway', 'name');
 	$can_inspect = isAllowedPage('/sdwan/diagnostics.php');
 	$can_view_forwarding = sdwan_can_view_forwarding();
 	$bindings_by_policy = [];
 	$bindings_error = false;
+	$native = null;
 	$pf_rules = null;
 	if ($can_view_forwarding) {
 		require_once('/usr/local/pkg/sdwan_steering.inc');
@@ -59,6 +60,7 @@ $sdwanRender = static function (): void {
 		}
 		if ($snapshot !== null && $bindings_by_policy && sdwan_steering_supported()) {
 			$pf_rules = sdwan_steering_pf_rules();
+			$native = sdwan_steering_native($inventory);
 		}
 	}
 	?>
@@ -93,12 +95,20 @@ $sdwanRender = static function (): void {
 				if ($binding !== null) {
 					$url = '/sdwan/forwarding.php?' . http_build_query(['policy' => $name, 'group' => $group], '', '&', PHP_QUERY_RFC3986);
 					$state = $snapshot['steering'][$group] ?? [];
-					$verified = sdwan_steering_pf_status($binding, is_array($state) ? $state : [], $inventory, $pf_rules);
+					$verified = 'unavailable';
+					if ($native !== null) {
+						$approval = sdwan_steering_preflight($config, $name, $group, $native);
+						$valid = sdwan_steering_preflight_matches($binding, $approval) &&
+						    $binding['policy_revision'] === sdwan_steering_policy_revision($config, $name);
+						$verified = $valid ? sdwan_steering_pf_status($binding, is_array($state) ? $state : [],
+						    $inventory, $pf_rules, $approval['rule_pairs']) : 'binding_changed';
+					}
 					[$color, $status] = match (true) {
 						$snapshot === null => ['bg-info', gettext('No current data')],
 						$verified === 'applied' => ['bg-success', gettext('Applied')],
 						$verified === 'blocked' => ['bg-danger', gettext('Blocked')],
 						$verified === 'pending' => ['bg-warning', gettext('Rules pending')],
+						$verified === 'binding_changed' => ['bg-warning', gettext('Binding changed')],
 						default => ['bg-warning', gettext('Rules unverified')],
 					};
 					if ($verified === 'applied') {

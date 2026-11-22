@@ -356,12 +356,16 @@ function sdwan_steering_preflight_matches(array $binding, array $check): bool {
 
 /* Run in the observer process. Recheck native membership/ACL drift on each
  * sample so a subsequent reload can close a binding that is no longer valid. */
-function sdwan_steering_observations(array $config, array $snapshot, array $previous): array {
+function sdwan_steering_observations(array $config, array $snapshot, array $previous, array &$rule_pairs = []): array {
 	$states = [];
+	$rule_pairs = [];
 	$native = sdwan_steering_native();
 	foreach (sdwan_steering_bindings() as $group => $binding) {
 		$check = sdwan_steering_preflight($config, $binding['policy'], $group, $native);
 		$approved = sdwan_steering_preflight_matches($binding, $check);
+		if ($approved) {
+			$rule_pairs[$group] = $check['rule_pairs'];
+		}
 		$result = $approved ? ($snapshot['policies'][$binding['policy']] ?? []) : [];
 		$states[$group] = sdwan_steering_state($config, $binding, $result, $previous[$group] ?? [], $snapshot['generated_at']);
 	}
@@ -591,7 +595,21 @@ function sdwan_steering_retire_observation(bool $startup = false): bool {
 	}
 }
 
-function sdwan_steering_pf_status(array $binding, array $state, array $inventory, ?array $lines): string {
+/* Compare the packet selectors reflected by PF on a bound rule and its native
+ * fallback, independent of action, logging, route selection and TCP state. */
+function sdwan_steering_loaded_scope(string $rule): ?string {
+	if (!preg_match('/^(?:pass|block(?: (?:drop|return\S*(?: \([^)]*\))?))?) in (?:log(?: \([^)]*\))? )?quick on ([a-z0-9_.-]+) (.+)$/D',
+	    $rule, $parts)) {
+		return null;
+	}
+	$match = preg_replace('/^route-to\s+(?:\{[^}]+\}\s+round-robin(?:\s+sticky-address)?|\([^()]+\))\s+/', '', $parts[2]);
+	[$selectors] = preg_split('/\s+(?:flags|keep state|no state|modulate state|synproxy state|ridentifier|dnpipe|queue)(?=\s)/',
+	    $match, 2);
+	return preg_match('/^inet6?\s/', $selectors) ? $parts[1] . ' ' . trim(preg_replace('/\s+/', ' ', $selectors)) : null;
+}
+
+function sdwan_steering_pf_status(array $binding, array $state, array $inventory, ?array $lines,
+    ?array $rule_pairs = null): string {
 	if ($lines === null) {
 		return 'unavailable';
 	}
@@ -620,23 +638,47 @@ function sdwan_steering_pf_status(array $binding, array $state, array $inventory
 		return 'pending';
 	}
 	$matched = [];
-	foreach ($lines as $line) {
+	$guards = [];
+	$guard_ids = array_column($rule_pairs ?? [], 'guard');
+	foreach (array_values($lines) as $position => $line) {
 		$identifier = sdwan_steering_rule_tracker($line);
 		if (!in_array($identifier, $binding['trackers'], true)) {
+			if (in_array($identifier, $guard_ids, true)) {
+				[$rule] = explode(' label "', $line, 2);
+				if (isset($guards[$identifier]) || !str_starts_with($rule, 'block ')) {
+					return 'pending';
+				}
+				$guards[$identifier] = [$position, sdwan_steering_loaded_scope($rule)];
+			}
 			continue;
+		}
+		if ($rule_pairs !== null && isset($matched[$identifier])) {
+			return 'pending';
 		}
 		[$rule] = explode(' label "', $line, 2);
 		if ($target === null) {
-			if (!preg_match('/^block (?:drop |return\S*(?: \([^)]*\))? )?in (?:log(?: \([^)]*\))? )?quick on /', $rule)) {
+			if (!preg_match('/^block (?:drop |return\S*(?: \([^)]*\))? )?in (?:log(?: \([^)]*\))? )?quick on /', $rule) ||
+			    ($rule_pairs !== null && empty($rule_pairs[$identifier]['explicit_tcp_flags']) &&
+			    preg_match('/\bflags\s+(?!any(?:\s|$))\S+/', $rule))) {
 				return 'pending';
 			}
-		} elseif (!sdwan_steering_loaded_path_matches($rule, $gateways)) {
+		} elseif (!sdwan_steering_loaded_path_matches($rule, $gateways) || ($rule_pairs !== null &&
+		    preg_match('/\b(?:no|modulate|synproxy) state(?:\s|$)/', $rule))) {
 			return 'pending';
 		}
-		$matched[$identifier] = true;
+		$matched[$identifier] = [$position, $rule_pairs === null ? null : sdwan_steering_loaded_scope($rule)];
 	}
 	if (count($matched) !== count($binding['trackers'])) {
 		return 'pending';
+	}
+	if ($rule_pairs !== null) {
+		foreach ($matched as $identifier => [$position, $scope]) {
+			$guard = $rule_pairs[$identifier]['guard'] ?? '';
+			if (!isset($guards[$guard]) || $scope === null || $guards[$guard][0] <= $position ||
+			    $guards[$guard][1] !== $scope) {
+				return 'pending';
+			}
+		}
 	}
 	return $target === null ? 'blocked' : 'applied';
 }
@@ -700,7 +742,7 @@ function sdwan_steering_reconnect(string $group, string $gateway, string $revisi
 		$reason = $snapshot['policies'][$binding['policy']]['candidates'][$member] ?? null;
 		$pool = $state['pool'] ?? array_filter([$state['gateway'] ?? null]);
 		if ($reason === null || $reason === 'Eligible' || in_array($gateway, $pool, true) ||
-		    sdwan_steering_pf_status($binding, $state, $inventory, sdwan_steering_pf_rules()) !== 'applied') {
+		    sdwan_steering_pf_status($binding, $state, $inventory, sdwan_steering_pf_rules(), $preview['rule_pairs']) !== 'applied') {
 			return ['errors' => ['Reconnect is available after the filter has applied a different eligible gateway.']];
 		}
 		$metadata = $inventory[$gateway] ?? [];

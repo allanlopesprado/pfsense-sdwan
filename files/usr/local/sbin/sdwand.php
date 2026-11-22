@@ -118,7 +118,8 @@ function sdwan_observe_once(): void {
 				$prior = sdwan_current_snapshot($config, $inventory);
 				try {
 					$bindings = sdwan_steering_bindings();
-					$snapshot['steering'] = sdwan_steering_observations($config, $snapshot, $prior['steering'] ?? []);
+					$rule_pairs = [];
+					$snapshot['steering'] = sdwan_steering_observations($config, $snapshot, $prior['steering'] ?? [], $rule_pairs);
 				} catch (UnexpectedValueException $e) {
 					/* Unreadable bindings produce no pass decisions. */
 					$invalid_bindings = true;
@@ -137,7 +138,8 @@ function sdwan_observe_once(): void {
 					$rules = $same && $bindings ? sdwan_steering_pf_rules() : null;
 					$matches = $rules !== null;
 					foreach ($bindings as $group => $binding) {
-						$status = sdwan_steering_pf_status($binding, $snapshot['steering'][$group] ?? [], $inventory, $rules);
+						$status = sdwan_steering_pf_status($binding, $snapshot['steering'][$group] ?? [], $inventory, $rules,
+						    $rule_pairs[$group] ?? null);
 						$matches = $matches && in_array($status, ['applied', 'blocked'], true);
 					}
 					if ($matches && !$receipt['confirmed']) {

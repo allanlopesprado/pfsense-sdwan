@@ -206,10 +206,19 @@ if [ -n "${SDWAN_RENDERED_RULES:-}" ]; then
                 "A" => ["interface" => $argv[2], "family" => "inet", "address" => "198.51.100.2"],
                 "B" => ["interface" => $argv[3], "family" => "inet", "address" => "203.0.113.2"],
             ];
-            $status = sdwan_steering_pf_status($binding, $state, $inventory, sdwan_steering_pf_rules());
+            $pairs = [41001 => ["guard" => "41002", "action" => "block"]];
+            $rules = sdwan_steering_pf_rules();
+            $status = sdwan_steering_pf_status($binding, $state, $inventory, $rules, $pairs);
             if ($status !== $argv[5]) {
                 fwrite(STDERR, "Expected {$argv[5]}, found {$status}\n");
                 exit(1);
+            }
+            if ($status === "applied") {
+                $without_guard = array_filter($rules, static fn($row) => sdwan_steering_rule_tracker($row) !== "41002");
+                if (sdwan_steering_pf_status($binding, $state, $inventory, $without_guard, $pairs) !== "pending") {
+                    fwrite(STDERR, "PF confirmation did not require the loaded fallback guard\n");
+                    exit(1);
+                }
             }
         ' -- "$repo" "$wan_a" "$wan_b" "$1" "$2"
     }

@@ -69,7 +69,7 @@ if ($policy !== null):
 			<?php endif; ?>
 		</div>
 		<?php if ($result === null) {
-			$notice = match (sdwan_ui_service_state()) {
+			$notice = match (sdwan_service_state()) {
 				'stopped' => gettext('The SD-WAN service is stopped.'),
 				'unregistered' => gettext('The SD-WAN service is not registered in Status > Services.'),
 				default => gettext('No current sample for this policy. Check gateway monitoring.'),

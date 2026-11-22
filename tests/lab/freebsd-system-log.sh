@@ -1,5 +1,5 @@
 #!/bin/sh
-# Exercise the released PHP emitter, real syslogd and the native GUI reader.
+# Exercise the PHP emitter, real syslogd and the native GUI reader.
 # Library directories are shared read-only. Kernel log device, host syslog
 # sockets, configurations, log directories and network are not shared.
 set -eu
@@ -26,11 +26,17 @@ trap cleanup EXIT
 trap 'exit 1' HUP INT TERM
 mkdir -p "$work/shim" "$work/etc" "$work/fixture" "$work/var/log" "$work/var/run" "$work/tmp"
 touch "$work/shim/util.inc" "$work/shim/config.inc"
-version=$(awk '$1=="PORTVERSION=" {print $2}' "$repo/Makefile")
-test -n "$version"
-pkg="$repo/dist/pfSense-pkg-SDWAN-$version.pkg"
-tar -xOf "$pkg" /usr/local/pkg/sdwan_log.inc >"$work/fixture/sdwan_log.inc"
-cmp "$work/fixture/sdwan_log.inc" "$repo/files/usr/local/pkg/sdwan_log.inc"
+case ${2:-} in
+    --source-only) cp "$repo/files/usr/local/pkg/sdwan_log.inc" "$work/fixture/sdwan_log.inc" ;;
+    '')
+        version=$(awk '$1=="PORTVERSION=" {print $2}' "$repo/Makefile")
+        test -n "$version"
+        pkg="$repo/dist/pfSense-pkg-SDWAN-$version.pkg"
+        tar -xOf "$pkg" /usr/local/pkg/sdwan_log.inc >"$work/fixture/sdwan_log.inc"
+        cmp "$work/fixture/sdwan_log.inc" "$repo/files/usr/local/pkg/sdwan_log.inc"
+        ;;
+    *) echo 'Unknown system log fixture mode' >&2; exit 2 ;;
+esac
 cp "$repo/tests/lab/system-log-events.php" "$work/fixture/events.php"
 
 for tree in /bin /lib /libexec /sbin /usr; do
@@ -77,7 +83,7 @@ for round in 1 2 3; do
 for scenario in rfc3164-default rfc5424-default rfc5424-warning; do
     format=${scenario%-*}
     level=${scenario#*-}
-    if [ "$level" = warning ]; then general_count=2; else general_count=5; fi
+    if [ "$level" = warning ]; then general_count=4; else general_count=9; fi
     "$php" -n "$repo/tests/lab/native-system-log.php" prepare "$src" "$work" "$format" "$level"
     : >"$work/var/log/system.log"
     : >"$work/var/log/gateways.log"
@@ -104,7 +110,7 @@ for scenario in rfc3164-default rfc5424-default rfc5424-warning; do
     if [ "$round" -eq 3 ]; then
         jexec "$node" pkill -CONT -F /var/run/lab.pid syslogd
     fi
-    wait_for_count "$work/var/log/fixture-input.log" 'SD-WAN ' 5 &&
+    wait_for_count "$work/var/log/fixture-input.log" 'SD-WAN ' 9 &&
         wait_for_count "$work/var/log/fixture-input.log" native-ident-control 1 &&
         wait_for_count "$work/var/log/system.log" 'SD-WAN ' "$general_count" || { diagnostics; exit 1; }
     # Each control uses a separate external logger(1) connection and must

@@ -47,18 +47,8 @@ function sdwan_ui_choice_value(string $value): string {
 	return str_starts_with($value, ':') ? substr($value, 1) : $value;
 }
 
-function sdwan_ui_service_state(): string {
-	static $state;
-	if ($state === null) {
-		require_once('service-utils.inc');
-		$service = find_service_by_name('sdwan');
-		$state = !$service ? 'unregistered' : (get_service_status($service) ? 'running' : 'stopped');
-	}
-	return $state;
-}
-
 function sdwan_ui_snapshot(array $config): ?array {
-	if (sdwan_ui_service_state() !== 'running') {
+	if (sdwan_service_state() !== 'running') {
 		return null;
 	}
 	return sdwan_current_snapshot($config, sdwan_gateways());

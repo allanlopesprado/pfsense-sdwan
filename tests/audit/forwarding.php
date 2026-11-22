@@ -57,8 +57,9 @@ $guard = 'block drop in quick on em1 inet proto tcp from 192.168.1.10 to any por
 	'label "id=771292102" label "tags=user_rule" label "descr=Lab SD-WAN fallback block" ridentifier 771292102';
 $logged = str_replace('pass in quick', 'pass in log (all, to pflog0) quick', $pass) . ' dnpipe 10';
 $logged = str_replace('descr=Lab SD-WAN TCP 18080', 'descr=Lab rule with ridentifier 441', $logged);
+$rule_pairs = ['771292101' => ['guard' => '771292102', 'action' => 'block']];
 $status = static fn(array $selection, ?array $rules): string =>
-	sdwan_steering_pf_status($binding, $selection, $inventory, $rules);
+	sdwan_steering_pf_status($binding, $selection, $inventory, $rules, $rule_pairs);
 
 $rows = [
 	audit_case('ce292_pass', 'applied', $status($state, [$pass, $guard])),
@@ -130,11 +131,11 @@ $scope6 = static fn(string $zone): string => str_replace(
 	['(em2 198.18.20.2) inet', 'from 192.168.1.10'], ["(em2 fe80::20%{$zone}) inet6", 'from 2001:db8::10'], $pass);
 $guard6 = str_replace('inet proto tcp from 192.168.1.10', 'inet6 proto tcp from 2001:db8::10', $guard);
 $rows[] = audit_case('ipv6_link_local_scope', 'applied',
-	sdwan_steering_pf_status($binding, $state, $inventory6, [$scope6('em2'), $guard6]));
+	sdwan_steering_pf_status($binding, $state, $inventory6, [$scope6('em2'), $guard6], $rule_pairs));
 $rows[] = audit_case('ipv6_link_local_wrong_scope', 'pending',
-	sdwan_steering_pf_status($binding, $state, $inventory6, [$scope6('em0'), $guard6]), 'applied');
+	sdwan_steering_pf_status($binding, $state, $inventory6, [$scope6('em0'), $guard6], $rule_pairs), 'applied');
 $rows[] = audit_case('ipv6_link_local_scope_inferred_from_device', 'applied',
-	sdwan_steering_pf_status($binding, $state, $inventory6, [str_replace('%em2', '', $scope6('em2')), $guard6]));
+	sdwan_steering_pf_status($binding, $state, $inventory6, [str_replace('%em2', '', $scope6('em2')), $guard6], $rule_pairs));
 $state6 = [
 	'all tcp 2001:db8::1:443 <- 2001:db8::10:51000 ESTABLISHED:ESTABLISHED',
 	'   id: 000000010000000a creatorid: 12345678',

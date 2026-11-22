@@ -39,6 +39,10 @@ function is_valid_widgetkey($key, $settings, $file) {
     return in_array($key, $settings, true) && basename($file) === 'sdwan.widget.php';
 }
 """)
+    (directory / "service-utils.inc").write_text("""<?php
+function find_service_by_name($name) { return $name; }
+function get_service_status($service) { return config_get_path('fixture_service_running', true); }
+""")
     script = """error_reporting(E_ALL);
 set_error_handler(function ($n, $s) {
     if (error_reporting() & $n) { throw new ErrorException($s); }
@@ -82,24 +86,42 @@ echo json_encode([http_response_code() ?: 200, $body, $sdwan_title_link,
     fixture = json.loads(config.read_text())
     fixture["interfaces"]["opt1"]["if"] = "igb0"
     fixture["interfaces"]["opt2"]["if"] = "igb1"
-    fixture["fixture_devices"] = {"opt1": "igb0", "opt2": "igb1"}
+    fixture["interfaces"]["lan"] = {"enable": "", "if": "igb2"}
+    fixture["fixture_devices"] = {"opt1": "igb0", "opt2": "igb1", "lan": "igb2"}
     settings = fixture["installedpackages/sdwan"]
     rules = settings["policies"]["item"]
     rules[0]["name"] = "Voice"
     rules.extend([dict(rules[0], name="BranchVPN"), dict(rules[0], name="Backups"),
                   dict(rules[0], name="Lab")])
     groups = {"Voice": "LAN_SDWAN", "BranchVPN": "PRIVATE_VPN", "Backups": "BACKUP_NET"}
-    bindings = [
-        {"group": group, "policy": policy, "gateways": {"item": ["GW_A", "GW_B"]},
-         "trackers": {"item": [str(300 + index)]}, "rules_revision": "0" * 64,
-         "policy_revision": "1" * 64}
-        for index, (policy, group) in enumerate(groups.items(), 1)
-    ]
+    bindings = []
+    fixture["gateways/gateway_group"] = []
+    fixture["filter/rule"] = []
+
+    def register_binding(policy, group, tracker, host):
+        fixture["gateways/gateway_group"].append({"name": group, "item": ["GW_A|1|", "GW_B|1|"]})
+        rule = {"type": "pass", "interface": "lan", "tracker": str(tracker), "gateway": group,
+                "ipprotocol": "inet", "source": {"address": host}, "destination": {"any": ""}}
+        guard = dict(rule, type="block", tracker=str(tracker + 100))
+        del guard["gateway"]
+        fixture["filter/rule"].extend([rule, guard])
+        config.write_text(json.dumps(fixture))
+        preflight = json.loads(package_value(f"json_encode(sdwan_steering_preview(sdwan_get_config(), '{policy}', '{group}'))"))
+        assert not preflight["errors"], preflight
+        approved = preflight["binding"]
+        for key in ("gateways", "trackers"):
+            approved[key] = {"item": approved[key]}
+        bindings.append(approved)
+
+    for index, (policy, group) in enumerate(groups.items(), 1):
+        register_binding(policy, group, 300 + index, f"203.0.113.{index}")
     fixture["gateways/sdwan_bindings"] = {"item": bindings}
     fixture["fixture_pf_rules"] = [
-        'pass in quick on lan route-to (igb1 198.51.100.1) inet all label "descr=Voice" ridentifier 301',
-        'pass in quick on lan route-to (igb0 192.0.2.1) inet all ridentifier 302',
-        'block drop in quick on lan inet all ridentifier 303',
+        'pass in quick on igb2 route-to (igb1 198.51.100.1) inet from 203.0.113.1 to any label "descr=Voice" ridentifier 301',
+        'pass in quick on igb2 route-to (igb0 192.0.2.1) inet from 203.0.113.2 to any ridentifier 302',
+        'block drop in quick on igb2 inet from 203.0.113.3 to any ridentifier 303',
+        *[f'block drop in quick on igb2 inet from 203.0.113.{index} to any ridentifier {400 + index}'
+          for index in (1, 2, 3)],
     ]
     config.write_text(json.dumps(fixture))
     revision = package_value("sdwan_config_revision(sdwan_get_config())")
@@ -152,6 +174,16 @@ echo json_encode([http_response_code() ?: 200, $body, $sdwan_title_link,
     assert all(label not in body for label in ("<time", "Last sample", ">RTT<", "23.450ms", "192.0.2.1", "Preferred:"))
     assert '/sdwan/forwarding.php?policy=Voice&amp;group=LAN_SDWAN' in body
     assert '/sdwan/diagnostics.php?policy=Lab' in body
+    fixture["fixture_service_running"] = False
+    config.write_text(json.dumps(fixture))
+    stopped = render("ajax")[1]
+    assert "No current data" in stopped and "Applied" not in stopped and "GW_B" not in stopped
+    fixture.pop("fixture_service_running")
+    guard = fixture["fixture_pf_rules"].pop(3)
+    config.write_text(json.dumps(fixture))
+    assert "Rules pending" in row(render("ajax")[1], "Voice")
+    fixture["fixture_pf_rules"].insert(3, guard)
+    config.write_text(json.dumps(fixture))
     restricted = render("ajax", "view")[1]
     assert "Within SLA" in row(restricted, "Voice") and "No eligible link" in row(restricted, "Backups")
     assert all(label not in restricted for label in ("LAN_SDWAN", "GW_B", "Applied", "/sdwan/forwarding.php"))
@@ -186,7 +218,7 @@ echo json_encode([http_response_code() ?: 200, $body, $sdwan_title_link,
     assert "No SLA backup" not in row(render("ajax")[1], "Voice")
     save()
 
-    pool = 'pass in quick on lan route-to { (igb1 198.51.100.1), (igb0 192.0.2.1) } round-robin inet all ridentifier 301'
+    pool = 'pass in quick on igb2 route-to { (igb1 198.51.100.1), (igb0 192.0.2.1) } round-robin inet from 203.0.113.1 to any ridentifier 301'
     fixture["fixture_pf_rules"][0] = pool
     config.write_text(json.dumps(fixture))
     multipath = dict(snapshot["steering"], LAN_SDWAN=dict(snapshot["steering"]["LAN_SDWAN"], pool=["GW_B", "GW_A"]))
@@ -196,10 +228,11 @@ echo json_encode([http_response_code() ?: 200, $body, $sdwan_title_link,
     save({"steering": dict(snapshot["steering"], LAN_SDWAN="unreadable")})
     assert "Rules pending" in row(render("ajax")[1], "Voice")
 
-    second = dict(bindings[0], group="OPT_SDWAN", trackers={"item": ["305"]})
-    bindings.append(second)
-    fixture["fixture_pf_rules"].append(
-        'pass in quick on lan route-to (igb0 192.0.2.1) inet all ridentifier 305')
+    register_binding("Voice", "OPT_SDWAN", 305, "203.0.113.5")
+    fixture["fixture_pf_rules"].extend([
+        'pass in quick on igb2 route-to (igb0 192.0.2.1) inet from 203.0.113.5 to any ridentifier 305',
+        'block drop in quick on igb2 inet from 203.0.113.5 to any ridentifier 405',
+    ])
     config.write_text(json.dumps(fixture))
     multipath["OPT_SDWAN"] = {"gateway": "GW_A", "revision": binding_revision("OPT_SDWAN")}
     save({"steering": multipath})

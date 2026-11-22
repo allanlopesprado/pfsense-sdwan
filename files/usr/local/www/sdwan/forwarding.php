@@ -118,7 +118,7 @@ $filter_status = match (true) {
 	!$supported => 'unavailable',
 	!$binding_current => 'binding_changed',
 	$sample === null => 'expired',
-	default => sdwan_steering_pf_status($binding, $steering, $inventory, sdwan_steering_pf_rules()),
+	default => sdwan_steering_pf_status($binding, $steering, $inventory, sdwan_steering_pf_rules(), $binding_preview['rule_pairs']),
 };
 if ($filter_status === 'pending' && isset($sample['steering'])) {
 	$receipt = sdwan_steering_read_receipt(SDWAN_SNAPSHOT_PATH . '.forwarded');

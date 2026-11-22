@@ -182,7 +182,7 @@ function sdwan_preflight_prefix(array $parts): ?array {
 	}
 	$width = strlen($address) * 8;
 	$bits = $parts[1] ?? (string)$width;
-	return ctype_digit($bits) && (int)$bits <= $width ? [$address, (int)$bits] : null;
+	return preg_match('/\A[0-9]{1,3}\z/', $bits) && (int)$bits <= $width ? [$address, (int)$bits] : null;
 }
 
 function sdwan_preflight_prefixes_overlap(?string $first, ?string $second): bool {
@@ -322,7 +322,8 @@ function sdwan_preflight_native_rules(array $native, string $group, string $fami
 			return sdwan_preflight_error("Place a permanent native block or reject directly after rule {$tracker}, with the same match, its own tracker and no gateway.");
 		}
 		$trackers[] = $tracker;
-		$rule_pairs[$tracker] = ['guard' => (string)$guard_id, 'action' => $guard['type']];
+		$rule_pairs[$tracker] = ['guard' => (string)$guard_id, 'action' => $guard['type'],
+		    'explicit_tcp_flags' => !empty($rule['tcpflags2'])];
 		unset($rule['created'], $rule['updated'], $rule['descr']);
 		$rule['tracker'] = $tracker;
 		$scope[] = [$rule, $device, (string)$guard_id, $guard['type']];
