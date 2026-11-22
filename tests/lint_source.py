@@ -28,7 +28,7 @@ def main():
             shellcheck = ["shellcheck", "--format=gcc"]
             if path == HISTORICAL:
                 # Preserve the exact source used to record the original appliance evidence.
-                shellcheck += ["--exclude=SC2009,SC2015,SC2016"]
+                shellcheck += ["--exclude=SC2009,SC2015,SC2016,SC3013"]
             commands = [["sh", "-n"], shellcheck]
         else:
             continue

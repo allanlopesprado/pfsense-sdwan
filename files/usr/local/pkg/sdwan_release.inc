@@ -178,23 +178,46 @@ function sdwan_release_files_intact(string $version): bool {
 	    pkg_exec('check -s ' . SDWAN_RELEASE_PACKAGE, $stdout, $stderr) === 0;
 }
 
+function sdwan_release_add(string $archive, bool $restore = false): bool {
+	$file = escapeshellarg($archive);
+	$options = $restore ? '-f ' : '';
+	if (pkg_exec("-o DEVELOPER_MODE=yes add {$options}{$file} 2>&1", $output, $stderr) !== 0) {
+		return false;
+	}
+	// pkg reports some script failures on its error stream while returning success.
+	return !preg_match('/^(?:[^:\r\n]+: )?(?:PRE-INSTALL|POST-INSTALL|DEINSTALL|POST-DEINSTALL) script ' .
+	    '(?:failed|terminated by signal [0-9]+)\r?$/m', (string)$output . "\n" . (string)$stderr);
+}
+
 function sdwan_release_restore(string $backup, string $previous, string $attempted): string {
 	$current = sdwan_release_installed();
 	if ($current !== null && $current !== $previous && $current !== $attempted) {
 		return 'rollback_changed';
 	}
 	// Force is reserved for recovery from this attempt, using the archive made beforehand.
-	$file = escapeshellarg($backup);
-	return pkg_exec("add -f {$file} 2>&1", $output, $stderr) === 0 && sdwan_release_files_intact($previous) ?
+	return sdwan_release_add($backup, true) && sdwan_release_files_intact($previous) ?
 	    'rolled_back' : 'rollback_failed';
+}
+
+function sdwan_release_service_running(bool $installed_now): bool {
+	$attempts = $installed_now ? 3 : 1;
+	for ($attempt = 1; $attempt <= $attempts; $attempt++) {
+		if (mwexec('/usr/local/etc/rc.d/sdwand.sh status', true) === 0) {
+			return true;
+		}
+		if ($attempt < $attempts) {
+			usleep(200000);
+		}
+	}
+	return false;
 }
 
 function sdwan_release_verify_installation(string $version, ?int $installed_since = null): string {
 	if (!sdwan_release_files_intact($version)) {
 		return 'verify_files';
 	}
-	if (mwexec('/usr/local/etc/rc.d/sdwand.sh status', true) !== 0) {
-		return 'verify';
+	if (!sdwan_release_service_running($installed_since !== null)) {
+		return $installed_since === null ? 'verify' : 'service_inactive';
 	}
 	// The native rc status tracks the daemon supervisor, including between worker restarts.
 	$supervisor = trim((string)@file_get_contents('/var/run/sdwand.pid', false, null, 0, 32));
@@ -295,13 +318,20 @@ function sdwan_release_upgrade(array $target, bool $verify_only = false): string
 		if (sdwan_release_installed() !== $installed) {
 			return 'changed';
 		}
-		// Drain pkg and its hook messages together, using pfSense's native environment.
 		$installed_since = time();
-		$file = escapeshellarg($path);
-		$status = pkg_exec("add {$file} 2>&1", $output, $stderr) === 0 ?
-		    sdwan_release_verify_installation($release['version'], $installed_since) : 'verify_files';
-		if ($status === 'verify_files') {
+		$status = sdwan_release_add($path) ?
+		    sdwan_release_verify_installation($release['version'], $installed_since) : 'install_failed';
+		if (in_array($status, ['install_failed', 'verify_files', 'service_inactive'], true)) {
+			$failure = $status;
 			$status = sdwan_release_restore($backup, $installed, $release['version']);
+			if ($failure === 'service_inactive') {
+				if (function_exists('sdwan_log_emit')) {
+					sdwan_log_emit(LOG_WARNING, 'SD-WAN service did not start after the package update: ' . $status);
+				}
+				if ($status === 'rolled_back') {
+					$status = 'rolled_back_inactive';
+				}
+			}
 			if ($status === 'rollback_failed') {
 				$preserved_backup = $backup;
 				if (function_exists('sdwan_log_emit')) {

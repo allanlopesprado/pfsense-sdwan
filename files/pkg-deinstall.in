@@ -3,6 +3,7 @@
 [ "${PKG_CHROOTED:-}" != true ] || exit 0
 # The new post-install hook restarts the observer and refreshes registration.
 [ -z "${PKG_UPGRADE:-}" ] || exit 0
+removal_ready=/var/run/sdwan-package-removal.ready
 
 register_removal() {
 	if [ -f /var/run/php-fpm.pid ]; then
@@ -28,6 +29,7 @@ register_removal() {
 
 case "${2:-}" in
 DEINSTALL)
+	rm -f "$removal_ready" || exit 1
 	# Avoid a second invalidation when native package cleanup stops the service.
 	export SDWAN_PACKAGE_REMOVING=1
 	if [ -x /usr/local/etc/rc.d/sdwand.sh ]; then
@@ -46,14 +48,22 @@ DEINSTALL)
 		echo 'SD-WAN forwarding withdrawal cannot be checked. Restore the package helper before removal.' >&2
 		exit 1
 	fi
-	register_removal "$2"
+	register_removal "$2" || exit 1
+	# /var/run is root-owned. Publish only after all pre-removal checks passed.
+	(umask 077; set -C; : > "$removal_ready")
 	;;
 POST-DEINSTALL)
+	# pkg can continue to the post hook even when the pre hook failed.
+	[ -f "$removal_ready" ] || exit 0
+	rm -f "$removal_ready" || exit 1
 	register_removal "$2" || exit 1
 	# The observer is stopped, PF withdrawal was checked, and the package is gone.
 	rm -f /var/run/sdwand.pid /var/run/sdwan-filter-commit.json \
 		/var/run/sdwan-observer.json /var/run/sdwan-observer.json.forwarded \
-		/var/run/sdwan-observer.json.events /var/run/sdwan-observer.json.lock
+		/var/run/sdwan-observer.json.events /var/run/sdwan-observer.json.lock || exit 1
+	for lock in /var/run/sdwan-settings.lock /var/run/sdwan-package-upgrade.lock; do
+		/usr/bin/lockf -kns -t 0 "$lock" /bin/rm -f "$lock" || :
+	done
 	;;
 *) exit 0 ;;
 esac

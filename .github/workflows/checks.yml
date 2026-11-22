@@ -141,6 +141,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+          fetch-depth: 0
       - uses: actions/download-artifact@v4
         with:
           name: native-filter-rules
@@ -166,6 +167,23 @@ jobs:
             php -n -v
           run: |
             set -eu
+            export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory GIT_CONFIG_VALUE_0="$PWD"
+            if sh tools/update-install-line.sh; then
+              echo 'The README generator accepted the FreeBSD 15 runner ABI' >&2
+              exit 1
+            fi
+            # Exercise the target ABI with real pkg, sha256 and Git on this FreeBSD builder.
+            ABI=FreeBSD:16:amd64 sh tools/update-install-line.sh
+            git diff --exit-code -- README.md
+            candidate=$(mktemp -d)
+            trap 'rm -rf "$candidate"' EXIT
+            if ! python3 tools/build-lab-pkg.py --output "$candidate/artifacts" > "$candidate/build.log" 2>&1; then
+              tail -20 "$candidate/build.log"
+              exit 1
+            fi
+            mkdir -p "$candidate/root/var/db/pkg" "$candidate/root/var/cache/pkg"
+            /usr/local/sbin/pkg-static -r "$candidate/root" -o ABI=FreeBSD:16:amd64 -o OSVERSION=1600018 add -I "$candidate"/artifacts/*.pkg
+            /usr/local/sbin/pkg-static -r "$candidate/root" -o ABI=FreeBSD:16:amd64 -o OSVERSION=1600018 check -s pfSense-pkg-SDWAN
             python3 -B tests/steering_daemon.py php --load-filter-extension
             sh tests/freebsd-install.sh
             sh tests/lab/freebsd-system-log.sh "$PWD/lab-syslog/syslog.inc" --source-only

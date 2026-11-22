@@ -46,11 +46,12 @@ if ($submit) {
 			'manifest' => gettext('The downloaded package identity does not match the selected SD-WAN release.'),
 			'backup' => gettext('The installed SD-WAN package could not be prepared for rollback. Check package integrity and available space in /tmp.'),
 			'rolled_back' => gettext('The update failed and the previous SD-WAN package was restored. Check Status > Services and System Logs.'),
+			'rolled_back_inactive' => gettext('The SD-WAN service did not start after the update. The previous package was restored. Check Status > Services and System Logs.'),
 			'rollback_changed' => gettext('The installed SD-WAN version changed during the update. Review the installed package and System Logs.'),
 			'rollback_failed' => gettext('The update and automatic rollback failed. System Logs contains the path to the local recovery archive.'),
 			default => gettext('The package manager returned success, but the installed version, files or observer could not be verified. Check System Logs.'),
 		};
-		if ($upgrade && !$verify && in_array($result, ['success', 'signature', 'backup', 'rolled_back',
+		if ($upgrade && !$verify && in_array($result, ['success', 'signature', 'backup', 'rolled_back', 'rolled_back_inactive',
 		    'rollback_changed', 'rollback_failed', 'verify', 'verify_files'], true)) {
 			$priority = match ($result) {
 				'success' => LOG_NOTICE, 'rollback_failed' => LOG_ERR, default => LOG_WARNING,

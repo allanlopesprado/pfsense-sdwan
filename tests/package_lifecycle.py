@@ -67,8 +67,11 @@ def check_shell_hooks(tmp, php):
     log_state = tmp / "sdwan-observer.json.events"
     receipt = tmp / "sdwan-observer.json.forwarded"
     lock = tmp / "sdwan-observer.json.lock"
+    settings_lock = tmp / "sdwan-settings.lock"
+    upgrade_lock = tmp / "sdwan-package-upgrade.lock"
     commit = tmp / "sdwan-filter-commit.json"
     pid = tmp / "sdwand.pid"
+    removal_ready = tmp / "sdwan-package-removal.ready"
     fpm_pid = tmp / "php-fpm.pid"
     service = tmp / "rc.d" / "sdwand.sh"
     service.parent.mkdir()
@@ -90,8 +93,17 @@ printf '%s\\n' "$*" >> "$CALLS"
 if [ "$2" = "$INVALIDATE_HELPER" ]; then
     exit "$WITHDRAWAL_RESULT"
 fi
+exit "$REGISTRY_RESULT"
 ''')
     registry.chmod(0o755)
+    lockf = tmp / "lockf"
+    lockf.write_text('''#!/bin/sh
+test "$1 $2 $3" = '-kns -t 0' || exit 64
+test -f "$4" && test "$4" != "$BUSY_LOCK" || exit 1
+shift 4
+exec "$@"
+''')
+    lockf.chmod(0o755)
     native_php = tmp / "native"
     native_php.mkdir()
     for name in ("config", "functions", "filter", "shaper", "captiveportal", "pfsense-utils"):
@@ -112,9 +124,13 @@ function delete_package_xml($name, $phase) {
             ("/usr/local/etc/rc.d/sdwand.sh", str(service)),
             ("/usr/local/bin/php", str(registry)),
             ("/usr/local/pkg/sdwan_invalidate.inc", str(helper)),
+            ("/usr/bin/lockf", str(lockf)),
             ("/var/run/sdwan-observer.json", str(state)),
             ("/var/run/sdwan-filter-commit.json", str(commit)),
             ("/var/run/sdwand.pid", str(pid)),
+            ("/var/run/sdwan-package-removal.ready", str(removal_ready)),
+            ("/var/run/sdwan-settings.lock", str(settings_lock)),
+            ("/var/run/sdwan-package-upgrade.lock", str(upgrade_lock)),
             ("/var/run/php-fpm.pid", str(fpm_pid)),
         ]:
             contents = contents.replace(source, shlex.quote(Path(target).as_posix()))
@@ -124,7 +140,8 @@ function delete_package_xml($name, $phase) {
     def run(phase, when, root="/", code=0, **overrides):
         env = dict(os.environ, PKG_ROOTDIR=root, CALLS=log.as_posix(), PHP_TEST=Path(php).as_posix(),
                    NATIVE_PHP=native_php.as_posix(), INVALIDATE_HELPER=helper.as_posix(),
-                   PKG_CHROOTED="", PKG_UPGRADE="", STOP_RESULT="0", STATUS_RESULT="1", WITHDRAWAL_RESULT="0")
+                   PKG_CHROOTED="", PKG_UPGRADE="", STOP_RESULT="0", STATUS_RESULT="1", WITHDRAWAL_RESULT="0",
+                   REGISTRY_RESULT="0", BUSY_LOCK="")
         env.update(overrides)
         result = subprocess.run(["sh", (tmp / phase).as_posix(), "pfSense-pkg-SDWAN", when],
                                 env=env, text=True, capture_output=True)
@@ -153,7 +170,9 @@ function delete_package_xml($name, $phase) {
     fpm_pid.touch()
     run("install", "POST-INSTALL", PKG_UPGRADE="true")
     run("deinstall", "DEINSTALL")
+    assert removal_ready.exists()
     run("deinstall", "POST-DEINSTALL")
+    assert not removal_ready.exists()
     if state.exists() or log_state.exists():
         raise AssertionError("Runtime measurement or event suppression state survived removal")
     expected = ["-f /etc/rc.packages pfSense-pkg-SDWAN POST-INSTALL", "service stop",
@@ -164,20 +183,33 @@ function delete_package_xml($name, $phase) {
 
     # The installed helper invalidates runtime decisions even if the service is down.
     helper.touch()
-    for artifact in (state, receipt, lock, log_state, pid, commit):
+    for artifact in (state, receipt, lock, log_state, pid, commit, settings_lock, upgrade_lock):
         artifact.touch()
+    removal_ready.touch()  # A prior interrupted transaction must not authorize this cleanup.
     still_running = run("deinstall", "DEINSTALL", code=1, STOP_RESULT="1", STATUS_RESULT="0")
     assert "observer is still running" in still_running.stderr
     assert calls()[-2:] == ["service stop", "service status"] and receipt.exists()
+    assert not removal_ready.exists()
     run("deinstall", "DEINSTALL", code=1, WITHDRAWAL_RESULT="1")
     assert calls()[-2:] == ["service stop", "-f " + helper.as_posix()]
+    before = calls()
+    run("deinstall", "POST-DEINSTALL")  # Default pkg mode may call it after a failed DEINSTALL.
+    assert calls() == before
+    assert receipt.exists() and lock.exists() and commit.exists()
+    assert settings_lock.exists() and upgrade_lock.exists()
+    run("deinstall", "DEINSTALL", code=1, REGISTRY_RESULT="1")
+    before = calls()
+    run("deinstall", "POST-DEINSTALL")
+    assert calls() == before
     assert receipt.exists() and lock.exists() and commit.exists()
     run("deinstall", "DEINSTALL", STOP_RESULT="1")
     if calls()[-4:] != ["service stop", "service status", "-f " + helper.as_posix(), expected[2]]:
         raise AssertionError("Removal did not invoke invalidation before unregistering")
     assert receipt.exists() and lock.exists()
-    run("deinstall", "POST-DEINSTALL")
+    run("deinstall", "POST-DEINSTALL", BUSY_LOCK=upgrade_lock.as_posix())
+    assert not removal_ready.exists()
     assert not any(artifact.exists() for artifact in (state, receipt, lock, log_state, pid, commit))
+    assert not settings_lock.exists() and upgrade_lock.exists()
     helper.unlink()
     receipt.touch()
     no_helper = run("deinstall", "DEINSTALL", code=1)

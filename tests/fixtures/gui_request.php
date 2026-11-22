@@ -49,18 +49,21 @@ function pkg_exec($query, &$stdout, &$stderr) {
 	} elseif (str_starts_with($query, 'query -F ')) {
 		$archive_version = str_contains($query, 'pfSense-pkg-SDWAN-0.4.8.pkg') ? '0.4.8' : $installed_release;
 		$stdout = "pfSense-pkg-SDWAN {$archive_version} net/pfSense-pkg-SDWAN";
-	} elseif (str_starts_with($query, 'add -f ')) {
+	} elseif (str_starts_with($query, '-o DEVELOPER_MODE=yes add -f ')) {
 		$rollback_calls++;
 		if (!empty($request['rollback_failure'])) {
 			return 1;
 		}
 		$installed_release = '0.4.7';
-	} elseif (str_starts_with($query, 'add ')) {
+	} elseif (str_starts_with($query, '-o DEVELOPER_MODE=yes add ')) {
 		$upgrade_calls++;
 		if (!empty($request['install_failure'])) {
 			return 1;
 		}
 		$installed_release = '0.4.8';
+		if (!empty($request['install_hook_failure'])) {
+			$stdout = "pkg-static: POST-INSTALL script failed\n";
+		}
 		if (isset($request['snapshot'])) {
 			fixture_write_snapshot($request['snapshot'], $config);
 		}

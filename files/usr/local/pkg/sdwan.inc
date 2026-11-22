@@ -10,7 +10,8 @@ function sdwan_lock(string $name, int $timeout) {
 	}
 	$directory = defined('SDWAN_LOCK_DIRECTORY') ? SDWAN_LOCK_DIRECTORY : '/var/run';
 	$path = $directory . '/' . $name . '.lock';
-	if (is_link($path) || (file_exists($path) && !is_file($path))) {
+	clearstatcache(true, __FILE__);
+	if (!is_file(__FILE__) || is_link($path) || (file_exists($path) && !is_file($path))) {
 		return null;
 	}
 	$mask = umask(0077);
@@ -25,7 +26,15 @@ function sdwan_lock(string $name, int $timeout) {
 	$deadline = hrtime(true) + $timeout * 1000000000;
 	do {
 		if (flock($lock, LOCK_EX | LOCK_NB)) {
-			return $lock;
+			// A concurrent uninstall may have removed the name while we waited.
+			clearstatcache(true, $path);
+			$named = @lstat($path);
+			$locked = fstat($lock);
+			if ($named !== false && $locked !== false && $named['ino'] === $locked['ino'] &&
+			    $named['dev'] === $locked['dev']) {
+				return $lock;
+			}
+			break;
 		}
 		if (hrtime(true) >= $deadline) {
 			break;
@@ -37,6 +46,11 @@ function sdwan_lock(string $name, int $timeout) {
 }
 
 function sdwan_unlock($lock): void {
+	clearstatcache(true, __FILE__);
+	if (!is_file(__FILE__)) {
+		// The uninstall hook may have skipped this file while the lock was held.
+		@unlink(stream_get_meta_data($lock)['uri']);
+	}
 	fclose($lock);
 }
 
