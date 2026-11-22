@@ -21,8 +21,12 @@ function config_path_enabled($path, $key) { return isset(config_get_path($path, 
 function get_failover_gateway_group_label_item($gateway) { return []; }
 function interface_has_gateway($interface) { return $interface === 'wan'; }
 function interface_has_gatewayv6($interface) { return $interface === 'wan'; }
-function get_interface_gateway($interface) { return '198.51.100.2'; }
-function get_interface_gateway_v6($interface) { return '2001:db8:20::2'; }
+if ($operation === 'preview') {
+	require_once($work . '/gwlb.inc');
+} else {
+	function get_interface_gateway($interface) { return '198.51.100.2'; }
+	function get_interface_gateway_v6($interface) { return '2001:db8:20::2'; }
+}
 // This format matches printing rules on the WebGUI. Optional unused fields in
 // the pinned upstream generator may be absent in config.xml.
 set_error_handler(static function ($level, $message, $file) use ($work) {

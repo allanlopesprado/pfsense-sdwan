@@ -64,10 +64,13 @@ def verify_erp(work, core, rules_dir, client, lan, firewall, peer, remote_a, rem
     config_path.write_text(json.dumps(config))
 
     def render(operation):
-        return php("/usr/local/bin/php", "-d", "extension=filter", "-d", "extension=mbstring",
-                   "-d", "extension=ctype",
-                   str(Path(__file__).resolve().parents[1] / "fixtures/native_filter.php"),
-                   str(work), str(core), operation)
+        args = ("-d", "extension=filter", "-d", "extension=mbstring", "-d", "extension=ctype",
+                str(Path(__file__).resolve().parents[1] / "fixtures/native_filter.php"), str(work), str(core), operation)
+        if operation == "preview":
+            # The activation preflight must see the same host routes as the observer.
+            return subprocess.check_output(["jexec", firewall, "/usr/local/bin/php", "-n", *args],
+                                           text=True, timeout=15)
+        return php("/usr/local/bin/php", *args)
 
     preview = json.loads(render("preview"))
     assert not preview["errors"], preview
