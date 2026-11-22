@@ -1154,17 +1154,33 @@ function sdwan_steering_gateways_for_rule(array $raw, array $rule): array {
 	if (!is_array($chosen) || !array_is_list($chosen)) {
 		return [];
 	}
-	$members = array_column($config['members'], 'name', 'gateway');
+	$members = array_column($config['members'], null, 'gateway');
+	$slas = array_column($config['slas'], null, 'name');
+	$sla = $slas[$policy['sla'] ?? ''] ?? null;
+	$overrides = array_column($policy['probe_requirements'] ?? [], null, 'member');
 	$result = $snapshot['policies'][$binding['policy']] ?? [];
 	foreach ($chosen as $gateway) {
 		if (!is_string($gateway) || !in_array($gateway, $binding['gateways'], true)) {
 			return [];
 		}
-		$member = $members[$gateway] ?? '';
+		$member = $members[$gateway] ?? null;
+		$name = $member['name'] ?? '';
+		$reason = $result['candidates'][$name] ?? null;
+		if ($reason === 'Eligible') {
+			continue;
+		}
 		$degraded = $state['degraded'][$gateway] ?? null;
-		if (($result['candidates'][$member] ?? null) !== 'Eligible' &&
-		    !(is_int($degraded) && $degraded > 0 && $degraded < (int)($policy['degrade_samples'] ?? 1) &&
-		        in_array($member, $result['soft'] ?? [], true))) {
+		$sample = $snapshot['members'][$name] ?? null;
+		$checks = $sample['checks'] ?? [];
+		if (!is_int($degraded) || $degraded < 1 || $degraded >= (int)($policy['degrade_samples'] ?? 1) ||
+		    !in_array($name, $result['soft'] ?? [], true) || !is_string($reason) ||
+		    $member === null || $sample === null || $sla === null || !is_array($checks)) {
+			return [];
+		}
+		$requirements = sdwan_policy_probe_requirements($policy, $member, $overrides[$name] ?? []);
+		if ($reason !== sdwan_candidate_reason($member, $sample, $sla, $requirements) ||
+		    !sdwan_is_wan_quality_breach($reason, $sample, $sla) ||
+		    sdwan_service_reason($checks, $requirements) !== 'Eligible') {
 			return [];
 		}
 	}

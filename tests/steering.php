@@ -189,6 +189,18 @@ $soft_sample['gateway_inventory_revision'] = sdwan_gateway_inventory_revision($t
 $soft_sample['steering']['G'] = $first;
 file_put_contents(SDWAN_SNAPSHOT_PATH, json_encode($soft_sample));
 verify(sdwan_steering_gateway_for_rule($tuned_raw, $rule) === 'A', 'native renderer permits the approved temporarily degraded gateway');
+foreach ([
+	'down gateway' => ['status' => 'down'],
+	'failed required probe' => ['checks' => ['probe_primary' => 'Timed out']],
+	'missing required probe' => ['checks' => []],
+	'unreadable service results' => ['checks' => 'Unavailable'],
+] as $condition => $replacement) {
+	$contradictory = $soft_sample;
+	$contradictory['members']['a'] = array_replace($contradictory['members']['a'], $replacement);
+	file_put_contents(SDWAN_SNAPSHOT_PATH, json_encode($contradictory));
+	verify(sdwan_steering_gateway_for_rule($tuned_raw, $rule) === null,
+	    "native renderer rejects a degraded decision with {$condition}");
+}
 $soft_sample['steering']['G']['degraded_at']--;
 file_put_contents(SDWAN_SNAPSHOT_PATH, json_encode($soft_sample));
 verify(sdwan_steering_gateway_for_rule($tuned_raw, $rule) === null, 'native renderer rejects a degraded decision from another sample');
