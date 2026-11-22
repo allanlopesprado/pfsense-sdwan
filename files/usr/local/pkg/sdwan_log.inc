@@ -53,6 +53,7 @@ function sdwan_log_plan(array $state, string $kind, array $snapshot, string $cau
 	$filter_event = match ($kind) {
 		'filter_requested' => [LOG_NOTICE, 'Native filter reload requested. Waiting for PF confirmation.'],
 		'filter_applied' => [LOG_NOTICE, 'Active PF rules confirmed the current forwarding decision.'],
+		'filter_withdrawal_confirmed' => [LOG_NOTICE, 'Active PF rules confirmed withdrawal of the removed forwarding bindings.'],
 		'filter_divergent' => [LOG_ERR, 'Persistent PF divergence. Automatic reload attempts for this decision have stopped.'],
 		'filter_unavailable' => [LOG_WARNING, 'Active PF rules are unavailable after the native filter reload was accepted. Confirmation and retries are paused. See Status > Filter Reload.'],
 		'filter_retirement_unconfirmed' => [LOG_ERR, 'Observer stopped without confirming withdrawal of the previous forwarding rules. Check Status > Filter Reload.'],

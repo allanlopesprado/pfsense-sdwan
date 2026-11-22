@@ -53,6 +53,8 @@ def observer(binary, *, two_bindings=False):
         steering.write_text(source)
         (work / "filter.inc").write_text(
             "<?php function filter_sdwan_binding_api(): int { return 1; }\n"
+            "function filter_sdwan_withdrawal_proof_api(): int { return 1; }\n"
+            "function g_get($key, $default) { return $key === 'varrun_path' ? __DIR__ : $default; }\n"
             "function is_platform_booting(): bool { return config_get_path('booting', false); }\n")
 
         config = fixture(work)
@@ -219,7 +221,7 @@ def unbind_cleanup(observe, config, receipt, events):
     config["fixture_pf_rules"] = []
     observe()
     results.append(case("unbind_independent_pf_repair", "passive",
-                        "passive" if len(requests.read_bytes()) == count else "requested"))
+                        "passive" if len(requests.read_bytes()) == count and not receipt.exists() else "requested"))
     return results
 
 
@@ -252,7 +254,27 @@ def unbind_one_of_two(observe, config, receipt, retained_binding):
     results.append(case("unbind_partial_remaining_tracker_changed", "pending",
                         "confirmed" if state["confirmed"] else "pending"))
 
-    config["fixture_pf_rules"] = [g_native, g_guard, h_block, h_guard]
+    native_hash = "bad5555555555555"
+    default_deny = (f'block drop inet all label "tags=ruleset:{native_hash}" '
+                    'label "descr=Default deny rule IPv4"')
+    config["fixture_pf_rules"] = [default_deny, g_native, g_guard, h_block, h_guard]
+    journal = receipt.with_name("sdwan-filter-commit.json")
+    state = json.loads(receipt.read_bytes())
+    since = state.get("withdrawal", {}).get("since_ns", 1)
+    for name, proof in (
+        ("unbind_native_pf_without_generation", None),
+        ("unbind_rejects_previous_generation", {"started_ns": since - 1, "trackers": ["311"], "ruleset": native_hash}),
+        ("unbind_rejects_mismatched_ruleset", {"started_ns": since, "trackers": ["311"], "ruleset": "beef000000000000"}),
+        ("unbind_rejects_active_withdrawn_tracker", {"started_ns": since, "trackers": ["301", "311"], "ruleset": native_hash}),
+    ):
+        if proof is None:
+            journal.unlink(missing_ok=True)
+        else:
+            journal.write_text(json.dumps(proof))
+        observe()
+        pending = json.loads(receipt.read_bytes())
+        results.append(case(name, "pending", "confirmed" if pending["confirmed"] else "pending"))
+    journal.write_text(json.dumps({"started_ns": since, "trackers": ["311"], "ruleset": native_hash}))
     observe()
     state = json.loads(receipt.read_bytes())
     results.append(case("unbind_partial_native_rules_restored", "confirmed",

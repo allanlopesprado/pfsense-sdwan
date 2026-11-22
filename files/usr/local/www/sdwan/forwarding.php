@@ -113,15 +113,17 @@ $pf_labels = [
 	'unavailable' => gettext('Filter verification unavailable'),
 ];
 $inventory = sdwan_gateways();
+$receipt = sdwan_steering_read_receipt(SDWAN_SNAPSHOT_PATH . '.forwarded');
+$rules = $supported && (($binding_current && $sample !== null) || isset($receipt['withdrawal']))
+    ? sdwan_steering_pf_rules() : null;
 $filter_status = match (true) {
 	$binding === null => null,
 	!$supported => 'unavailable',
 	!$binding_current => 'binding_changed',
 	$sample === null => 'expired',
-	default => sdwan_steering_pf_status($binding, $steering, $inventory, sdwan_steering_pf_rules(), $binding_preview['rule_pairs']),
+	default => sdwan_steering_pf_status($binding, $steering, $inventory, $rules, $binding_preview['rule_pairs']),
 };
 if ($filter_status === 'pending' && isset($sample['steering'])) {
-	$receipt = sdwan_steering_read_receipt(SDWAN_SNAPSHOT_PATH . '.forwarded');
 	if (($receipt['signature'] ?? null) === sdwan_steering_runtime_signature($sample, $inventory) &&
 	    !$receipt['confirmed']) {
 		$age = time() - $receipt['requested_at'];
@@ -147,6 +149,17 @@ if ($errors) {
 }
 if (!$supported) {
 	print_info_box(gettext('Preview mode. Binding requires the SD-WAN forwarding integration.'), 'info', false);
+}
+if (isset($receipt['withdrawal'])) {
+	$exhausted = $receipt['attempts'] >= SDWAN_RELOAD_MAX_ATTEMPTS &&
+	    time() - $receipt['requested_at'] >= SDWAN_RELOAD_RETRY_INTERVAL;
+	if (sdwan_steering_withdrawal_confirmed($receipt['withdrawal'], sdwan_steering_trackers($bindings_by_group), $rules)) {
+		print_info_box(gettext('Active PF rules confirmed the forwarding withdrawal.'), 'success', false);
+	} else {
+		print_info_box($exhausted ?
+		    gettext('Forwarding withdrawal remains unconfirmed. Automatic retries exhausted. Review Status > Filter Reload.') :
+		    gettext('Forwarding withdrawal pending. Waiting for active PF confirmation.'), 'warning', false);
+	}
 }
 $policy_options = ['' => gettext('Select a policy')];
 foreach ($policy_names as $name) {

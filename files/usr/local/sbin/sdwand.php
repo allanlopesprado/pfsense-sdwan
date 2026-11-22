@@ -114,7 +114,10 @@ function sdwan_observe_once(): void {
 		}
 		$receipt_path = SDWAN_SNAPSHOT_PATH . '.forwarded';
 		$receipt = null;
+		$previous = [];
 		$action = null;
+		$clear_receipt = false;
+		$withdrawal_verified = false;
 		$invalid_bindings = false;
 		$prior = sdwan_current_snapshot($config, $inventory, $expired);
 		if ($expired) {
@@ -140,22 +143,42 @@ function sdwan_observe_once(): void {
 					$previous = sdwan_steering_read_receipt($receipt_path);
 					$now = time();
 					$same = ($previous['signature'] ?? null) === $signature && $previous['requested_at'] <= $now;
-					$receipt = $same ? $previous : [
+					$trackers = $invalid_bindings ? ($previous['trackers'] ?? []) : sdwan_steering_trackers($bindings);
+					$withdrawal = $invalid_bindings ? ($previous['withdrawal'] ?? null) :
+					    sdwan_steering_withdrawal($previous, $trackers);
+					if (!$invalid_bindings && !$previous && !$trackers && !$bound) {
+						$withdrawal = ['trackers' => [], 'unknown' => true, 'since_ns' => hrtime(true)];
+					}
+					$receipt = $same && $withdrawal === ($previous['withdrawal'] ?? null) ? $previous : [
 						'signature' => $signature, 'attempts' => 0, 'requested_at' => 0,
 						'accepted' => false, 'confirmed' => false,
 					];
-					$rules = $same && $bindings ? sdwan_steering_pf_rules() : null;
-					$matches = $rules !== null;
+					$receipt['trackers'] = $trackers;
+					$rules = ($same && $bindings) || $withdrawal !== null ? sdwan_steering_pf_rules() : null;
+					if ($withdrawal !== null && !$invalid_bindings &&
+					    sdwan_steering_withdrawal_confirmed($withdrawal, $trackers, $rules)) {
+						$withdrawal_verified = true;
+						$withdrawal = null;
+					}
+					if ($withdrawal === null) {
+						unset($receipt['withdrawal']);
+					} else {
+						$receipt['withdrawal'] = $withdrawal;
+					}
+					$clear_receipt = !$bindings && !$invalid_bindings && $withdrawal === null;
+					$matches = $rules !== null && $withdrawal === null && !$invalid_bindings;
 					foreach ($bindings as $group => $binding) {
 						$status = sdwan_steering_pf_status($binding, $snapshot['steering'][$group] ?? [], $inventory, $rules,
 						    $rule_pairs[$group] ?? null);
 						$matches = $matches && in_array($status, ['applied', 'blocked'], true);
 					}
-					if ($matches && !$receipt['confirmed']) {
+					if ($clear_receipt) {
+						$receipt = null;
+					} elseif ($matches && !$receipt['confirmed']) {
 						$receipt['attempts'] = 0;
 						$receipt['confirmed'] = true;
 						$action = 'filter_applied';
-					} elseif ($rules === null && $bindings && $receipt['accepted'] && !$receipt['confirmed'] &&
+					} elseif ($rules === null && ($bindings || $withdrawal !== null) && $receipt['accepted'] && !$receipt['confirmed'] &&
 					    $now - $receipt['requested_at'] >= SDWAN_RELOAD_RETRY_INTERVAL) {
 						$action = 'filter_unavailable';
 					} elseif (!$matches && ($rules !== null || !$receipt['accepted'])) {
@@ -198,15 +221,18 @@ function sdwan_observe_once(): void {
 				throw new RuntimeException('pfSense did not accept the filter reload request');
 			}
 			$receipt['accepted'] = true;
-			if ($bound) {
-				if (!sdwan_steering_write_receipt($receipt_path, $receipt)) {
-					throw new RuntimeException('Cannot record the filter reload request');
-				}
-			} elseif (is_file($receipt_path)) {
-				unlink($receipt_path);
+			if (!sdwan_steering_write_receipt($receipt_path, $receipt)) {
+				throw new RuntimeException('Cannot record the filter reload request');
 			}
-		} elseif ($action === 'filter_applied' && !sdwan_steering_write_receipt($receipt_path, $receipt)) {
-			throw new RuntimeException('Cannot record the filter reload request');
+		} elseif ($clear_receipt) {
+			if (is_file($receipt_path) && !unlink($receipt_path)) {
+				throw new RuntimeException('Cannot clear the confirmed withdrawal receipt');
+			}
+		} elseif ($receipt !== null && $receipt !== $previous && !sdwan_steering_write_receipt($receipt_path, $receipt)) {
+			throw new RuntimeException('Cannot update the filter reload receipt');
+		}
+		if ($withdrawal_verified) {
+			sdwan_log_event('filter_withdrawal_confirmed');
 		}
 		if ($action !== null) {
 			sdwan_log_event($action);

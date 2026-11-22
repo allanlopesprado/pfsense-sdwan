@@ -262,6 +262,8 @@ function sdwan_steering_edit(string $group, ?string $policy, string $expected_re
 	if (!is_resource($lock)) {
 		return ['SD-WAN settings are busy. Reload the page and try again.'];
 	}
+	$observation_lock = null;
+	$receipt_before_edit = null;
 	try {
 		if (!config_read_file(false, false)) {
 			return ['The current pfSense configuration could not be read.'];
@@ -275,6 +277,34 @@ function sdwan_steering_edit(string $group, ?string $policy, string $expected_re
 			    sdwan_steering_group($row['group'] ?? null) !== $group));
 			if ($updated === $rows) {
 				return ['This group has no saved binding.'];
+			}
+			if (sdwan_steering_supported()) {
+				$observation_lock = @fopen(SDWAN_SNAPSHOT_PATH . '.lock', 'c');
+				if (!is_resource($observation_lock) || !flock($observation_lock, LOCK_EX | LOCK_NB)) {
+					return ['An SD-WAN observation is in progress. Retry the withdrawal.'];
+				}
+				$path = SDWAN_SNAPSHOT_PATH . '.forwarded';
+				$receipt_before_edit = sdwan_steering_read_receipt($path);
+				$receipt = $receipt_before_edit + [
+				    'signature' => sdwan_config_revision([]), 'attempts' => 0, 'requested_at' => 0,
+				    'accepted' => false, 'confirmed' => false,
+				];
+				try {
+					$active = sdwan_steering_bindings();
+					$known = [...($receipt['trackers'] ?? []), ...sdwan_steering_trackers($active)];
+					$receipt['trackers'] = array_values(array_unique($known));
+					sort($receipt['trackers'], SORT_STRING);
+					unset($active[$group]);
+					$receipt['withdrawal'] = sdwan_steering_withdrawal($receipt, sdwan_steering_trackers($active));
+				} catch (UnexpectedValueException $e) {
+					$receipt['withdrawal'] = ['trackers' => $receipt['withdrawal']['trackers'] ?? [],
+					    'unknown' => true, 'since_ns' => hrtime(true)];
+				}
+				$receipt = array_replace($receipt, ['attempts' => 0, 'requested_at' => 0,
+				    'accepted' => false, 'confirmed' => false]);
+				if (!sdwan_steering_write_receipt($path, $receipt)) {
+					return ['Could not record withdrawal for PF verification.'];
+				}
 			}
 		} else {
 			$preview = sdwan_steering_preview(sdwan_get_config(), $policy, $group);
@@ -295,10 +325,20 @@ function sdwan_steering_edit(string $group, ?string $policy, string $expected_re
 		if (!is_array(config_set_path(SDWAN_BINDINGS_PATH, ['item' => $updated])) ||
 		    !is_array(write_config($policy === null ? 'Returned SD-WAN rules to native gateway selection' : 'Bound SD-WAN forwarding policy to native firewall rules'))) {
 			config_read_file(false, false);
+			if ($receipt_before_edit !== null) {
+				if ($receipt_before_edit) {
+					sdwan_steering_write_receipt($path, $receipt_before_edit);
+				} else {
+					@unlink($path);
+				}
+			}
 			sdwan_log_event('binding_error');
 			return ['pfSense could not save the forwarding binding.'];
 		}
 	} finally {
+		if (is_resource($observation_lock)) {
+			fclose($observation_lock);
+		}
 		unlock($lock);
 	}
 	$label = sdwan_log_label($group);
@@ -452,6 +492,99 @@ const SDWAN_RELOAD_MAX_ATTEMPTS = 3;
 const SDWAN_RELOAD_RETRY_INTERVAL = 30;
 const SDWAN_STARTUP_RETRY_WINDOW = 300;
 
+function sdwan_steering_trackers(array $bindings): array {
+	$trackers = [];
+	foreach ($bindings as $binding) {
+		foreach ($binding['trackers'] as $tracker) {
+			$trackers[$tracker] = true;
+		}
+	}
+	$ids = array_map('strval', array_keys($trackers));
+	sort($ids, SORT_STRING);
+	return $ids;
+}
+
+function sdwan_steering_tracker_list_valid(mixed $list): bool {
+	if (!is_array($list) || !array_is_list($list) || count($list) > 4096) {
+		return false;
+	}
+	$last = '';
+	foreach ($list as $tracker) {
+		if (!is_string($tracker) || !preg_match('/\A[1-9][0-9]{0,9}\z/', $tracker) ||
+		    strcmp($tracker, $last) <= 0) {
+			return false;
+		}
+		$last = $tracker;
+	}
+	return true;
+}
+
+function sdwan_steering_withdrawal(array $previous, array $trackers): ?array {
+	$pending = $previous['withdrawal'] ?? null;
+	$removed = array_diff($previous['trackers'] ?? [], $trackers);
+	$unknown = $pending['unknown'] ?? ($previous && !$trackers && !isset($previous['trackers']));
+	$affected = array_values(array_unique(array_diff([...($pending['trackers'] ?? []), ...$removed], $trackers)));
+	sort($affected, SORT_STRING);
+	if (!$affected && !$unknown) {
+		return null;
+	}
+	if (($pending['trackers'] ?? null) === $affected && ($pending['unknown'] ?? null) === $unknown) {
+		return $pending;
+	}
+	return ['trackers' => $affected, 'unknown' => $unknown, 'since_ns' => hrtime(true)];
+}
+
+/* Native PF puts the generated ruleset hash in its root default-deny labels. */
+function sdwan_steering_loaded_ruleset(array $rules): ?string {
+	$hash = null;
+	foreach ($rules as $line) {
+		if (!str_starts_with($line, 'block ') ||
+		    !preg_match('/\blabel "descr=Default deny rule IPv[46]"/', $line) ||
+		    !preg_match('/\blabel "tags=([^"]+)"/', $line, $tags)) {
+			continue;
+		}
+		foreach (explode(' ', $tags[1]) as $tag) {
+			if (preg_match('/\Aruleset:([a-f0-9]{16})\z/', $tag, $parts)) {
+				if ($hash !== null && $hash !== $parts[1]) {
+					return null;
+				}
+				$hash = $parts[1];
+			}
+		}
+	}
+	return $hash;
+}
+
+function sdwan_steering_withdrawal_confirmed(array $withdrawal, array $trackers, ?array $rules): bool {
+	if ($rules === null) {
+		return false;
+	}
+	if (!$withdrawal['unknown']) {
+		$still_present = false;
+		foreach ($rules as $rule) {
+			if (in_array(sdwan_steering_rule_tracker($rule), $withdrawal['trackers'], true)) {
+				$still_present = true;
+				break;
+			}
+		}
+		if (!$still_present) {
+			return true;
+		}
+	}
+	/* On older adapters, a native rule may reuse the tracker and route. Its
+	 * presence alone cannot identify the generation that produced it. */
+	if (!function_exists('filter_sdwan_withdrawal_proof_api') || filter_sdwan_withdrawal_proof_api() !== 1) {
+		return false;
+	}
+	$path = g_get('varrun_path', '/var/run') . '/sdwan-filter-commit.json';
+	$raw = @file_get_contents($path, false, null, 0, 65537);
+	$proof = is_string($raw) && strlen($raw) <= 65536 ? json_decode($raw, true, 8) : null;
+	$started = $proof['started_ns'] ?? null;
+	$hash = sdwan_steering_loaded_ruleset($rules);
+	return is_int($started) && $started >= $withdrawal['since_ns'] && $started <= hrtime(true) &&
+	    ($proof['trackers'] ?? null) === $trackers && $hash !== null && ($proof['ruleset'] ?? null) === $hash;
+}
+
 function sdwan_steering_runtime_signature(array $snapshot, array $inventory): string {
 	$paths = [];
 	$sticky = false;
@@ -476,8 +609,8 @@ function sdwan_steering_runtime_signature(array $snapshot, array $inventory): st
 
 /* An old-format acknowledgement or a damaged receipt cannot confirm PF. */
 function sdwan_steering_read_receipt(string $path): array {
-	$raw = @file_get_contents($path, false, null, 0, 1024);
-	$data = is_string($raw) ? json_decode($raw, true) : null;
+	$raw = @file_get_contents($path, false, null, 0, 131073);
+	$data = is_string($raw) && strlen($raw) <= 131072 ? json_decode($raw, true, 8) : null;
 	if (!is_array($data) || !is_string($data['signature'] ?? null) ||
 	    !preg_match('/\A[a-f0-9]{64}\z/', $data['signature']) ||
 	    !is_int($data['attempts'] ?? null) || $data['attempts'] < 0 ||
@@ -485,6 +618,17 @@ function sdwan_steering_read_receipt(string $path): array {
 	    !is_int($data['requested_at'] ?? null) || $data['requested_at'] < 0 ||
 	    !is_bool($data['accepted'] ?? null) || !is_bool($data['confirmed'] ?? null)) {
 		return [];
+	}
+	if (isset($data['trackers']) && !sdwan_steering_tracker_list_valid($data['trackers'])) {
+		return [];
+	}
+	if (isset($data['withdrawal'])) {
+		$withdrawal = $data['withdrawal'];
+		if (!is_array($withdrawal) || !sdwan_steering_tracker_list_valid($withdrawal['trackers'] ?? null) ||
+		    !is_bool($withdrawal['unknown'] ?? null) || !is_int($withdrawal['since_ns'] ?? null) ||
+		    $withdrawal['since_ns'] <= 0 || (!$withdrawal['trackers'] && !$withdrawal['unknown'])) {
+			return [];
+		}
 	}
 	return $data;
 }
@@ -550,8 +694,10 @@ function sdwan_steering_retire_observation(bool $startup = false): bool {
 				}
 			}
 		}
+		$receipt = sdwan_steering_read_receipt($path);
+		$pending_withdrawal = isset($receipt['withdrawal']) || (!$trackers && !empty($receipt['trackers']));
 		if (!$trackers) {
-			return $startup || !is_file($path) || unlink($path);
+			return $startup || (!$pending_withdrawal && (!is_file($path) || unlink($path)));
 		}
 		if ($startup && is_file(SDWAN_SNAPSHOT_PATH)) {
 			sdwan_read_snapshot($expired);
@@ -575,16 +721,16 @@ function sdwan_steering_retire_observation(bool $startup = false): bool {
 			return true;
 		};
 		if ($closed()) {
-			return !is_file($path) || unlink($path);
+			return $pending_withdrawal ? $startup : (!is_file($path) || unlink($path));
 		}
 		/* Reuse the startup signature so stop and restart share the retry budget. */
 		$signature = sdwan_config_revision(['startup', array_keys($trackers)]);
-		$receipt = sdwan_steering_read_receipt($path);
 		$now = time();
 		if (($receipt['signature'] ?? null) !== $signature || $receipt['requested_at'] > $now ||
 		    $now - $receipt['requested_at'] >= SDWAN_STARTUP_RETRY_WINDOW) {
 			$receipt = ['signature' => $signature, 'attempts' => 0, 'requested_at' => 0,
-			    'accepted' => false, 'confirmed' => false];
+			    'accepted' => false, 'confirmed' => false] + array_intersect_key($receipt,
+			        ['trackers' => true, 'withdrawal' => true]);
 		}
 		if ($receipt['attempts'] >= SDWAN_RELOAD_MAX_ATTEMPTS ||
 		    $now - $receipt['requested_at'] < SDWAN_RELOAD_RETRY_INTERVAL) {
@@ -602,7 +748,7 @@ function sdwan_steering_retire_observation(bool $startup = false): bool {
 		$deadline = hrtime(true) + 5_000_000_000;
 		do {
 			if ($closed()) {
-				return !is_file($path) || unlink($path);
+				return $pending_withdrawal ? $startup : (!is_file($path) || unlink($path));
 			}
 			usleep(250000);
 		} while (hrtime(true) < $deadline);
