@@ -91,6 +91,10 @@ function sdwan_ui_traffic_sample(array $policy, array $members, array $inventory
 		$row = ['at_ns' => (string)$now];
 		foreach (['inbytes', 'outbytes'] as $field) {
 			$value = $stats[$field] ?? null;
+			// The native PHP module exports byte counters as doubles.
+			if (is_float($value) && $value >= 0 && $value <= 9007199254740991 && floor($value) === $value) {
+				$value = (int)$value;
+			}
 			if (!is_int($value) && !is_string($value)) {
 				continue 2;
 			}
