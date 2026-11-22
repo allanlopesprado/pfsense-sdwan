@@ -197,7 +197,7 @@ if [ -n "${SDWAN_RENDERED_RULES:-}" ]; then
     verify_pf() {
         node=$1
         shift
-        jexec "$node" /usr/local/bin/php -n -r '
+        jexec "$node" /usr/local/bin/php -n -d extension=filter -r '
             function get_real_interface($interface, $family, $realv6iface, $flush) { return $interface; }
             require $argv[1] . "/files/usr/local/pkg/sdwan_steering.inc";
             $binding = ["gateways" => ["A", "B"], "trackers" => ["41001"]];
