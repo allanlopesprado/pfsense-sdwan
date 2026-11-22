@@ -6,6 +6,7 @@ require_once __DIR__ . '/../../files/usr/local/pkg/sdwan_steering.inc';
 $seed = getenv('SDWAN_AUDIT_SEED');
 mt_srand($seed === false || $seed === '' ? 172831 : (int)$seed);
 $trials = 256;
+$inputHash = hash_init('sha256');
 $passed = [
     'hold_boundary' => 0,
     'changed_challenger' => 0,
@@ -34,6 +35,7 @@ for ($trial = 0; $trial < $trials; $trial++) {
         $reappeared['since'] === $start + 31 && $confirmed['gateway'] === $preferred);
 
     $clockNow = $start - mt_rand(1, 30);
+    hash_update($inputHash, implode(',', [$incumbent, $preferred, $alternate, $start, $beforeBoundary, $clockNow]) . "\n");
     $rewound = sdwan_steering_step($challenged, $eligible, $preferred, $clockNow);
     $passed['clock_rollback'] += (int)($rewound['gateway'] === $incumbent && $rewound['since'] === $clockNow);
 
@@ -47,4 +49,5 @@ $results = [];
 foreach ($passed as $case => $count) {
     $results[] = ['id' => "transitions.$case", 'expected' => $trials, 'observed' => $count];
 }
-echo json_encode($results, JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR), PHP_EOL;
+echo json_encode(['input_sha256' => hash_final($inputHash), 'cases' => $results],
+    JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR), PHP_EOL;

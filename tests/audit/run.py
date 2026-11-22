@@ -2,12 +2,14 @@
 
 import argparse
 from collections import Counter
+import hashlib
 import json
 import os
 from pathlib import Path
 import re
 import subprocess
 import sys
+import time
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -15,17 +17,33 @@ DRIVERS = ("forwarding.php", "decision.php", "dynamic-route.php", "transitions.p
 ID = re.compile(r"[a-z0-9_]+(?:\.[a-z0-9_]+)+")
 
 
-def read_cases(driver, environment, php):
+def read_cases(driver, environment, php, processes):
     path = ROOT / "tests" / "audit" / driver
     command = [php, str(path)] if path.suffix == ".php" else [sys.executable, "-B", str(path)]
-    completed = subprocess.run(
-        command, cwd=ROOT, env=environment, capture_output=True, text=True,
-        encoding="utf-8", errors="replace", timeout=30, check=False,
-    )
-    if completed.returncode:
-        detail = completed.stderr.strip() or completed.stdout.strip()
-        raise ValueError(f"exit {completed.returncode}\n{detail[-1600:]}")
-    cases = json.loads(completed.stdout)
+    started = time.monotonic()
+    with subprocess.Popen(command, cwd=ROOT, env=environment, stdout=subprocess.PIPE,
+                          stderr=subprocess.PIPE) as process:
+        try:
+            stdout, stderr = process.communicate(timeout=30)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            stdout, stderr = process.communicate()
+            raise
+        finally:
+            evidence = {"driver": driver, "pid": process.pid, "exit_code": process.returncode,
+                        "elapsed_seconds": round(time.monotonic() - started, 6)}
+            processes.append(evidence)
+    evidence["stdout_sha256"] = hashlib.sha256(stdout).hexdigest()
+    if process.returncode:
+        detail = (stderr.strip() or stdout.strip()).decode("utf-8", errors="replace")
+        raise ValueError(f"exit {process.returncode}\n{detail[-1600:]}")
+    cases = json.loads(stdout)
+    if driver == "transitions.php":
+        digest = cases.get("input_sha256") if isinstance(cases, dict) else None
+        if not isinstance(digest, str) or not re.fullmatch(r"[a-f0-9]{64}", digest):
+            raise ValueError("The transitions driver did not report a valid input fingerprint.")
+        evidence["input_sha256"] = digest
+        cases = cases.get("cases")
     if not isinstance(cases, list) or not cases:
         raise ValueError("The driver must return a nonempty array of observations.")
     for case in cases:
@@ -79,12 +97,14 @@ def summary(report):
 
 
 def audit(php, seed):
+    started = time.monotonic()
     environment = dict(os.environ, PHP_BIN=php, SDWAN_AUDIT_SEED=str(seed))
     results = []
+    processes = []
     seen = set()
     for driver in DRIVERS:
         try:
-            cases = read_cases(driver, environment, php)
+            cases = read_cases(driver, environment, php, processes)
             identifiers = {case["id"] for case in cases}
             if len(identifiers) != len(cases) or identifiers & seen:
                 raise ValueError("Duplicate observation identifiers.")
@@ -102,7 +122,8 @@ def audit(php, seed):
 
     occurrences = Counter(case["outcome"] for case in results)
     counts = {name: occurrences[name] for name in ("passed", "known", "resolved", "unexpected")}
-    return {"seed": seed, "revision": os.environ.get("GITHUB_SHA", "local"), "counts": counts, "cases": results}
+    return {"seed": seed, "revision": os.environ.get("GITHUB_SHA", "local"), "counts": counts,
+            "duration_seconds": round(time.monotonic() - started, 6), "processes": processes, "cases": results}
 
 
 def save_report(report, output):
