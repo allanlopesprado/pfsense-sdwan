@@ -14,7 +14,8 @@ on:
       - 'pkg-plist'
       - 'tools/prepare-core.py'
       - 'tools/build-lab-pkg.py'
-      - 'dist/pfSense-pkg-SDWAN-0.4.27.pkg*'
+      - 'tools/previous-dist-package.sh'
+      - 'dist/pfSense-pkg-SDWAN-*.pkg*'
   workflow_dispatch:
     inputs:
       ce_version:
@@ -48,7 +49,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: ${{ env.CE_LAB }}.raw.gz
-          key: ${{ env.CE_LAB }}-candidate-disk-v3-${{ hashFiles('.github/workflows/ce291-appliance.yml', '.github/workflows/build-package.yml', 'tests/lab/ce291-disk.sh', 'tests/lab/ce291-guest.php', 'tests/lab/ce291-source.py', 'core/**', 'tools/prepare-core.py', 'tools/build-lab-pkg.py', 'files/**', 'Makefile', 'pkg-descr', 'pkg-plist', 'dist/pfSense-pkg-SDWAN-0.4.27.pkg*') }}
+          key: ${{ env.CE_LAB }}-candidate-disk-v4-${{ hashFiles('.github/workflows/ce291-appliance.yml', '.github/workflows/build-package.yml', 'tests/lab/ce291-disk.sh', 'tests/lab/ce291-guest.php', 'tests/lab/ce291-source.py', 'core/**', 'tools/prepare-core.py', 'tools/build-lab-pkg.py', 'tools/previous-dist-package.sh', 'files/**', 'Makefile', 'pkg-descr', 'pkg-plist', 'dist/pfSense-pkg-SDWAN-*.pkg*') }}
       - uses: actions/download-artifact@v4
         if: steps.disk.outputs.cache-hit != 'true'
         with:

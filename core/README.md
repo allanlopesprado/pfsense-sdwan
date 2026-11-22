@@ -17,13 +17,11 @@ The last command displays the diff and returns 1 when there are changes. The too
 
 Restart the SD-WAN service after changing the native adapter so its long-running PHP process loads the updated generator. Use a dedicated gateway group and verify that a fresh connection follows the policy while the system default route stays on the original WAN.
 
-### CE 2.9.1 lab copy
+### Signed CE 2.9.1 and CE 2.9.2 lab copies
 
-To prepare a copy off the appliance, use `--ce-291-lab` on a tree containing the original `src/etc/inc/filter.inc`. This mode requires SHA-256 `6acd8621e4f88660759c5656488d81f580b49f4c9848b19048ae6a2570e177b4`. The hook runs after the native decision that may omit unavailable gateways. The lab checked patch application and PHP syntax on the exact copy. Two-path traffic, filter reloads, and rollback still require validation on a clone before using the image.
+The [two-WAN appliance workflow](../.github/workflows/ce291-appliance.yml) extracts the audited rule generator from the signed Netgate system package for each target. Both audited packages contain a `src/etc/inc/filter.inc` with SHA-256 `70758089d12a271ff08ccf3e20a180d3f441f8d468e984be6b1476c366c66c30`. Use `--ce-292-lab` for this fingerprint from either package. Use `--ce-291-lab` for the previously audited CE 2.9.1 copy with SHA-256 `6acd8621e4f88660759c5656488d81f580b49f4c9848b19048ae6a2570e177b4`.
 
-### CE 2.9.2 lab copy
-
-Use `--ce-292-lab` with the original `src/etc/inc/filter.inc` from the signed `pfSense-system-2.9.2` package. Its SHA-256 is `70758089d12a271ff08ccf3e20a180d3f441f8d468e984be6b1476c366c66c30`. The preparation tool rejects files from other builds. A firmware upgrade can replace the patched generator. Generate the overlay from the signed package for the installed version, then check the active PF rules and restart SD-WAN after installing the matching overlay. [Netgate CE 2.9.2 release notes](https://docs.netgate.com/pfsense/en/latest/releases/26-07-2_2-9-2.html)
+The workflow has verified two-path traffic, filter reloads, reboot, and rollback on both versions. Verify those behaviors on a clone of the target image before deployment. A firmware upgrade can replace the patched generator. Generate the overlay from the signed package for the installed version, then check the active PF rules and restart SD-WAN after installing the matching overlay. [Netgate CE 2.9.2 release notes](https://docs.netgate.com/pfsense/en/latest/releases/26-07-2_2-9-2.html)
 
 ## Forwarding scope
 

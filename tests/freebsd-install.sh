@@ -36,9 +36,12 @@ package=pfSense-pkg-SDWAN
 version=$(awk '$1=="PORTVERSION="{print $2}' Makefile)
 test -n "$version"
 head -c 80 "$PWD/dist/$package-$version.pkg" > "$root/interrupted.pkg"
+previous=$(sh tools/previous-dist-package.sh "$version")
+previous_version=${previous#dist/"$package"-}
+previous_version=${previous_version%.pkg}
 
 # Cover both update channels and the previous patch level.
-for baseline in 0.2.0 0.3.0 0.4.0 0.4.1 0.4.2 0.4.3 0.4.4 0.4.5 0.4.6 0.4.7 0.4.8 0.4.9 0.4.10 0.4.11 0.4.12 0.4.18; do
+for baseline in 0.2.0 0.3.0 0.4.0 0.4.1 0.4.2 0.4.3 0.4.4 0.4.5 0.4.6 0.4.7 0.4.8 0.4.9 0.4.10 0.4.11 0.4.12 0.4.18 "$previous_version"; do
     test "$(run_pkg version -t "$baseline" "$version")" = '<'
     checksum=$(awk '{print $1}' "$PWD/dist/$package-$baseline.pkg.sha256")
     sha256 -c "$checksum" "$PWD/dist/$package-$baseline.pkg" || exit 1
@@ -89,7 +92,7 @@ for baseline in 0.2.0 0.3.0 0.4.0 0.4.1 0.4.2 0.4.3 0.4.4 0.4.5 0.4.6 0.4.7 0.4.
     run_pkg check -s "$package"
     run_pkg delete -Dy "$package"
 done
-baseline=0.4.18
+baseline=$previous_version
 sed "s|'/etc/version'|'$root/pfsense-version'|" files/usr/local/pkg/sdwan_release.inc > "$root/sdwan_release.inc"
 for platform in 2.9.1-RELEASE 2.9.2-RELEASE; do
     if run_pkg info -e "$package"; then
@@ -150,4 +153,4 @@ sleep 6
 test "$(cat "$root/child.pid")" = "$restarted"
 if kill -0 "$restarted" 2>/dev/null; then exit 1; fi
 echo "Verified FreeBSD service crash recovery, start, restart and deliberate stop with a fixture worker."
-echo "Verified checksum rejection, download failure, direct upgrades through 0.4.18 to $version, removal, rollback to each prior version and reinstall (hooks disabled)."
+echo "Verified checksum rejection, download failure, direct upgrades through $previous_version to $version, removal, rollback to each tested version and reinstall (hooks disabled)."
