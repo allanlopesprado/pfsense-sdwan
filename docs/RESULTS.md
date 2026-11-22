@@ -10,6 +10,14 @@ On a CE 2.9.2 appliance with the matching experimental core and two working WANs
 
 [Current release evidence](https://github.com/allanlopesprado/pfsense-sdwan/releases/latest) · [Compatibility matrix](PACKAGE-COMPATIBILITY.md) · [Acceptance procedure](LAB.md)
 
+## Activation diagnostics and an open forwarding divergence
+
+The optional `activation-guard` experiment binds only ERP with the observer suspended. It reloads through the native pfSense entry point and compares both the tracker and the result of real TCP connections. Both CE versions initially showed the ERP tracker as a block. During the experiment the tracker returned to a pass rule and a new ERP connection completed via WAN1. The after-test state confirms a new source port. This transition remains unresolved. It is separate from the read-only diagnostics, and the experiment retains its failing assertion. [CE 2.9.1 guard experiment](https://github.com/allanlopesprado/pfsense-sdwan/actions/runs/45070959690) · [CE 2.9.2 guard experiment](https://github.com/allanlopesprado/pfsense-sdwan/actions/runs/45070959753)
+
+The normal two-binding activation benchmark on CE 2.9.2 recorded 9.50 seconds between successful replies during activation, then 360 successful requests in the stable phase. Forwarding rules and the observer are unchanged by the new interface measurements. [Activation benchmark](https://github.com/allanlopesprado/pfsense-sdwan/actions/runs/45068794234)
+
+The read-only collector observed byte count increases on both WANs of each appliance. Controlled traffic increased receive and transmit counters by 3,159 bytes per WAN on CE 2.9.1 and 3,116 bytes per WAN on CE 2.9.2. The loaded trackers and forwarding receipt stayed the same during the measurement. Both runs also passed shared-target, DHCP, reboot and ERP readiness checks. All 15 jobs in the package regression ran successfully, including the WebGUI tests for numeric counters and invalid intervals. [CE 2.9.1](https://github.com/allanlopesprado/pfsense-sdwan/actions/runs/45072655259) · [CE 2.9.2](https://github.com/allanlopesprado/pfsense-sdwan/actions/runs/45072656938) · [Package checks](https://github.com/allanlopesprado/pfsense-sdwan/actions/runs/45072648563)
+
 ## Two-WAN service checks and PF verification in the 0.4.29 candidate
 
 The same destination IP received DNS A, DNS AAAA and HTTPS probes through both WANs. The peer counted packets by ingress interface and source. Each CE version ran 28 paired checks. No probe reached the peer with crossed FIBs or after a reboot without the provisioned FIB routes. An absent AAAA record, an HTTPS 200 with the wrong readiness token, and a TLS hostname mismatch each produced the expected failure.
