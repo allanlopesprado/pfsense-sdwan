@@ -123,6 +123,14 @@ function is_service_running($name): bool {
 }
 function get_interface_gateway($interface) { return config_get_path('fixture_dynamic_targets', [])[$interface] ?? null; }
 function get_interface_gateway_v6($interface) { return get_interface_gateway($interface); }
+if (isset($request['interface_counters'])) {
+	function get_real_interface($interface, $family, $real, $flush) {
+		return config_get_path('interfaces', [])[$interface]['if'] ?? null;
+	}
+	function pfSense_get_interface_stats($device) {
+		return $GLOBALS['request']['interface_counters'][$device] ?? null;
+	}
+}
 if ($request['steering_abi'] ?? false) {
 	// Emulate the optional hook in the WebGUI test. A separate test exercises the actual core patch.
 	function filter_sdwan_binding_api() { return 1; }

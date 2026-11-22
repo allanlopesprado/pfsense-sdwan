@@ -1,10 +1,12 @@
+from contextlib import redirect_stdout
 import importlib.util
 from io import StringIO
 import json
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 
 spec = importlib.util.spec_from_file_location("benchmark", Path(__file__).with_name("ce-ab-benchmark.py"))
@@ -71,6 +73,42 @@ class ApplicationBenchmarkTest(unittest.TestCase):
             peer.readline.side_effect = TimeoutError
             self.assertEqual(benchmark.transaction("192.0.2.162", b"marker", .1),
                              {"status": "timeout", "stage": "reply"})
+
+    def test_binding_activation_errors_are_reported_outside_steady_scoring(self):
+        with TemporaryDirectory() as path:
+            output = Path(path)
+            ce = SimpleNamespace(LAB="/lab", command=Mock(), wait_paths=Mock(), loaded=Mock(), assert_rules=Mock())
+            experiment = SimpleNamespace(ce=ce, qemu=None, pair=1, mode="native", activations=[],
+                                         clients={}, output=output, digest="fixture", activation_file=StringIO(),
+                                         options=SimpleNamespace(ce_version="2.9.2", pairs=1, soak_hours=0,
+                                                                 recovery_hold_seconds=15))
+            with patch.object(benchmark.time, "monotonic_ns", side_effect=(300_000_000, 700_000_000)):
+                benchmark.Experiment.activate(experiment, "sdwan")
+            ce.command.assert_called_once_with(None, "php /lab/ce291-guest.php bind")
+            ce.wait_paths.assert_called_once_with(None, "benchmark bind", {"G": "GW_A", "B": "GW_A"})
+            ce.assert_rules.assert_called_once_with(ce.loaded.return_value, {"G": "GW_A", "B": "GW_A"})
+            events = [json.loads(line) for line in experiment.activation_file.getvalue().splitlines()]
+            self.assertEqual([entry["event"] for entry in events], ["start", "end"])
+            self.assertTrue(events[1]["verified"])
+
+            experiment.phases = [{"pair": 1, "mode": "sdwan", "phase": "baseline", "start_ns": 700_000_000,
+                                  "end_ns": 900_000_000, "expected": {name: "peer" for name in benchmark.TARGETS}}]
+            rows = [record(280, 315), record(305, 320, "peer"), record(400, 450) | {"stage": "connect"},
+                    record(500, 550) | {"stage": "reply"}, record(699, 720), record(880, 895, "peer")]
+            for flow in benchmark.TARGETS:
+                (output / f"{flow}.ndjson").write_text("".join(json.dumps(row) + "\n" for row in rows),
+                                                       encoding="utf-8")
+            (output / "resources.ndjson").touch()
+            with redirect_stdout(StringIO()):
+                benchmark.Experiment.summarize(experiment)
+            summary = json.loads((output / "summary.json").read_text(encoding="utf-8"))
+            self.assertEqual(summary["activations"][0]["duration_ms"], 400)
+            self.assertEqual(summary["activations"][0]["flows"]["erp"], {
+                "attempts": 3, "successful_replies": 1, "excluded_boundary_attempts": 1,
+                "errors": {"connect_timeout": 1, "reply_timeout": 1},
+            })
+            self.assertEqual(summary["tail_mismatches"], [])
+            self.assertTrue(all(row["attempts"] == 1 and row["lost_or_invalid"] == 0 for row in summary["aggregates"]))
 
     def test_freebsd_resource_query_uses_one_header_assignment_per_option(self):
         class Fixture:

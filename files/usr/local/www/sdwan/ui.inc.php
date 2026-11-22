@@ -56,6 +56,56 @@ function sdwan_ui_snapshot(array $config, ?array $inventory = null): ?array {
 	return sdwan_current_snapshot($config, $inventory ?? sdwan_gateways());
 }
 
+/* Read native interface counters for Diagnostics without involving the observer or PF. */
+function sdwan_ui_traffic_sample(array $policy, array $members, array $inventory, string $revision): array {
+	$sample = ['revision' => $revision, 'interfaces' => new stdClass()];
+	if (!function_exists('get_real_interface') || !function_exists('pfSense_get_interface_stats')) {
+		return $sample;
+	}
+	$paths = $devices = [];
+	foreach ((array)($policy['members'] ?? []) as $name) {
+		$gateway = is_string($name) ? ($members[$name]['gateway'] ?? null) : null;
+		$path = is_string($gateway) ? ($inventory[$gateway] ?? []) : [];
+		$interface = $path['interface'] ?? null;
+		$family = $path['family'] ?? null;
+		if (!is_string($interface) || $interface === '' || !in_array($family, ['inet', 'inet6'], true) ||
+		    isset($paths[$interface][$family])) {
+			continue;
+		}
+		$paths[$interface][$family] = true;
+		try {
+			$device = get_real_interface($interface, $family, false, true);
+			if (!is_string($device) || !preg_match('/\A[A-Za-z0-9_][A-Za-z0-9_.:-]{0,14}\z/', $device) ||
+			    isset($devices[$device])) {
+				continue;
+			}
+			$devices[$device] = true;
+			$stats = @pfSense_get_interface_stats($device);
+			$now = hrtime(true);
+		} catch (Throwable) {
+			continue;
+		}
+		if (!is_array($stats) || !is_int($now) || $now < 0) {
+			continue;
+		}
+		$row = ['at_ns' => (string)$now];
+		foreach (['inbytes', 'outbytes'] as $field) {
+			$value = $stats[$field] ?? null;
+			if (!is_int($value) && !is_string($value)) {
+				continue 2;
+			}
+			$decimal = (string)$value;
+			if (!preg_match('/\A(?:0|[1-9][0-9]{0,19})\z/', $decimal) ||
+			    (strlen($decimal) === 20 && strcmp($decimal, '18446744073709551615') > 0)) {
+				continue 2;
+			}
+			$row[$field] = $decimal;
+		}
+		$sample['interfaces']->{$device} = $row;
+	}
+	return $sample;
+}
+
 function sdwan_ui_empty(string $message, int $columns): void {
 	echo '<tr><td colspan="' . $columns . '" class="text-center">' . sdwan_ui_escape($message) . '</td></tr>';
 }

@@ -12,6 +12,7 @@ Each successful transaction includes the return path. The time origin for an int
 | `phases.csv` | Per-phase raw counts, expected source, addresses seen by the peer, first successful reply, and first reply from the expected WAN. |
 | `erp.ndjson` and `backup.ndjson` | Start/end timestamps, observed source, and the connection, send, or reply stage for socket errors. |
 | `phases.ndjson` | Fault and recovery boundaries, loaded PF rules, and the observer snapshot at the end of each phase. |
+| `activations.ndjson` | Mode change boundaries and PF confirmation. The summary reports separate per-flow errors for these windows. |
 | `resources.ndjson` | Periodic worker PID, `ps` CPU percentage, and resident memory in KiB. |
 | `sw-out*-erp.pcap*` | Optional bounded captures of synthetic ERP TCP on the LAN and both WANs. Use `wall_start_ns` to correlate a socket error with packets. |
 

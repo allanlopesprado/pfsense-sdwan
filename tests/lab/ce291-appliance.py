@@ -777,7 +777,7 @@ def acceptance(qemu, cleanup, provider, *, cold_restart):
     print("NATIVE_AND_PACKAGE_ROLLBACK_OK", flush=True)
 
 
-def install_bound_candidate(qemu):
+def install_candidate(qemu):
     package = f"{LAB}/candidate.pkg"
     command(qemu, f'test "$(sha256 -q {package})" = "$(cat {LAB}/candidate.sha256)"')
     version = command(qemu, f"pkg query -F {package} '%v'")
@@ -785,6 +785,11 @@ def install_bound_candidate(qemu):
     command(qemu, f"php {LAB}/ce291-guest.php settings")
     stock_hash = command(qemu, "sha256 -q /etc/inc/filter.inc")
     command(qemu, f"cp {LAB}/filter*.inc /etc/inc/; /usr/local/etc/rc.d/sdwand.sh restart")
+    return version, stock_hash
+
+
+def install_bound_candidate(qemu):
+    version, stock_hash = install_candidate(qemu)
     command(qemu, f"php {LAB}/ce291-guest.php bind")
     return version, stock_hash
 

@@ -140,6 +140,48 @@ def screenshots(directory, www, pages):
                     assert 'data-sdwan-focus="pass"' in output.stdout, (name, theme, output.stdout.split("<body")[1][:140])
                 print("ok - native startup clears the System Logs outline, preserves the policy field and keeps the button focusable")
 
+                sample_test = """
+                    <script>
+                    async function testInterfaceTraffic() {
+                        const sample = (revision, at_ns, inbytes) => ({revision, interfaces: {
+                            igb0: {at_ns, inbytes, outbytes: '0'}
+                        }});
+                        const before = sample('revision', '1000000000', '9007199254740993');
+                        const samples = [before, sample('revision', '3000000000', '9007199254990993'),
+                            before, sample('revision', '3000000000', '3'),
+                            before, sample('changed', '3000000000', '9007199254990993')];
+                        window.fetch = async () => ({ok: true, json: async () => samples.shift()});
+                        events.forEach(callback => callback());
+                        const button = document.getElementById('sdwan-traffic-measure');
+                        const results = document.getElementById('sdwan-traffic-results');
+                        const measure = () => new Promise(resolve => {
+                            const watcher = new MutationObserver(() => {
+                                if (!button.disabled) { watcher.disconnect(); resolve(); }
+                            });
+                            watcher.observe(button, {attributes: true, attributeFilter: ['disabled']});
+                            button.click();
+                        });
+                        await measure();
+                        const correct = !results.hidden && [...results.querySelectorAll('tbody td')]
+                            .map(cell => cell.textContent).join(',') === '1 Mbit/s,0 bit/s';
+                        await measure();
+                        const rejectsReset = results.hidden;
+                        await measure();
+                        document.body.dataset.sdwanTraffic = correct && rejectsReset && results.hidden &&
+                            samples.length === 0 ? 'pass' : 'fail';
+                    }
+                    testInterfaceTraffic();
+                    </script>
+                """
+                path = site / "diagnostics-traffic.html"
+                path.write_text(pages["diagnostics"].replace("</body>", sample_test + "</body>"), encoding="utf-8")
+                output = subprocess.run([chrome, "--headless", "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage",
+                                         f"--user-data-dir={folder}/chrome", "--virtual-time-budget=6000", "--dump-dom",
+                                         f"http://127.0.0.1:{server.server_port}/{path.name}"],
+                                        capture_output=True, text=True, check=True, timeout=35)
+                assert 'data-sdwan-traffic="pass"' in output.stdout
+                print("ok - the browser calculates live interface rates and rejects resets and changed policies")
+
                 page = pages["status"].replace("</body>",
                     '<script>document.querySelector(\'button[form="sdwan-system-logs"]\').click();</script></body>')
                 (site / "system-logs-click.html").write_text(page)
@@ -559,6 +601,25 @@ def run(php, classes, screenshot_dir=None):
         assert numeric_options == [(":1", False), (":01", True)], numeric_options
         assert "no longer configured" in request("diagnostics", get={"policy": "deleted"})
         assert 'form="sdwan-system-logs"' not in request("diagnostics", privileges={"/status_logs.php": False})
+        sample_traffic = {"policy": ":VOICE", "traffic": "sample"}
+        inventory = {**native, "interfaces": {"wan": {"enable": "", "if": "igb0"}}}
+        counters = {"igb0": {"inbytes": "18446744073709551615", "outbytes": 0},
+                    "lan0": {"inbytes": 100, "outbytes": 200}}
+        traffic = json.loads(request("diagnostics", native=inventory, get={**sample_traffic, "interface": "lan0"},
+                                     interface_counters=counters, service_state="stopped"))
+        assert re.fullmatch(r"[a-f0-9]{64}", traffic["revision"])
+        assert list(traffic["interfaces"]) == ["igb0"]
+        assert traffic["interfaces"]["igb0"]["at_ns"].isdigit()
+        assert traffic["interfaces"]["igb0"]["inbytes"] == "18446744073709551615"
+        assert traffic["interfaces"]["igb0"]["outbytes"] == "0"
+        for options in ({}, {"interface_counters": {"igb0": {"inbytes": "18446744073709551616", "outbytes": 0}}},
+                        {"interface_counters": {"igb0": {"inbytes": 100}}}):
+            missing = json.loads(request("diagnostics", native=inventory, get=sample_traffic, **options))
+            assert missing["interfaces"] == {}
+        assert not request("diagnostics", native=inventory, get={**sample_traffic, "policy": ":deleted"},
+                           interface_counters=counters)
+        assert 'id="sdwan-traffic-measure"' not in diagnostics
+        print("ok - interface sampling is read-only, policy-scoped and independent of the observer")
         updates = request("updates")
         assert Choices(updates).posts == 1 and len(Choices(updates).tokens) == 1
         assert "/pkg_mgr_installed.php" not in Choices(updates).links and "Installed Packages" not in updates
@@ -665,7 +726,8 @@ def run(php, classes, screenshot_dir=None):
                                  "selected": "Fiber", "path_status": "degraded", "eligible_count": 1, "shared_underlay": False}}}
             demo_native = {**native, "gateways/gateway_item": [
                 {"interface": "wan", "name": member["gateway"]} for member in demo["members"]]}
-            pages = {page: request(page, config=demo, native=demo_native, snapshot=demo_snapshot)
+            pages = {page: request(page, config=demo, native=demo_native, snapshot=demo_snapshot,
+                                   **({"interface_counters": {}} if page == "diagnostics" else {}))
                      for page in ("status", "diagnostics", "members", "updates")}
             pages["members-edit"] = request("members", get={"edit": "1"})
             pages["updates"] = offered.split("</html>", 1)[0] + "</html>"
@@ -738,6 +800,12 @@ def run(php, classes, screenshot_dir=None):
         active = {**fixture, "gateways/sdwan_bindings": data, "gateways/sdwan_bindings/item": data["item"]}
         active_page = request("forwarding", native=active, steering_abi=True)
         assert "Active filter" in active_page and "PBR" in active_page and 'value="unbind"' in active_page
+        assert "No current observation" in active_page
+        unobserved = {"members": {"1": sample, "01": sample}, "policies": {"VOICE": {
+            "selected": "1", "reason": "Lowest configured cost within SLA", "candidates": {"1": "Eligible", "01": "Eligible"},
+        }}}
+        activating = request("forwarding", native=active, steering_abi=True, snapshot=unobserved)
+        assert "Waiting for an observation of this binding" in activating
         edit_page = request("slas", native=active, steering_abi=True, get={"edit": "01"})
         edit_controls = Choices(edit_page)
         tuning = {"action": "save", "original": "01", "name": "01", "latency_ms": "35", "rttsd_ms": "1.5", "loss_pct": "1",
