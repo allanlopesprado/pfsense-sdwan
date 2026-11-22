@@ -9,6 +9,7 @@ from pathlib import Path
 import re
 import select
 import socket
+import struct
 import subprocess
 import sys
 import tempfile
@@ -55,35 +56,52 @@ def capture_peer(path):
             while True:
                 ready, _, _ = select.select(captures, [], [])
                 for listener in ready:
-                    request = captured_request(listener.recv(65536))
+                    frame = listener.recv(65536)
+                    captured_at = time.monotonic_ns()
+                    request = captured_request(frame)
                     if request:
                         iface = PEER_INTERFACES[captures.index(listener)]
-                        print(json.dumps([iface, *request]), file=report)
+                        print(json.dumps([captured_at, iface, *request]), file=report)
         finally:
             for listener in captures:
                 listener.close()
 
 
-def assert_peer(capture, marker, expected, targets):
+def assert_peer(capture, marker, expected, targets, stopping_at=None):
     deadline = time.monotonic() + 4
     while True:
-        observed = set()
+        observed = {}
         for line in capture.read_text(encoding="utf-8").splitlines(keepends=True):
             if not line.endswith("\n"):
                 continue
-            interface, source, destination, payload = json.loads(line)
+            captured_at, interface, source, destination, payload = json.loads(line)
             if payload == marker and destination in targets:
-                observed.add((interface, source, destination))
-        if observed == expected:
+                observed.setdefault((interface, source, destination), captured_at)
+        if observed.keys() == expected:
             return
-        if observed - expected or time.monotonic() >= deadline:
-            raise AssertionError((marker, observed, expected))
+        unexpected = observed.keys() - expected
+        if unexpected or time.monotonic() >= deadline:
+            seconds_from_stop = (None if stopping_at is None else
+                                 {path: (observed[path] - stopping_at) / 1e9 for path in unexpected})
+            raise AssertionError((marker, set(observed), expected, "seconds from IPS stop", seconds_from_stop))
         time.sleep(0.1)
+
+
+def flow(target):
+    with socket.create_connection((target, 7), timeout=3) as conn:
+        conn.sendall(sys.stdin.buffer.readline())
+        try:
+            with conn.makefile("rb") as peer:
+                print(peer.readline().decode().strip())
+        except TimeoutError:
+            # A normal close can keep an unacknowledged payload queued for
+            # retransmission after the deliberately stopped inspector is gone.
+            conn.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))
 
 
 def probe(ce, label, expected):
     def request(target):
-        return ce.run(*ce.in_ns("sdwan-client", sys.executable, ce.SCRIPT, "flow", target),
+        return ce.run(*ce.in_ns("sdwan-client", sys.executable, SCRIPT, "flow", target),
                       input=label + "\n", capture_output=True).stdout.strip()
 
     with ThreadPoolExecutor(max_workers=2) as workers:
@@ -225,10 +243,13 @@ def inspection(ce, qemu, cleanup):
         ce.wait_paths(qemu, "inline failover after blocked marker", remapped)
         ce.management("inline failover", certificate)
         assert ce.route_and_nat(qemu) == baseline
+        for marker, expected in denied:
+            assert_peer(capture, marker, expected, (ce.ERP, ce.BACKUP))
     except Exception:
         print(ce.command(qemu, f"tail -n 30 {WORK}/suricata.log || :"), flush=True)
         raise
     finally:
+        stopping_at = time.monotonic_ns()
         try:
             stop_engine(ce, qemu)
         finally:
@@ -239,7 +260,7 @@ def inspection(ce, qemu, cleanup):
     assert_peer(capture, marker, {(PEER_INTERFACES[0], ce.A, target) for target in (ce.ERP, ce.BACKUP)},
                 (ce.ERP, ce.BACKUP))
     for marker, expected in denied:
-        assert_peer(capture, marker, expected, (ce.ERP, ce.BACKUP))
+        assert_peer(capture, marker, expected, (ce.ERP, ce.BACKUP), stopping_at=stopping_at)
     ce.management("after stopping inline inspection", certificate)
     assert ce.route_and_nat(qemu) == baseline
     print("CE_VIRTIO_NETMAP_IPS_SD_WAN_PASSED", flush=True)
@@ -248,6 +269,9 @@ def inspection(ce, qemu, cleanup):
 def main():
     if sys.argv[1:2] == ["capture-peer"]:
         capture_peer(Path(sys.argv[2]))
+        return
+    if sys.argv[1:2] == ["flow"]:
+        flow(sys.argv[2])
         return
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("image", type=Path, help="disposable raw disk staged for inspection")
