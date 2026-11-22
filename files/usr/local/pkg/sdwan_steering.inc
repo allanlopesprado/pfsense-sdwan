@@ -91,6 +91,7 @@ function sdwan_steering_native(?array $inventory = null): array {
 	unset($gateway);
 	$native['default4'] = config_get_path('gateways/defaultgw4', '');
 	$native['default6'] = config_get_path('gateways/defaultgw6', '');
+	$native['statepolicy'] = config_get_path('system/statepolicy', 'if-bound');
 	$native['filtermode'] = config_get_path('ipsec/filtermode', '');
 	$policy_children = array_filter($native['phase2'], static fn($child) =>
 	    in_array($child['mode'] ?? '', ['tunnel', 'tunnel6'], true));
@@ -453,6 +454,9 @@ function sdwan_steering_runtime_signature(array $snapshot, array $inventory): st
 		foreach ($pool as $name) {
 			if (isset($inventory[$name])) {
 				$paths[$name] = sdwan_steering_resolve_path($inventory[$name]);
+				if ($paths[$name] !== null && ($inventory[$name]['address'] === 'dynamic' || !empty($inventory[$name]['dynamic_source']))) {
+					$paths[$name]['dynamic_identity'] = sdwan_dynamic_gateway_identity($inventory[$name], $paths[$name]['device']);
+				}
 			}
 		}
 	}
@@ -608,6 +612,25 @@ function sdwan_steering_loaded_scope(string $rule): ?string {
 	return preg_match('/^inet6?\s/', $selectors) ? $parts[1] . ' ' . trim(preg_replace('/\s+/', ' ', $selectors)) : null;
 }
 
+function sdwan_steering_loaded_pass_metadata(string $line, string $rule, array $pair, array $pool, string $group): bool {
+	if (isset($pair['gateway_tiers'])) {
+		$tier = $pair['gateway_tiers'][$pool[0]] ?? null;
+		preg_match_all('/\blabel "((?:[^"\\\\]|\\\\.)*)"/', $line, $labels);
+		$gateway_labels = array_values(array_filter($labels[1], static fn($label) => str_starts_with($label, 'gw=')));
+		if ($tier === null || $gateway_labels !== ["gw={$tier}:{$group}"]) {
+			return false;
+		}
+	}
+	if (isset($pair['state_policy']) && preg_match('/\bkeep state\s+\(([^)]*)\)/', $rule, $options)) {
+		foreach (array_map('trim', explode(',', $options[1])) as $option) {
+			if (in_array($option, ['if-bound', 'floating'], true) && $option !== $pair['state_policy']) {
+				return false;
+			}
+		}
+	}
+	return true;
+}
+
 function sdwan_steering_pf_status(array $binding, array $state, array $inventory, ?array $lines,
     ?array $rule_pairs = null): string {
 	if ($lines === null) {
@@ -663,7 +686,8 @@ function sdwan_steering_pf_status(array $binding, array $state, array $inventory
 				return 'pending';
 			}
 		} elseif (!sdwan_steering_loaded_path_matches($rule, $gateways) || ($rule_pairs !== null &&
-		    preg_match('/\b(?:no|modulate|synproxy) state(?:\s|$)/', $rule))) {
+		    (preg_match('/\b(?:no|modulate|synproxy) state(?:\s|$)/', $rule) ||
+		    !sdwan_steering_loaded_pass_metadata($line, $rule, $rule_pairs[$identifier] ?? [], $pool, $binding['group'] ?? '')))) {
 			return 'pending';
 		}
 		$matched[$identifier] = [$position, $rule_pairs === null ? null : sdwan_steering_loaded_scope($rule)];

@@ -29,10 +29,14 @@ foreach ($sources as $name) {
         );
     } elseif ($name === 'sdwan_probe.inc') {
         $code = str_replace(
-            ["!is_executable('/sbin/route')", "!is_executable('/bin/timeout')", "exec('/bin/timeout 0.3 /sbin/route"],
-            ['false', 'false', "fixture_route_get('/bin/timeout 0.3 /sbin/route"],
+            ["!is_executable('/sbin/route')", "!is_executable('/bin/timeout')", "exec('/bin/timeout"],
+            ['false', 'false', "fixture_route_get('/bin/timeout"],
             $code,
+            $changes,
         );
+        if ($changes !== 3) {
+            throw new RuntimeException('Probe fixture could not isolate every native route boundary.');
+        }
     }
     file_put_contents($directory . '/' . $name, $code);
 }
@@ -185,6 +189,15 @@ fixture_publish($settings, $wire, $observations);
 fixture_append($result, 'lease_new_poll_healthy', 'current/A', fixture_decision($settings, $wire, $rule));
 $current['gateways/gateway_item'][0]['monitor'] = '192.0.2.4';
 fixture_append($result, 'saved_monitor_change_control', 'stale/none', fixture_decision($settings, $wire, $rule));
+$current = $initial;
+$current['gateways/gateway_item'][0]['dpinger_dont_add_static_route'] = '';
+fixture_append($result, 'saved_per_gateway_monitor_route_mode_change', 'stale/none', fixture_decision($settings, $wire, $rule));
+$current = $initial;
+$current['gateways/gateway_item'][0]['gateway'] = '192.0.2.1';
+$wire = fixture_wire_binding($settings);
+fixture_publish($settings, $wire, $observations);
+$current['fixture/source/em0'] = '192.0.2.11';
+fixture_append($result, 'dynamic_source_with_static_next_hop', 'stale/none', fixture_decision($settings, $wire, $rule));
 
 // Change only the saved route used by an existing service check.
 $current = $initial;

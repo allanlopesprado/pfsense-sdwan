@@ -323,7 +323,8 @@ function sdwan_preflight_native_rules(array $native, string $group, string $fami
 		}
 		$trackers[] = $tracker;
 		$rule_pairs[$tracker] = ['guard' => (string)$guard_id, 'action' => $guard['type'],
-		    'explicit_tcp_flags' => !empty($rule['tcpflags2'])];
+		    'explicit_tcp_flags' => !empty($rule['tcpflags2']),
+		    'state_policy' => !empty($rule['statepolicy']) ? $rule['statepolicy'] : ($native['statepolicy'] ?? null)];
 		unset($rule['created'], $rule['updated'], $rule['descr']);
 		$rule['tracker'] = $tracker;
 		$scope[] = [$rule, $device, (string)$guard_id, $guard['type']];
@@ -474,6 +475,10 @@ function sdwan_steering_preflight(array $config, string $policy, string $group, 
 	}
 	$group_config = array_intersect_key($groups[0], array_flip(['name', 'item', 'trigger', 'keep_failover_states']));
 	$scope = sdwan_preflight_canonical([$group_config, $rules['scope'], $paths]);
+	foreach ($rules['rule_pairs'] as &$pair) {
+		$pair['gateway_tiers'] = $group_members;
+	}
+	unset($pair);
 	return ['errors' => [], 'binding' => [
 		'rules_revision' => hash('sha256', json_encode($scope, JSON_THROW_ON_ERROR)),
 		'group' => $group, 'policy' => $policy, 'gateways' => array_map('strval', array_keys($paths)),

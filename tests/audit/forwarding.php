@@ -57,7 +57,8 @@ $guard = 'block drop in quick on em1 inet proto tcp from 192.168.1.10 to any por
 	'label "id=771292102" label "tags=user_rule" label "descr=Lab SD-WAN fallback block" ridentifier 771292102';
 $logged = str_replace('pass in quick', 'pass in log (all, to pflog0) quick', $pass) . ' dnpipe 10';
 $logged = str_replace('descr=Lab SD-WAN TCP 18080', 'descr=Lab rule with ridentifier 441', $logged);
-$rule_pairs = ['771292101' => ['guard' => '771292102', 'action' => 'block']];
+$rule_pairs = ['771292101' => ['guard' => '771292102', 'action' => 'block', 'state_policy' => 'if-bound',
+	'gateway_tiers' => ['WAN1' => '1', 'WAN2' => '1']]];
 $status = static fn(array $selection, ?array $rules): string =>
 	sdwan_steering_pf_status($binding, $selection, $inventory, $rules, $rule_pairs);
 
@@ -94,6 +95,14 @@ $pass_mutations = [
 foreach ($pass_mutations as $case => [$old, $changed]) {
 	$rows[] = audit_case($case, 'pending', $status($state, [str_replace($old, $changed, $pass), $guard]), 'applied');
 }
+$rows[] = audit_case('gateway_label_absent', 'pending',
+	$status($state, [str_replace('label "gw=1:LAB_SD" ', '', $pass), $guard]));
+$rows[] = audit_case('duplicate_gateway_label', 'pending',
+	$status($state, [str_replace('label "gw=1:LAB_SD"', 'label "gw=1:LAB_SD" label "gw=2:LAB_SD"', $pass), $guard]));
+$floating_pairs = $rule_pairs;
+$floating_pairs['771292101']['state_policy'] = 'floating';
+$rows[] = audit_case('native_floating_state_policy', 'applied', sdwan_steering_pf_status($binding, $state,
+	$inventory, [str_replace('keep state (if-bound)', 'keep state (floating)', $pass), $guard], $floating_pairs));
 
 $rows[] = audit_case('duplicate_tracker_wrong_ingress', 'pending',
 	$status($state, [$pass, str_replace('on em1', 'on em3', $pass), $guard]), 'applied');

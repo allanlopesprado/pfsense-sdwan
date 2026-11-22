@@ -206,6 +206,10 @@ echo "ok - native service shortcut loader renders SD-WAN settings, status and au
 $widget = $temp . '/sdwan.widget.php';
 $source = file_get_contents($www . '/widgets/widgets/sdwan.widget.php');
 file_put_contents($widget, str_replace('/usr/local/pkg/', $local . '/pkg/', $source));
+file_put_contents($temp . '/service-utils.inc', '<?php
+function find_service_by_name($name) { return null; }
+function get_service_status($service) { return false; }
+');
 function widget_request(array $privileges, string $method, array $post, string $sequence, bool $dashboard): array {
 	global $widget, $role;
 	$role = $privileges;

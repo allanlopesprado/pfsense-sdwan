@@ -92,6 +92,7 @@ function sdwan_observe_once(): void {
 		$config = sdwan_get_config();
 		$started = time();
 		$inventory = sdwan_gateways();
+		$inventory_revision = sdwan_gateway_inventory_revision($config, $inventory);
 		$members = array_column($config['members'], 'gateway');
 		$observations = sdwan_gateway_observations($members ?: array_keys($inventory), $inventory);
 		$service_checks = [];
@@ -101,7 +102,10 @@ function sdwan_observe_once(): void {
 		}
 		$snapshot = sdwan_evaluate($config, $observations, $started, $inventory, $service_checks);
 		$snapshot['config_revision'] = sdwan_config_revision($config);
-		$snapshot['gateway_inventory_revision'] = sdwan_gateway_inventory_revision($config, $inventory);
+		if (sdwan_gateway_inventory_revision($config, $inventory) !== $inventory_revision) {
+			throw new RuntimeException('Gateway path changed during observation');
+		}
+		$snapshot['gateway_inventory_revision'] = $inventory_revision;
 		if (!$members) {
 			// Show native gateways on the dashboard before any members are configured.
 			$snapshot['gateways'] = array_map('sdwan_member_sample', $observations);

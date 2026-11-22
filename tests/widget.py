@@ -117,8 +117,8 @@ echo json_encode([http_response_code() ?: 200, $body, $sdwan_title_link,
         register_binding(policy, group, 300 + index, f"203.0.113.{index}")
     fixture["gateways/sdwan_bindings"] = {"item": bindings}
     fixture["fixture_pf_rules"] = [
-        'pass in quick on igb2 route-to (igb1 198.51.100.1) inet from 203.0.113.1 to any label "descr=Voice" ridentifier 301',
-        'pass in quick on igb2 route-to (igb0 192.0.2.1) inet from 203.0.113.2 to any ridentifier 302',
+        'pass in quick on igb2 route-to (igb1 198.51.100.1) inet from 203.0.113.1 to any label "gw=1:LAN_SDWAN" label "descr=Voice" ridentifier 301',
+        'pass in quick on igb2 route-to (igb0 192.0.2.1) inet from 203.0.113.2 to any label "gw=1:PRIVATE_VPN" ridentifier 302',
         'block drop in quick on igb2 inet from 203.0.113.3 to any ridentifier 303',
         *[f'block drop in quick on igb2 inet from 203.0.113.{index} to any ridentifier {400 + index}'
           for index in (1, 2, 3)],
@@ -218,7 +218,8 @@ echo json_encode([http_response_code() ?: 200, $body, $sdwan_title_link,
     assert "No SLA backup" not in row(render("ajax")[1], "Voice")
     save()
 
-    pool = 'pass in quick on igb2 route-to { (igb1 198.51.100.1), (igb0 192.0.2.1) } round-robin inet from 203.0.113.1 to any ridentifier 301'
+    pool = ('pass in quick on igb2 route-to { (igb1 198.51.100.1), (igb0 192.0.2.1) } round-robin '
+            'inet from 203.0.113.1 to any label "gw=1:LAN_SDWAN" ridentifier 301')
     fixture["fixture_pf_rules"][0] = pool
     config.write_text(json.dumps(fixture))
     multipath = dict(snapshot["steering"], LAN_SDWAN=dict(snapshot["steering"]["LAN_SDWAN"], pool=["GW_B", "GW_A"]))
@@ -231,7 +232,7 @@ echo json_encode([http_response_code() ?: 200, $body, $sdwan_title_link,
 
     register_binding("Voice", "OPT_SDWAN", 305, "203.0.113.5")
     fixture["fixture_pf_rules"].extend([
-        'pass in quick on igb2 route-to (igb0 192.0.2.1) inet from 203.0.113.5 to any ridentifier 305',
+        'pass in quick on igb2 route-to (igb0 192.0.2.1) inet from 203.0.113.5 to any label "gw=1:OPT_SDWAN" ridentifier 305',
         'block drop in quick on igb2 inet from 203.0.113.5 to any ridentifier 405',
     ])
     config.write_text(json.dumps(fixture))

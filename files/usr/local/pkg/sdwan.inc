@@ -167,6 +167,8 @@ function sdwan_gateways(): array {
 		$ip = explode('%', $address, 2)[0];
 		$family = filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6) ? 'inet6' :
 		    (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) ? 'inet' : ($gateway['ipprotocol'] ?? 'inet'));
+		$source_type = $interfaces[$interface][$family === 'inet6' ? 'ipaddrv6' : 'ipaddr'] ?? '';
+		$dynamic_source = in_array($source_type, ['dhcp', 'pppoe', 'ppp', 'pptp', 'l2tp', 'dhcp6', 'slaac', 'track6', '6rd'], true);
 		$probe = [];
 		foreach (['latencyhigh', 'latencylow', 'losshigh', 'losslow', 'interval', 'loss_interval',
 		    'time_period', 'alert_interval', 'data_payload'] as $setting) {
@@ -181,9 +183,11 @@ function sdwan_gateways(): array {
 			...((int)($gateway['weight'] ?? 1) !== 1 ? ['weight' => (int)$gateway['weight']] : []),
 			'transport' => str_starts_with($device, 'ipsec') ? ($transports[$device] ?? '') : $interface,
 			'address' => $address,
+			...($dynamic_source ? ['dynamic_source' => true] : []),
 			'monitor' => !empty($gateway['monitor']) ? $gateway['monitor'] : $address,
 			'family' => $family,
 			'monitor_disabled' => isset($gateway['monitor_disable']),
+			...(isset($gateway['dpinger_dont_add_static_route']) ? ['monitor_route_disabled' => true] : []),
 			'action_disabled' => isset($gateway['action_disable']),
 			'force_down' => isset($gateway['force_down']),
 		];
@@ -192,13 +196,70 @@ function sdwan_gateways(): array {
 	return $inventory;
 }
 
+/* A DHCP or PPP renewal can change the source/device/next hop without an XML edit. */
+function sdwan_dynamic_gateway_identity(array $gateway, ?string $device = null): array {
+	$family = $gateway['family'];
+	$interface = $gateway['interface'];
+	$device ??= function_exists('get_real_interface') ? get_real_interface($interface, $family, false, true) : null;
+	$source_lookup = $family === 'inet6' ? 'find_interface_ipv6' : 'find_interface_ip';
+	$gateway_lookup = $family === 'inet6' ? 'get_interface_gateway_v6' : 'get_interface_gateway';
+	$source = is_string($device) && $device !== '' && function_exists($source_lookup) ? $source_lookup($device, true) : null;
+	$hop = $gateway['address'];
+	if ($hop === 'dynamic') {
+		$hop = function_exists($gateway_lookup) ? $gateway_lookup($interface) : null;
+	}
+	$link_local = $family === 'inet6' && is_string($device) && $device !== '' && function_exists('find_interface_ipv6_ll')
+	    ? find_interface_ipv6_ll($device, true) : null;
+	return [$device, $source, $hop, $link_local];
+}
+
+/* Service checks require a host route. Hash the configured literal routes to
+ * those destinations, without invalidating samples for unrelated routes. */
+function sdwan_probe_host_routes(array $members): array {
+	$targets = [];
+	foreach ($members as $member) {
+		foreach (['probe_primary', 'probe_secondary'] as $field) {
+			if (!isset($member[$field])) {
+				continue;
+			}
+			require_once(__DIR__ . '/sdwan_probe.inc');
+			$target = sdwan_probe_target($member[$field]);
+			if ($target !== null) {
+				$targets[$target['address']] = $target['family'] === 'inet6' ? 128 : 32;
+			}
+		}
+	}
+	$routes = [];
+	if ($targets) {
+		foreach ((array)config_get_path('staticroutes/route', []) as $route) {
+			[$address, $prefix] = array_pad(explode('/', (string)($route['network'] ?? ''), 2), 2, null);
+			$packed = @inet_pton($address);
+			$canonical = $packed === false ? '' : inet_ntop($packed);
+			if (isset($targets[$canonical]) && ($prefix === null ||
+			    (preg_match('/\A[0-9]{1,3}\z/', $prefix) && (int)$prefix === $targets[$canonical]))) {
+				$routes[] = [$canonical, $route['gateway'] ?? null, isset($route['disabled'])];
+			}
+		}
+	}
+	return $routes;
+}
+
 /* Only changes that affect a monitored gateway invalidate its snapshot. */
 function sdwan_gateway_inventory_revision(array $config, array $inventory): string {
 	$members = array_column($config['members'], 'gateway');
 	$monitored = $members ? array_intersect_key($inventory, array_fill_keys($members, true)) : $inventory;
+	$dynamic = [];
+	foreach ($monitored as $name => $gateway) {
+		if (($gateway['address'] ?? null) === 'dynamic' || !empty($gateway['dynamic_source'])) {
+			$dynamic[$name] = sdwan_dynamic_gateway_identity($gateway);
+		}
+	}
+	$probe_routes = sdwan_probe_host_routes($config['members']);
 	return sdwan_config_revision([
 		'gateways' => $monitored,
 		'monitor_routes_disabled' => config_get_path('system/dpinger_dont_add_static_routes') !== null,
+		...($dynamic ? ['live_gateways' => $dynamic] : []),
+		...($probe_routes ? ['probe_host_routes' => $probe_routes] : []),
 	]);
 }
 
