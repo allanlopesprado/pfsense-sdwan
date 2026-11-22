@@ -38,6 +38,8 @@ d=$(mktemp -d /tmp/sdwan.XXXXXXXX) && (trap 'rm -rf "$d"' EXIT; p="$d/pfSense-pk
 
 If installation defers WebGUI registration, wait for PHP-FPM to return and run `/usr/local/bin/php -f /etc/rc.packages pfSense-pkg-SDWAN POST-INSTALL`. [Lab installation and verification](docs/LAB.md#build-and-install)
 
+The install progress reports the observer's start or restart separately from package registration. Check the SD-WAN Status page for a current observation before using forwarding. If the service action fails, check Status > Services and System Logs.
+
 ## Configure and update
 
 1. Confirm measurements in **Status → Gateways** and add the links under **Services → SD-WAN → Members**.

@@ -17,10 +17,13 @@
 	</service>
 	<custom_php_install_command>
 		sdwan_remove_legacy_service();
-		if (mwexec('/usr/local/etc/rc.d/sdwand.sh status', true) === 0) {
-			mwexec('/usr/local/etc/rc.d/sdwand.sh restart');
+		$sdwan_rc = '/usr/local/etc/rc.d/sdwand.sh';
+		$sdwan_action = mwexec($sdwan_rc . ' status', true) === 0 ? 'restart' : 'start';
+		$sdwan_exit = mwexec($sdwan_rc . ' ' . $sdwan_action);
+		if ($sdwan_exit === 0) {
+			update_status("\nSD-WAN observer {$sdwan_action} requested. Check Services > SD-WAN > Status for a current observation.\n");
 		} else {
-			mwexec('/usr/local/etc/rc.d/sdwand.sh start');
+			update_status("\nSD-WAN observer {$sdwan_action} failed (exit {$sdwan_exit}). Package registration continues. Check Status > Services and System Logs.\n");
 		}
 	</custom_php_install_command>
 </packagegui>

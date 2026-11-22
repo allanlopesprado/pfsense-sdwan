@@ -18,7 +18,8 @@ def check_install_xml(php):
         raise AssertionError("Missing package installation hook")
     # Execute exactly the PHP fragment read by install_package_xml.
     harness = "require " + json.dumps(str(FILES / "usr/local/pkg/sdwan.inc")) + ";\n" + """$calls = [];
-$services = json_decode($argv[2], true, 512, JSON_THROW_ON_ERROR);
+$progress = [];
+$services = json_decode($argv[3], true, 512, JSON_THROW_ON_ERROR);
 $writes = 0;
 function config_get_path($path, $default) {
     if ($path !== 'installedpackages/service') { exit(64); }
@@ -32,18 +33,30 @@ function config_set_path($path, $value) {
 function mwexec($command, $nologentry = false) {
     global $calls, $argv;
     $calls[] = $command;
-    return str_ends_with($command, ' status') ? (int)$argv[1] : 0;
+    return str_ends_with($command, ' status') ? (int)$argv[1] : (int)$argv[2];
 }
-""" + hook + "\necho json_encode([$calls, $services, $writes]);"
+function update_status($message) {
+    $GLOBALS['progress'][] = trim($message);
+}
+""" + hook + "\necho json_encode([$calls, $services, $writes, $progress]);"
     rcfile = "/usr/local/etc/rc.d/sdwand.sh "
     current = [{"name": "other", "rcfile": "other.sh"}, {"name": "sdwan", "rcfile": "sdwand.sh"},
                {"name": "sdwand", "rcfile": "unrelated.sh"}]
     legacy = {"name": "sdwand", "rcfile": "sdwand.sh"}
     for status, action, services, writes in [(0, "restart", [legacy, *current, legacy], 1), (1, "start", current, 0)]:
-        result = subprocess.run([php, "-r", harness, "--", str(status), json.dumps(services)],
-                                check=True, text=True, capture_output=True)
-        if json.loads(result.stdout) != [[rcfile + "status", rcfile + action], current, writes]:
-            raise AssertionError("Unexpected service migration or worker lifecycle during package registration")
+        messages = {
+            0: f"SD-WAN observer {action} requested. Check Services > SD-WAN > Status for a current observation.",
+            1: f"SD-WAN observer {action} failed (exit 1). Package registration continues. "
+               "Check Status > Services and System Logs.",
+            127: f"SD-WAN observer {action} failed (exit 127). Package registration continues. "
+                 "Check Status > Services and System Logs.",
+        }
+        for action_exit, message in messages.items():
+            command = [php, "-r", harness, "--", str(status), str(action_exit), json.dumps(services)]
+            result = subprocess.run(command, check=True, text=True, capture_output=True)
+            expected = [[rcfile + "status", rcfile + action], current, writes, [message]]
+            if json.loads(result.stdout) != expected:
+                raise AssertionError(f"Unexpected {action} result for exit {action_exit}: {result.stdout}")
 
 
 def check_shell_hooks(tmp):
