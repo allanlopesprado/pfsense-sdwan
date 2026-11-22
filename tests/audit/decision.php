@@ -12,6 +12,8 @@ namespace SdwanAuditProbeFixture {
         public static array $routeFlags = [];
         public static int $routeLookups = 0;
         public static int $tcpAttempts = 0;
+        public static bool $tcpRefused = false;
+        public static bool $tcpUnavailable = false;
     }
 
     function hrtime(bool $asNumber = false): int|array {
@@ -63,15 +65,15 @@ namespace SdwanAuditProbeFixture {
             throw new \RuntimeException('The probe did not bind to its expected synthetic source.');
         }
         ++ProbeFixture::$tcpAttempts;
-        return fopen('php://memory', 'w+b');
+        return ProbeFixture::$tcpUnavailable ? false : fopen('php://memory', 'w+b');
     }
 
     function stream_select(&$read, &$write, &$except, ?int $seconds, ?int $microseconds = null): int {
         return count($write);
     }
 
-    function stream_socket_get_name($socket, bool $remote): string {
-        return '198.18.101.21:443';
+    function stream_socket_get_name($socket, bool $remote): string|false {
+        return ProbeFixture::$tcpRefused ? false : '198.18.101.21:443';
     }
 
     function usleep(int $microseconds): void {
@@ -215,16 +217,38 @@ namespace {
             observe_tcp_route_change($routeFlags, $routeFlags)),
         audit_case('probe_route_ignores_flag_order', 'Passed / 1 TCP attempts / 2 route lookups',
             observe_tcp_route_change($routeFlags, 'STATIC,GATEWAY,DONE,HOST,UP')),
-        audit_case('probe_route_loses_host', 'TCP check failed / 1 TCP attempts / 2 route lookups',
-            observe_tcp_route_change($routeFlags, 'UP,GATEWAY,DONE,STATIC')),
-        audit_case('probe_route_becomes_reject', 'TCP check failed / 1 TCP attempts / 2 route lookups',
-            observe_tcp_route_change($routeFlags, $rejectFlags)),
-        audit_case('probe_route_becomes_blackhole', 'TCP check failed / 1 TCP attempts / 2 route lookups',
-            observe_tcp_route_change($routeFlags, 'UP,GATEWAY,HOST,DONE,STATIC,BLACKHOLE')),
-        audit_case('probe_route_loses_up', 'TCP check failed / 1 TCP attempts / 2 route lookups',
-            observe_tcp_route_change($routeFlags, 'GATEWAY,HOST,DONE,STATIC')),
+        audit_case('probe_route_loses_host', 'Path not verified / 1 TCP attempts / 2 route lookups',
+            observe_tcp_route_change($routeFlags, 'UP,GATEWAY,DONE,STATIC'),
+            'TCP check failed / 1 TCP attempts / 2 route lookups'),
+        audit_case('probe_route_becomes_reject', 'Path not verified / 1 TCP attempts / 2 route lookups',
+            observe_tcp_route_change($routeFlags, $rejectFlags),
+            'TCP check failed / 1 TCP attempts / 2 route lookups'),
+        audit_case('probe_route_becomes_blackhole', 'Path not verified / 1 TCP attempts / 2 route lookups',
+            observe_tcp_route_change($routeFlags, 'UP,GATEWAY,HOST,DONE,STATIC,BLACKHOLE'),
+            'TCP check failed / 1 TCP attempts / 2 route lookups'),
+        audit_case('probe_route_loses_up', 'Path not verified / 1 TCP attempts / 2 route lookups',
+            observe_tcp_route_change($routeFlags, 'GATEWAY,HOST,DONE,STATIC'),
+            'TCP check failed / 1 TCP attempts / 2 route lookups'),
         audit_case('probe_route_initially_rejects', 'No matching host route or source / 0 TCP attempts / 1 route lookups',
             observe_tcp_route_change($rejectFlags, $routeFlags)),
     ];
+    $healthy_gateway = ['status' => 'online', 'rtt_ms' => 25, 'rttsd_ms' => 5, 'loss_pct' => 0];
+    $mixed_checks = [
+        'service_measurement_unavailable' => [['Unavailable', 'Path not verified'], 'No verified service measurement'],
+        'service_measured_failure' => [['Timed out', 'Unavailable'], 'No configured service check passed'],
+        'service_legacy_any_passed' => [['Path not verified', 'Passed'], 'Eligible'],
+    ];
+    foreach ($mixed_checks as $id => [$measurements, $expected]) {
+        $result[] = audit_case($id, $expected, sdwan_candidate_reason(
+            $paths[0], $healthy_gateway + ['checks' => $measurements], $strict));
+    }
+    ProbeFixture::$tcpRefused = true;
+    $result[] = audit_case('probe_tcp_refused_on_verified_path', 'TCP check failed / 1 TCP attempts / 2 route lookups',
+        observe_tcp_route_change($routeFlags, $routeFlags));
+    $result[] = audit_case('probe_tcp_refused_on_changed_path', 'Path not verified / 1 TCP attempts / 2 route lookups',
+        observe_tcp_route_change($routeFlags, $rejectFlags), 'TCP check failed / 1 TCP attempts / 1 route lookups');
+    ProbeFixture::$tcpUnavailable = true;
+    $result[] = audit_case('probe_tcp_socket_could_not_start', 'Unavailable / 1 TCP attempts / 1 route lookups',
+        observe_tcp_route_change($routeFlags, $routeFlags), 'TCP check failed / 1 TCP attempts / 1 route lookups');
     echo json_encode($result, JSON_THROW_ON_ERROR | JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES), PHP_EOL;
 }

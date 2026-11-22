@@ -210,10 +210,10 @@ function sdwan_probe_path(array $target, array $gateway, ?int $deadline = null):
 }
 
 function sdwan_probe_result(array $job, bool $replied, string $failure, int $deadline): string {
-	if ($replied && sdwan_probe_path($job['target'], $job['gateway'], $deadline) === $job['path']) {
-		return 'Passed';
+	if (sdwan_probe_path($job['target'], $job['gateway'], $deadline) !== $job['path']) {
+		return 'Path not verified';
 	}
-	return hrtime(true) >= $deadline ? 'Timed out' : $failure;
+	return $replied ? 'Passed' : $failure;
 }
 
 /* Start pending HTTPS work and consume ready replies without waiting for I/O. */
@@ -302,9 +302,7 @@ function sdwan_probe_observe(array $members, array $inventory, array $observatio
 				if ($target['protocol'] === 'tcp') {
 					$socket = @stream_socket_client("tcp://{$destination}:{$target['port']}", $error, $message, 0,
 					    STREAM_CLIENT_CONNECT | STREAM_CLIENT_ASYNC_CONNECT, $context);
-					if ($socket === false) {
-						$results[$name][$field] = 'TCP check failed';
-					} else {
+					if ($socket !== false) {
 						$jobs[] = $job + ['socket' => $socket];
 					}
 					continue;

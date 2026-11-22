@@ -157,7 +157,9 @@ function sdwan_candidate_reason(?array $member, ?array $sample, ?array $sla): st
 		return 'Loss exceeds the SLA';
 	}
 	if (($sample['checks'] ?? []) && !in_array('Passed', $sample['checks'], true)) {
-		return 'No configured service check passed';
+		$measured = ['Timed out', 'TCP check failed', 'DNS check failed', 'HTTPS check failed'];
+		return array_intersect($sample['checks'], $measured) ?
+		    'No configured service check passed' : 'No verified service measurement';
 	}
 	return 'Eligible';
 }
