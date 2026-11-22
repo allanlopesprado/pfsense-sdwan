@@ -172,7 +172,14 @@ if ($action === 'bind' || $action === 'unbind') {
         if ($action === 'bind') {
             $errors = sdwan_steering_bind($policy, $group, sdwan_steering_revision());
         } else {
-            $errors = sdwan_steering_unbind($group, sdwan_steering_revision());
+            $deadline = hrtime(true) + 10_000_000_000;
+            do {
+                $errors = sdwan_steering_unbind($group, sdwan_steering_revision());
+                if ($errors !== ['An SD-WAN observation is in progress. Retry the withdrawal.']) {
+                    break;
+                }
+                usleep(250000);
+            } while (hrtime(true) < $deadline);
         }
         if ($errors) {
             throw new RuntimeException("$group: " . implode('; ', $errors));
