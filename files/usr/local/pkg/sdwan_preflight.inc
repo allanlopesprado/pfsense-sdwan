@@ -403,6 +403,7 @@ function sdwan_steering_preflight(array $config, string $policy, string $group, 
 	}
 	$members = array_column($config['members'] ?? [], 'gateway', 'name');
 	$paths = [];
+	$weights = [];
 	$family = null;
 	$kind = null;
 	$transports = [];
@@ -452,6 +453,7 @@ function sdwan_steering_preflight(array $config, string $policy, string $group, 
 		}
 		$paths[$name] = [$if, $device, $transport, $physical, $gateway['family'],
 		    $gateway['address'] ?? '', $gateway['monitor'] ?? ''];
+		$weights[] = max(1, min(30, (int)($gateway['weight'] ?? 1)));
 		if ($is_vti) {
 			$peer = sdwan_preflight_vti_peer($native, $device);
 			if ($peer === null) {
@@ -473,6 +475,14 @@ function sdwan_steering_preflight(array $config, string $policy, string $group, 
 	}
 	if (count($paths) < 2 || count($paths) !== count($group_members)) {
 		return sdwan_preflight_error('Active steering requires at least two distinct gateways and exactly the native group membership.');
+	}
+	if ($balance) {
+		/* The adapter expands mixed pools containing a unit weight. Reject a
+		 * complete pool it cannot render even if a smaller subset is usable. */
+		$multiplier = min($weights) === 1 && max($weights) > 1 ? 2 : 1;
+		if (array_sum($weights) * $multiplier > 384) {
+			return sdwan_preflight_error('The configured gateway weights exceed the native forwarding pool limit of 384 entries.');
+		}
 	}
 	if ($kind && $native['filtermode'] !== 'if_ipsec') {
 		return sdwan_preflight_error('VTI steering requires a topology already filtering on assigned IPsec interfaces. Check compatibility with other VPNs before changing any global setting.');

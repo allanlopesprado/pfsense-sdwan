@@ -206,6 +206,35 @@ foreach ([386 => 12, 422 => 30] as $hops => $weight) {
 	$rows[] = audit_case("renderer_rejects_{$hops}_hops", true, filter_sdwan_pool_route($native_routes) === null);
 }
 $native['gateways']['GW7']['weight'] = 11;
+$native_routes['GW7']['weight'] = 11;
+
+$oversized = $native;
+$oversized['gateways']['GW7']['weight'] = 12;
+$single_path = $settings;
+$single_path['policies'][0]['strategy'] = 'cost';
+$rows[] = audit_case('cost_policy_not_subject_to_pool_limit', true,
+	sdwan_steering_preflight($single_path, 'office', 'LAB_SD', $oversized)['errors'] === []);
+
+$unscaled = $native;
+$unscaled['gateways']['GW0']['weight'] = 2;
+$unscaled_routes = $native_routes;
+$unscaled_routes['GW0']['weight'] = 2;
+$rows[] = audit_case('preflight_without_unit_weight', true,
+	sdwan_steering_preflight($settings, 'office', 'LAB_SD', $unscaled)['errors'] === []);
+$rows[] = audit_case('renderer_uses_unscaled_pool_without_unit_weight', 193,
+	substr_count(filter_sdwan_pool_route($unscaled_routes), '('));
+
+$clamped = $native;
+$clamped['gateways']['GW0']['weight'] = 0;
+$clamped['gateways']['GW1']['weight'] = 300;
+$clamped_routes = $native_routes;
+foreach (['GW0' => ['igb1', '192.0.2.1'], 'GW1' => ['igb2', '192.0.2.2']] as $gateway => [$device, $hop]) {
+	$clamped_routes[$gateway] = filter_sdwan_gateway_route(['interface' => $device, 'ipprotocol' => 'inet',
+	    'weight' => $clamped['gateways'][$gateway]['weight']], $hop);
+}
+$rows[] = audit_case('preflight_clamps_weights_like_renderer', true,
+	sdwan_steering_preflight($settings, 'office', 'LAB_SD', $clamped)['errors'] === []);
+$rows[] = audit_case('renderer_clamped_pool', 384, substr_count(filter_sdwan_pool_route($clamped_routes), '('));
 
 $renumbered = $native;
 $renumbered['groups'][0]['item'] = array_map(static fn($item) => str_replace('|1|', '|2|', $item), $native['groups'][0]['item']);
