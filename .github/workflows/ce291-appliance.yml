@@ -27,7 +27,7 @@ on:
         description: Appliance acceptance, diagnostics, recovery, or package security inventory
         type: choice
         default: acceptance
-        options: [acceptance, paths, benchmark, recovery, shared-target, inspection, activation-guard, security]
+        options: [acceptance, paths, benchmark, recovery, shared-target, inspection, activation-guard, security, source-scan]
       pairs:
         description: Number of native versus SD-WAN pairs for the benchmark
         type: number
@@ -54,6 +54,10 @@ on:
         type: choice
         default: base
         options: [base, suricata]
+      source_scan_certificate:
+        description: Public PEM certificate for the private source scan result
+        type: string
+        required: false
 permissions:
   contents: read
 concurrency:
@@ -61,7 +65,44 @@ concurrency:
   cancel-in-progress: true
 jobs:
   package:
+    if: inputs.scenario != 'source-scan'
     uses: ./.github/workflows/build-package.yml
+  source-scan:
+    if: inputs.scenario == 'source-scan'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
+        with:
+          persist-credentials: false
+      - name: Scan source and encrypt the detailed report
+        env:
+          AUDIT_PUBLIC_CERT: ${{ inputs.source_scan_certificate }}
+          SEMGREP_SEND_METRICS: 'off'
+        run: |
+          set -euo pipefail
+          umask 077
+          audit_dir=$(mktemp -d "$RUNNER_TEMP/sdwan-sast.XXXXXX")
+          printf '%s\n' "$AUDIT_PUBLIC_CERT" > "$audit_dir/recipient.pem"
+          openssl x509 -in "$audit_dir/recipient.pem" -noout > /dev/null
+          python3 -m venv "$audit_dir/venv"
+          "$audit_dir/venv/bin/python" -m pip --disable-pip-version-check --quiet install 'semgrep==1.186.0'
+          mapfile -d '' -t targets < <(git ls-files -z 'files/*.php' 'files/*.inc' 'core/*.inc' '.github/workflows/*.yml' 'tools/*.py')
+          test "${#targets[@]}" -gt 0
+          "$audit_dir/venv/bin/semgrep" scan --metrics off --disable-version-check --no-git-ignore \
+            --scan-unknown-extensions --config p/php --config p/github-actions --config p/python \
+            --json --quiet --output "$audit_dir/result.json" -- "${targets[@]}"
+          jq -e '.paths.scanned | length > 0' "$audit_dir/result.json" > /dev/null
+          openssl cms -encrypt -binary -aes-256-gcm -in "$audit_dir/result.json" \
+            -outform DER -out "$RUNNER_TEMP/sdwan-source-scan.cms" "$audit_dir/recipient.pem"
+          jq -c '{scanner: .version, scanned: (.paths.scanned | length), matches: (.results | length), errors: (.errors | length)}' \
+            "$audit_dir/result.json" | tee -a "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: sdwan-source-scan-encrypted
+          path: ${{ runner.temp }}/sdwan-source-scan.cms
+          if-no-files-found: error
+          retention-days: 7
   appliance:
     needs: package
     runs-on: ubuntu-24.04
