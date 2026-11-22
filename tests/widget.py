@@ -226,7 +226,8 @@ echo json_encode([http_response_code() ?: 200, $body, $sdwan_title_link,
     balanced = row(render("ajax")[1], "Voice")
     assert "Applied" in balanced and "GW_B, GW_A" in balanced and "Backup:" not in balanced
     save({"steering": dict(snapshot["steering"], LAN_SDWAN="unreadable")})
-    assert "Rules pending" in row(render("ajax")[1], "Voice")
+    invalid = render("ajax")[1]
+    assert "No current data" in invalid and "Applied" not in invalid
 
     register_binding("Voice", "OPT_SDWAN", 305, "203.0.113.5")
     fixture["fixture_pf_rules"].extend([

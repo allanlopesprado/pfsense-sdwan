@@ -133,6 +133,10 @@ echo json_encode([str_contains($widget, 'Within SLA'), sdwan_ui_snapshot($sdwan)
         ("map_missing_primary_check", {"probe_secondary": "Unavailable"}, 0, "rendered_unavailable", None),
         ("non_string_check_result", {"probe_primary": ["Passed"]}, 0,
          "rendered_without_current_data", "gettext_type_error"),
+        ("boolean_check_result", {"probe_primary": True}, 0,
+         "rendered_without_current_data", None),
+        ("numeric_check_result", {"probe_primary": 7}, 0,
+         "rendered_without_current_data", None),
         ("stale_non_string_check", {"probe_primary": ["Passed"]}, 45,
          "rendered_without_current_data", None),
     ):

@@ -256,6 +256,34 @@ function sdwan_evaluate(array $config, array $gateways, int $now, array $invento
 	return ['generated_at' => $now, 'members' => $samples, 'policies' => $policies];
 }
 
+function sdwan_snapshot_steering_valid(mixed $steering): bool {
+	if (!is_array($steering)) {
+		return false;
+	}
+	foreach ($steering as $state) {
+		if (!is_array($state) || !is_string($state['revision'] ?? null) ||
+		    !preg_match('/^[a-f0-9]{64}$/D', $state['revision']) || !array_key_exists('gateway', $state) ||
+		    ($state['gateway'] !== null && (!is_string($state['gateway']) || $state['gateway'] === ''))) {
+			return false;
+		}
+		if (!array_key_exists('pool', $state)) {
+			continue;
+		}
+		$pool = $state['pool'];
+		if (!is_array($pool) || !array_is_list($pool) || ($pool[0] ?? null) !== $state['gateway']) {
+			return false;
+		}
+		$seen = [];
+		foreach ($pool as $gateway) {
+			if (!is_string($gateway) || $gateway === '' || isset($seen[$gateway])) {
+				return false;
+			}
+			$seen[$gateway] = true;
+		}
+	}
+	return true;
+}
+
 function sdwan_read_snapshot(): ?array {
 	$contents = @file_get_contents(SDWAN_SNAPSHOT_PATH);
 	if ($contents === false) {
@@ -268,6 +296,9 @@ function sdwan_read_snapshot(): ?array {
 	    !is_array($data['members'] ?? null) || !is_array($data['policies'] ?? null) ||
 	    !is_string($data['config_revision'] ?? null) ||
 	    !preg_match('/^[a-f0-9]{64}$/D', $data['config_revision'])) {
+		return null;
+	}
+	if (array_key_exists('steering', $data) && !sdwan_snapshot_steering_valid($data['steering'])) {
 		return null;
 	}
 	$gateways = $data['gateways'] ?? [];
@@ -292,6 +323,13 @@ function sdwan_read_snapshot(): ?array {
 			}
 			if ((!is_int($value) && !is_float($value)) || !is_finite($value) ||
 			    $value < 0 || ($metric === 'loss_pct' && $value > 100)) {
+				return null;
+			}
+		}
+		// Older observations can omit service data or use an unavailable value.
+		$checks = $sample['checks'] ?? null;
+		foreach (is_array($checks) ? $checks : [] as $check) {
+			if ($check !== null && !is_string($check)) {
 				return null;
 			}
 		}

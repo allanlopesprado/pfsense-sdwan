@@ -227,14 +227,25 @@ ob_end_clean();
 $current = $before;
 $ready = array_replace($snapshot, ['generated_at' => time()]);
 $gateways = sdwan_gateways();
+$state = $ready['steering']['G'];
 $cases = [
     'snapshot_valid_binding' => $ready,
     'snapshot_observation_only' => array_diff_key($ready, ['steering' => true]),
     'snapshot_empty_steering' => array_replace($ready, ['steering' => []]),
+    'snapshot_weighted_pool' => array_replace($ready, ['steering' => ['G' => $state + ['pool' => ['A', 'B']]]]),
+    'snapshot_blocked_pool' => array_replace($ready, ['steering' => ['G' => array_replace($state, ['gateway' => null, 'pool' => []])]]),
+    'snapshot_optional_steering_metadata' => array_replace($ready, ['steering' => ['G' => $state + ['guard' => '302']]]),
     'snapshot_steering_string' => array_replace($ready, ['steering' => 'damaged']),
     'snapshot_steering_group_boolean' => array_replace($ready, ['steering' => ['G' => true]]),
     'snapshot_steering_missing_gateway' => array_replace($ready, ['steering' => ['G' => ['revision' => str_repeat('0', 64)]]]),
     'snapshot_steering_pool_string' => array_replace_recursive($ready, ['steering' => ['G' => ['pool' => 'A']]]),
+    'snapshot_steering_null' => array_replace($ready, ['steering' => null]),
+    'snapshot_invalid_binding_revision' => array_replace_recursive($ready, ['steering' => ['G' => ['revision' => 'old']]]),
+    'snapshot_steering_gateway_boolean' => array_replace_recursive($ready, ['steering' => ['G' => ['gateway' => true]]]),
+    'snapshot_steering_pool_map' => array_replace($ready, ['steering' => ['G' => $state + ['pool' => ['first' => 'A']]]]),
+    'snapshot_steering_pool_null_entry' => array_replace($ready, ['steering' => ['G' => $state + ['pool' => ['A', null]]]]),
+    'snapshot_steering_pool_mismatched_gateway' => array_replace($ready, ['steering' => ['G' => $state + ['pool' => ['B', 'A']]]]),
+    'snapshot_steering_pool_duplicate' => array_replace($ready, ['steering' => ['G' => $state + ['pool' => ['A', 'A']]]]),
     'snapshot_malformed_steering_expired' => array_replace($ready, ['generated_at' => time() - 31, 'steering' => 'damaged']),
     'snapshot_wrong_inventory_revision' => array_replace($ready, ['gateway_inventory_revision' => str_repeat('0', 64)]),
     'snapshot_wrong_config_revision' => array_replace($ready, ['config_revision' => str_repeat('0', 64)]),
@@ -262,7 +273,8 @@ echo json_encode($results, JSON_THROW_ON_ERROR);
 
 def snapshots(binary):
     states = run_php_fixture(binary, SNAPSHOT_FIXTURE)
-    valid = {"snapshot_valid_binding", "snapshot_observation_only", "snapshot_empty_steering"}
+    valid = {"snapshot_valid_binding", "snapshot_observation_only", "snapshot_empty_steering",
+             "snapshot_weighted_pool", "snapshot_blocked_pool", "snapshot_optional_steering_metadata"}
     malformed = {"snapshot_steering_string", "snapshot_steering_group_boolean",
                  "snapshot_steering_missing_gateway", "snapshot_steering_pool_string"}
     return [
