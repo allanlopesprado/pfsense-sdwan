@@ -5,11 +5,13 @@ test "$(uname -s)" = FreeBSD
 test "$(id -u)" = 0
 out=$(realpath "$1")
 version=${2:-2.9.1}
+scenario=${3:-acceptance}
 case "$version" in
     2.9.1) lab=ce291; series=2_9_1 ;;
     2.9.2) lab=ce292; series=2_9_2 ;;
     *) echo "Unsupported pfSense CE release: $version" >&2; exit 2 ;;
 esac
+if [ "$scenario" = recovery ]; then test "$version" = 2.9.1; fi
 set -- "$out"/ce-candidate-package/*.pkg
 test "$#" -eq 1
 test -f "$1"
@@ -65,6 +67,21 @@ tar -xpf "$root/usr/local/share/pfSense/base.txz" -C "$root"
 ce_pkg fetch -dy -U pfSense pfSense-default-config-serial
 mkdir -p "$root/root/sdwan-lab"
 cp "$work/repos/pfsense.conf" "$root/root/sdwan-lab/pfsense.conf"
+if [ "$scenario" = recovery ]; then
+    next="$root/root/sdwan-lab/ce292-repos"
+    mkdir "$next"
+    next_mirror="https://pkg01-atx.netgate.com/pfSense_v2_9_2_amd64"
+    cat > "$next/pfsense.conf" <<REPO
+next-core: { url: "$next_mirror-core", enabled: yes, signature_type: "fingerprints", fingerprints: "/root/netgate-keys" }
+next-system: { url: "$next_mirror-pfSense_v2_9_2", enabled: yes, signature_type: "fingerprints", fingerprints: "/root/netgate-keys" }
+REPO
+    ce_pkg_next() {
+        env ABI=FreeBSD:16:amd64 OSVERSION=1600018 REPOS_DIR="$next" PKG_CACHEDIR="$root/var/cache/pkg" \
+            /usr/local/sbin/pkg-static --rootdir "$root" "$@"
+    }
+    ce_pkg_next update
+    ce_pkg_next fetch -dy -U pfSense pfSense-base pfSense-kernel-pfSense pfSense-system pfSense-default-config-serial
+fi
 cp "$out/tests/lab/ce291-guest.php" "$root/root/sdwan-lab/"
 cp "$out"/lab-overlay/src/etc/inc/filter*.inc "$root/root/sdwan-lab/"
 cp "$candidate" "$root/root/sdwan-lab/candidate.pkg"
