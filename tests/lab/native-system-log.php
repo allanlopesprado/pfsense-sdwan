@@ -74,14 +74,17 @@ $expected = [
 $forwarding = [
 	'SD-WAN Native filter reload requested. Waiting for PF confirmation.',
 	'SD-WAN Active PF rules confirmed the current forwarding decision.',
-	'SD-WAN Active PF rules confirmed withdrawal of the removed forwarding bindings.',
 	'SD-WAN Persistent PF divergence. Automatic reload attempts for this decision have stopped.',
 	'SD-WAN Active PF rules are unavailable after the native filter reload was accepted. Confirmation and retries are paused. See Status > Filter Reload.',
 	'SD-WAN Observer stopped without confirming withdrawal of the previous forwarding rules. Check Status > Filter Reload.',
+	'SD-WAN Active PF rules confirmed withdrawal of the removed forwarding bindings.',
 	'SD-WAN Previous observation expired. Its result cannot be reused by the observer.',
 ];
 if ($level === 'warning') {
-	$expected = [...array_slice($expected, 3), ...array_slice($forwarding, 2)];
+	$warnings = array_filter($forwarding, static fn($message) =>
+	    !str_starts_with($message, 'SD-WAN Native filter reload requested') &&
+	    !str_starts_with($message, 'SD-WAN Active PF rules confirmed'));
+	$expected = [...array_slice($expected, 3), ...$warnings];
 } else {
 	$expected = [...$expected, ...$forwarding];
 }
