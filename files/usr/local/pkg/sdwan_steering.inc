@@ -704,14 +704,14 @@ function sdwan_steering_loaded_shadow(array $lines, int $position, string $scope
 	}
 	for ($i = 0; $i < $position; $i++) {
 		$rule = preg_replace('/\s+label "(?:[^"\\\\]|\\\\.)*"/', '', $lines[$i]);
+		$rule = preg_replace('/(?: flags (?:any|S\/SA))?(?:(?: keep state(?: \((?:if-bound|floating)\))?)| no state)?' .
+		    '(?: ridentifier [0-9]+)?$/D', '', $rule);
 		if (!preg_match('/^(?:pass|block(?: (?:drop|return))?) (?:in )?(?:log(?: \([^)]*\))? )?quick ' .
 		    '(?:on ([a-z0-9_.-]+) )?(?:(inet6?) )?((?:proto [a-z0-9_-]+ )?(?:all|from .+))$/D', $rule, $match)) {
 			continue;
 		}
-		$selectors = preg_replace('/(?: flags (?:any|S\/SA))?(?:(?: keep state(?: \((?:if-bound|floating)\))?)| no state)?' .
-		    '(?: ridentifier [0-9]+)?$/D', '', $match[3]);
 		$prior = sdwan_steering_scope_fields(($match[1] ?: $bound['device']) . ' ' .
-		    ($match[2] ?: $bound['family']) . ' ' . $selectors);
+		    ($match[2] ?: $bound['family']) . ' ' . $match[3]);
 		if ($prior !== null && $prior['device'] === $bound['device'] && $prior['family'] === $bound['family'] &&
 		    ($prior['protocol'] === '' || $prior['protocol'] === $bound['protocol']) &&
 		    sdwan_preflight_endpoint($prior['source'], $prior['family'], $bound['source']['network'] ?? '') &&

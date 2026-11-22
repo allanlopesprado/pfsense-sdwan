@@ -121,6 +121,10 @@ $rows[] = audit_case('earlier_rule_with_additional_match_requires_lab_verificati
 	$status($state, [str_replace(' ridentifier', ' tagged testlab ridentifier', $earlier_pass), $pass, $guard]));
 $rows[] = audit_case('earlier_global_floating_quick_shadows_policy', 'pending',
 	$status($state, [str_replace(' in quick on em1', ' quick', $earlier_pass), $pass, $guard]), 'applied');
+$rows[] = audit_case('earlier_global_quick_all_with_state_shadows_policy', 'pending',
+	$status($state, ['pass quick all flags S/SA keep state (if-bound) ridentifier 771292099', $pass, $guard]), 'applied');
+$rows[] = audit_case('earlier_ipv6_quick_all_does_not_cover_ipv4', 'applied',
+	$status($state, ['pass quick inet6 all flags S/SA keep state (if-bound) ridentifier 771292099', $pass, $guard]));
 $rows[] = audit_case('earlier_global_floating_non_quick_does_not_end_evaluation', 'applied',
 	$status($state, [str_replace(' in quick on em1', '', $earlier_pass), $pass, $guard]));
 $rows[] = audit_case('earlier_out_quick_does_not_cover_ingress', 'applied',
