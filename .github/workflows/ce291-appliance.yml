@@ -48,10 +48,15 @@ on:
         description: SD-WAN preferred path qualification hold for this benchmark
         type: number
         default: 30
+      security_profile:
+        description: Additional signed packages to include in the security inventory
+        type: choice
+        default: base
+        options: [base, suricata]
 permissions:
   contents: read
 concurrency:
-  group: ce-native-${{ inputs.ce_version || '2.9.1' }}-${{ inputs.scenario || 'acceptance' }}-${{ inputs.soak_mode || 'sdwan' }}-${{ github.ref }}
+  group: ce-native-${{ inputs.ce_version || '2.9.1' }}-${{ inputs.scenario || 'acceptance' }}-${{ inputs.soak_mode || 'sdwan' }}-${{ inputs.security_profile || 'base' }}-${{ github.ref }}
   cancel-in-progress: true
 jobs:
   package:
@@ -69,6 +74,7 @@ jobs:
       CE_SOAK_MODE: ${{ inputs.soak_mode || 'sdwan' }}
       CE_FAULT_INTERVAL: ${{ inputs.fault_interval_seconds }}
       CE_RECOVERY_HOLD: ${{ inputs.recovery_hold_seconds }}
+      CE_SECURITY_PROFILE: ${{ inputs.security_profile || 'base' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -118,7 +124,7 @@ jobs:
             env ASSUME_ALWAYS_YES=yes pkg bootstrap
           run: |
             set -eu
-            sh tests/lab/ce291-disk.sh "$PWD" '${{ env.CE_VERSION }}' '${{ env.CE_SCENARIO }}'
+            sh tests/lab/ce291-disk.sh "$PWD" '${{ env.CE_VERSION }}' '${{ env.CE_SCENARIO }}' '${{ env.CE_SECURITY_PROFILE }}'
       - name: Cache the unbooted disk
         if: env.CE_SCENARIO != 'security' && steps.disk.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4

@@ -6,12 +6,18 @@ test "$(id -u)" = 0
 out=$(realpath "$1")
 version=${2:-2.9.1}
 scenario=${3:-acceptance}
+security_profile=${4:-base}
 case "$version" in
     2.9.1) lab=ce291; series=2_9_1 ;;
     2.9.2) lab=ce292; series=2_9_2 ;;
     *) echo "Unsupported pfSense CE release: $version" >&2; exit 2 ;;
 esac
 if [ "$scenario" = recovery ]; then test "$version" = 2.9.1; fi
+case "$security_profile" in
+    base) ;;
+    suricata) test "$scenario" = security ;;
+    *) echo 'Unsupported security inventory profile' >&2; exit 2 ;;
+esac
 set -- "$out"/ce-candidate-package/*.pkg
 test "$#" -eq 1
 test -f "$1"
@@ -68,6 +74,10 @@ if [ "$scenario" = security ]; then
     reports="$out/$lab-security"
     mkdir "$reports"
     ce_pkg install -Iy -U pfSense pfSense-default-config-serial
+    if [ "$security_profile" = suricata ]; then
+        ce_pkg install -Iy -U pfSense-pkg-suricata
+        ce_pkg query '%n|%v' pfSense-pkg-suricata suricata > "$reports/suricata-versions.txt"
+    fi
     ce_pkg add -I "$candidate"
     test "$(ce_pkg query '%n' pfSense-pkg-SDWAN)" = pfSense-pkg-SDWAN
     ce_pkg query -a '%n|%v|%o' > "$work/inventory"
@@ -76,8 +86,17 @@ if [ "$scenario" = security ]; then
     fetch -T 45 -o "$work/vuln.xml.xz" "$vuln_site"
     xz -dc "$work/vuln.xml.xz" > "$work/vuln.xml"
     test -s "$work/vuln.xml"
-    printf 'TARGET_CE=%s\nCANDIDATE_SHA256=%s\nVUXML_URL=%s\nVUXML_SHA256=%s\n' \
-        "$version" "$(sha256 -q "$candidate")" "$vuln_site" "$(sha256 -q "$work/vuln.xml")" > "$reports/metadata.txt"
+    base="$root/usr/local/share/pfSense/base.txz"
+    tar -tf "$base" > "$work/base-files"
+    libcrypto=$(awk '/^(\.\/)?usr\/lib\/libcrypto\.so\.[0-9]+$/ {print; exit}' "$work/base-files")
+    if [ -n "$libcrypto" ]; then
+        tar -xOf "$base" "$libcrypto" > "$work/libcrypto"
+        strings -a "$work/libcrypto" | awk '/^OpenSSL [0-9]+\.[0-9]+\.[0-9]+[[:alnum:]]*([[:space:]]|$)/' \
+            > "$reports/openssl-version-strings.txt"
+    fi
+    printf 'TARGET_CE=%s\nSECURITY_PROFILE=%s\nCANDIDATE_SHA256=%s\nBASE_SHA256=%s\nVUXML_URL=%s\nVUXML_SHA256=%s\n' \
+        "$version" "$security_profile" "$(sha256 -q "$candidate")" "$(sha256 -q "$base")" \
+        "$vuln_site" "$(sha256 -q "$work/vuln.xml")" > "$reports/metadata.txt"
     audit_status=0
     ce_pkg audit -f "$work/vuln.xml" -Rjson > "$reports/vuxml.json" || audit_status=$?
     printf 'PKG_AUDIT_EXIT=%s\n' "$audit_status" >> "$reports/metadata.txt"
