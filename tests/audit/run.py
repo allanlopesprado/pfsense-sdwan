@@ -20,7 +20,7 @@ def read_cases(driver, environment, php):
     command = [php, str(path)] if path.suffix == ".php" else [sys.executable, "-B", str(path)]
     completed = subprocess.run(
         command, cwd=ROOT, env=environment, capture_output=True, text=True,
-        encoding="utf-8", errors="replace", timeout=90, check=False,
+        encoding="utf-8", errors="replace", timeout=30, check=False,
     )
     if completed.returncode:
         detail = completed.stderr.strip() or completed.stdout.strip()
@@ -67,22 +67,24 @@ def summary(report):
         values = [json.dumps(case[field], ensure_ascii=True).replace("|", "\\|").replace("`", "'")
                   for field in ("expected", "observed")]
         lines.append(f"| `{case['id']}` | `{values[0]}` | `{values[1]}` | {case['outcome']} |")
+    if "follow_up" in report:
+        follow_up = report["follow_up"]
+        lines += [
+            "",
+            f"The follow-up used seed `{follow_up['seed']}` and had "
+            f"{follow_up['counts']['unexpected']} unexpected results.",
+            "Find the second report in the artifact's `follow-up/` directory.",
+        ]
     return "\n".join(lines) + "\n"
 
 
-def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--php", default=os.environ.get("PHP_BIN", "php"))
-    parser.add_argument("--seed", type=int, default=172831)
-    args = parser.parse_args()
-    args.output.mkdir(parents=True, exist_ok=True)
-    environment = dict(os.environ, PHP_BIN=args.php, SDWAN_AUDIT_SEED=str(args.seed))
+def audit(php, seed):
+    environment = dict(os.environ, PHP_BIN=php, SDWAN_AUDIT_SEED=str(seed))
     results = []
     seen = set()
     for driver in DRIVERS:
         try:
-            cases = read_cases(driver, environment, args.php)
+            cases = read_cases(driver, environment, php)
             identifiers = {case["id"] for case in cases}
             if len(identifiers) != len(cases) or identifiers & seen:
                 raise ValueError("Duplicate observation identifiers.")
@@ -100,12 +102,31 @@ def main():
 
     occurrences = Counter(case["outcome"] for case in results)
     counts = {name: occurrences[name] for name in ("passed", "known", "resolved", "unexpected")}
-    report = {"seed": args.seed, "revision": os.environ.get("GITHUB_SHA", "local"),
-              "counts": counts, "cases": results}
-    (args.output / "audit.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
-    (args.output / "audit.md").write_text(summary(report), encoding="utf-8")
-    print(" ".join(f"{name}={count}" for name, count in counts.items()))
-    return int(counts["unexpected"] != 0)
+    return {"seed": seed, "revision": os.environ.get("GITHUB_SHA", "local"), "counts": counts, "cases": results}
+
+
+def save_report(report, output):
+    output.mkdir(parents=True, exist_ok=True)
+    (output / "audit.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+    (output / "audit.md").write_text(summary(report), encoding="utf-8")
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--php", default=os.environ.get("PHP_BIN", "php"))
+    parser.add_argument("--seed", type=int, default=172831)
+    args = parser.parse_args()
+    report = audit(args.php, args.seed)
+    failed = report["counts"]["unexpected"] > 0
+    save_report(report, args.output)
+    if failed:
+        follow_up = audit(args.php, args.seed + 1)
+        save_report(follow_up, args.output / "follow-up")
+        report["follow_up"] = {key: follow_up[key] for key in ("seed", "counts")}
+        save_report(report, args.output)
+    print(" ".join(f"{name}={count}" for name, count in report["counts"].items()))
+    return int(failed)
 
 
 if __name__ == "__main__":
