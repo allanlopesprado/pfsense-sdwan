@@ -20,16 +20,21 @@ function sdwan_probe_target($value): ?array {
 			return null;
 		}
 		$target = ['protocol' => 'tcp', 'port' => $port];
-	} elseif (preg_match('~\A(https|dns)://([A-Za-z0-9.-]+)(/[^ \x00-\x20\x7f#]*)? ([A-Fa-f0-9:.]+)(?: expect=([A-Za-z0-9._:-]{1,64}))?\z~D', $value, $parts)) {
+	} elseif (preg_match('~\A(https|dns)://([A-Za-z0-9.-]+)(/[^ \x00-\x20\x7f#]*)? ([A-Fa-f0-9:.]+)(?: (?:expect=([A-Za-z0-9._:-]{1,64})|type=(A|AAAA)))?\z~D', $value, $parts)) {
 		[, $protocol, $host, $path, $address] = $parts;
+		$marker = $parts[5] ?? '';
+		$dns_type = $parts[6] ?? '';
 		if (strlen($host) > 253 || !preg_match('/\A(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?\z/iD', $host) ||
-		    ($protocol === 'dns' && ($path !== '' || isset($parts[5]))) ||
-		    ($protocol === 'https' && !sdwan_probe_https_path_valid($path))) {
+		    ($protocol === 'dns' && ($path !== '' || $marker !== '')) ||
+		    ($protocol === 'https' && ($dns_type !== '' || !sdwan_probe_https_path_valid($path)))) {
 			return null;
 		}
 		$target = ['protocol' => $protocol, 'host' => strtolower($host), 'path' => $path ?: '/'];
-		if (isset($parts[5])) {
-			$target['expect'] = $parts[5];
+		if ($marker !== '') {
+			$target['expect'] = $marker;
+		}
+		if ($dns_type === 'AAAA') {
+			$target['qtype'] = 28;
 		}
 	} else {
 		return null;
@@ -96,12 +101,12 @@ function sdwan_probe_route_matches(string $output, string $device, string $next_
 	    sdwan_next_hop_matches($route_destination[1], $direct_target, $device);
 }
 
-function sdwan_probe_dns_question(string $name): string {
+function sdwan_probe_dns_question(string $name, int $type = 1): string {
 	$question = '';
 	foreach (explode('.', $name) as $label) {
 		$question .= chr(strlen($label)) . $label;
 	}
-	return $question . "\0" . pack('nn', 1, 1);
+	return $question . "\0" . pack('nn', $type, 1);
 }
 
 /* Expand a bounded DNS name, retaining label boundaries for comparisons. */
@@ -141,7 +146,12 @@ function sdwan_probe_dns_name(string $packet, int &$offset): ?string {
 function sdwan_probe_dns_answer(string $reply, int $id, string $question): bool {
 	$size = strlen($reply);
 	$offset = 12 + strlen($question);
-	if ($size <= $offset) {
+	if (strlen($question) < 5 || $size <= $offset) {
+		return false;
+	}
+	$query = unpack('ntype/nclass', $question, strlen($question) - 4);
+	$address_length = [1 => 4, 28 => 16][$query['type']] ?? null;
+	if ($query['class'] !== 1 || $address_length === null) {
 		return false;
 	}
 	$header = unpack('nid/nflags/nquestions/nanswers', $reply);
@@ -162,7 +172,7 @@ function sdwan_probe_dns_answer(string $reply, int $id, string $question): bool 
 		if ($end > $size) {
 			return false;
 		}
-		if ($rr['class'] === 1 && $rr['type'] === 1 && $rr['length'] === 4) {
+		if ($rr['class'] === 1 && $rr['type'] === $query['type'] && $rr['length'] === $address_length) {
 			$addresses[$owner] = true;
 		} elseif ($rr['class'] === 1 && $rr['type'] === 5) {
 			$alias = sdwan_probe_dns_name($reply, $offset);
@@ -445,7 +455,7 @@ function sdwan_probe_observe(array $members, array $inventory, array $observatio
 				}
 				stream_set_blocking($socket, false);
 				$id = random_int(0, 65535);
-				$question = sdwan_probe_dns_question($target['host']);
+				$question = sdwan_probe_dns_question($target['host'], $target['qtype'] ?? 1);
 				$request = pack('nnnnnn', $id, 0x0100, 1, 0, 0, 0) . $question;
 				if (@fwrite($socket, $request) !== strlen($request)) {
 					fclose($socket);

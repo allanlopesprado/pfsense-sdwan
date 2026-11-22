@@ -178,8 +178,16 @@ class Echo(socketserver.StreamRequestHandler):
 class DnsEcho(socketserver.BaseRequestHandler):
     def handle(self):
         query, sock = self.request
-        header = query[:2] + struct.pack("!HHHHH", 0x8180, 1, 1, 0, 0)
-        record = struct.pack("!HHHIHBBBB", 0xc00c, 1, 1, 30, 4, 192, 0, 2, 42)
+        if len(query) < 17:
+            return
+        qtype, qclass = struct.unpack_from("!HH", query, len(query) - 4)
+        data = None
+        if qclass == 1 and qtype == 1:
+            data = socket.inet_aton("192.0.2.42")
+        elif qclass == 1 and qtype == 28 and not query[12:].startswith(b"\x08ipv4only"):
+            data = socket.inet_pton(socket.AF_INET6, "2001:db8::42")
+        header = query[:2] + struct.pack("!HHHHH", 0x8180, 1, int(data is not None), 0, 0)
+        record = b"" if data is None else struct.pack("!HHHIH", 0xc00c, qtype, 1, 30, len(data)) + data
         sock.sendto(header + query[12:] + record, self.client_address)
 
 

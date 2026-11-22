@@ -343,6 +343,24 @@ check('DNS probes require a complete A answer for the requested name or its CNAM
     !sdwan_probe_dns_answer(substr($answer, 0, -1), 17, $question) &&
     !sdwan_probe_dns_answer(substr_replace($answer, pack('n', 0x8380), 2, 2), 17, $question));
 
+check('DNS probes can select AAAA independently of the transport family',
+    sdwan_probe_target('fib=2 dns://example.com 192.0.2.53 type=AAAA')['qtype'] === 28 &&
+    sdwan_probe_target('dns://example.com 2001:db8::53 type=A') === sdwan_probe_target('dns://example.com 2001:db8::53') &&
+    sdwan_probe_target('dns://example.com 192.0.2.53 type=TXT') === null &&
+    sdwan_probe_target('https://example.com/ready 192.0.2.53 type=AAAA') === null);
+$question6 = sdwan_probe_dns_question('example.com', 28);
+$header6 = pack('nnnnnn', 17, 0x8180, 1, 1, 0, 0) . $question6;
+$record6 = pack('nnNn', 28, 1, 60, 16) . inet_pton('2001:db8::42');
+$answer6 = $header6 . pack('n', 0xc00c) . $record6;
+$chain6 = pack('nnnnnn', 17, 0x8180, 1, 2, 0, 0) . $question6 .
+    $cname . pack('n', 0xc000 | $alias_offset) . $record6;
+check('AAAA answers must have a full IPv6 record at the queried name or its CNAME target',
+    sdwan_probe_dns_answer($answer6, 17, $question6) &&
+    sdwan_probe_dns_answer($chain6, 17, $question6) &&
+    !sdwan_probe_dns_answer(substr($answer6, 0, -1), 17, $question6) &&
+    !sdwan_probe_dns_answer($answer6, 17, $question) &&
+    !sdwan_probe_dns_answer($header6 . pack('n', 0xc00c) . $rr, 17, $question6));
+
 $route = "gateway: 192.0.2.1\ninterface: wan0\nflags: <UP,GATEWAY,HOST,DONE,STATIC>";
 check('service probes require an exact host route over the intended next hop',
     sdwan_probe_route_matches($route, 'wan0', '192.0.2.1') &&

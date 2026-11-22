@@ -16,6 +16,7 @@
 - [Validation matrix and automated regression tests](VALIDATION.md)
 - [Forwarding benchmarks and raw measurements](benchmarks/README.md)
 - [Results by test environment](RESULTS.md)
+- [Feature comparison with other SD-WAN platforms](FEATURE-COMPARISON.md)
 
 ## Develop and publish
 

@@ -341,7 +341,7 @@ elseif (!$display_form): ?>
 			->setHelp(gettext('A smaller value is preferred by the lowest cost strategy.'));
 		$section->addInput(new Form_Input('probe_primary', gettext('Primary service check'), 'text',
 		    $sdwan_record['probe_primary'] ?? '', ['maxlength' => 512]))
-		    ->setHelp(gettext('Optional. Enter a TCP service address such as tcp://192.0.2.20:587, or an HTTPS URL or DNS name followed by the target IP. Add a host route through this gateway. Prefix the check with fib=1 to use a preconfigured routing table. HTTPS requires a valid certificate. Append expect=ready to require that exact response body.'));
+		    ->setHelp(gettext('Optional. Enter a TCP service address such as tcp://192.0.2.20:587, or an HTTPS URL or DNS name followed by the target IP. Add a host route through this gateway. Prefix the check with fib=1 to use a preconfigured routing table. HTTPS requires a valid certificate. Append expect=ready to require that exact response body. DNS queries A records unless you append type=AAAA.'));
 		$section->addInput(new Form_Input('probe_secondary', gettext('Secondary service check'), 'text',
 		    $sdwan_record['probe_secondary'] ?? '', ['maxlength' => 512]))
 		    ->setHelp(gettext('Use a different target IP within the same routing table. Each target needs a host route. Use Policies to select which service checks determine eligibility.'));
