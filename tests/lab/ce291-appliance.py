@@ -676,7 +676,6 @@ def acceptance(qemu, cleanup, provider, *, cold_restart):
     management("rejected policy edit", certificate)
     print("PROBE_ROUTE_GUARD_PRESERVES_NATIVE_AND_ACTIVE_TRAFFIC", flush=True)
     verify_floating_rule(qemu, primary, certificate)
-    same_target_probes(qemu)
     vti_no_sa(qemu)
     verify_unapplied_reload(qemu, primary, certificate)
     verify_expired_sample(qemu, primary, certificate)
@@ -750,6 +749,7 @@ def acceptance(qemu, cleanup, provider, *, cold_restart):
     tcp_pair("after reboot", (A, A))
     assert route_and_nat(qemu) == reference
     print("COLD_BOOT_WITH_BOTH_WANS_DISCONNECTED_AND_RECOVERY_OK", flush=True)
+    same_target_probes(qemu)
 
     # Keep both upstreams reachable and fail only the ERP probe on WAN1. The
     # restored native route is distinguishable from the last package choice.

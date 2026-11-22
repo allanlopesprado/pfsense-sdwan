@@ -121,18 +121,19 @@ if ($action === 'floating_erp_block') {
 if ($action === 'package_fib_probe') {
     require_once('/usr/local/pkg/sdwan_probe.inc');
     $tables = ($argv[2] ?? '') === 'reversed' ? [2, 1] : [1, 2];
-    $config = sdwan_empty_config();
+    $probe_config = sdwan_empty_config();
     $observations = [];
     foreach (['GW_A', 'GW_B'] as $index => $gateway) {
-        $config['members'][] = ['name' => $gateway, 'gateway' => $gateway, 'cost' => '10',
+        $probe_config['members'][] = ['name' => $gateway, 'gateway' => $gateway, 'cost' => '10',
             'probe_primary' => "fib={$tables[$index]} tcp://192.0.2.168:7"];
         $observations[$gateway] = ['status' => 'online'];
     }
     $inventory = sdwan_gateways();
-    if (sdwan_validate_config($config, $inventory)) {
-        throw new RuntimeException('The package refused a valid layout of distinct FIBs');
+    $errors = sdwan_validate_config($probe_config, $inventory);
+    if ($errors) {
+        throw new RuntimeException('The package refused the layout of distinct FIBs: ' . implode('; ', $errors));
     }
-    echo json_encode(sdwan_probe_observe($config['members'], $inventory, $observations), JSON_THROW_ON_ERROR), PHP_EOL;
+    echo json_encode(sdwan_probe_observe($probe_config['members'], $inventory, $observations), JSON_THROW_ON_ERROR), PHP_EOL;
     exit;
 }
 if ($action === 'capture_config') {
