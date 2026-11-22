@@ -113,6 +113,12 @@ $rows[] = audit_case('guard_wrong_port', 'pending',
 $earlier_pass = 'pass in quick on em1 inet from 192.168.1.0/24 to any keep state ridentifier 771292099';
 $rows[] = audit_case('earlier_quick_pass_shadows_policy', 'pending',
 	$status($state, [$earlier_pass, $pass, $guard]), 'applied');
+$rows[] = audit_case('earlier_disjoint_source_keeps_policy_effective', 'applied',
+	$status($state, [str_replace('192.168.1.0/24', '192.168.2.0/24', $earlier_pass), $pass, $guard]));
+$rows[] = audit_case('earlier_rule_restricted_to_other_port_keeps_policy_effective', 'applied',
+	$status($state, [str_replace('inet from', 'inet proto tcp from', str_replace('to any', 'to any port = 22', $earlier_pass)), $pass, $guard]));
+$rows[] = audit_case('earlier_rule_with_additional_match_requires_lab_verification', 'applied',
+	$status($state, [str_replace(' ridentifier', ' tagged testlab ridentifier', $earlier_pass), $pass, $guard]));
 $rows[] = audit_case('block_wrong_ingress', 'pending',
 	$status($blocked_state, [str_replace('on em1', 'on em3', $block), $guard]), 'blocked');
 $rows[] = audit_case('block_wrong_scope', 'pending',

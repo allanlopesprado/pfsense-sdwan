@@ -56,6 +56,7 @@ function sdwan_log_plan(array $state, string $kind, array $snapshot, string $cau
 		'filter_divergent' => [LOG_ERR, 'Persistent PF divergence. Automatic reload attempts for this decision have stopped.'],
 		'filter_unavailable' => [LOG_WARNING, 'Active PF rules are unavailable after the native filter reload was accepted. Confirmation and retries are paused. See Status > Filter Reload.'],
 		'filter_retirement_unconfirmed' => [LOG_ERR, 'Observer stopped without confirming withdrawal of the previous forwarding rules. Check Status > Filter Reload.'],
+		'sample_expired' => [LOG_WARNING, 'Previous observation expired. Its result cannot be reused by the observer.'],
 		default => null,
 	};
 	if ($filter_event !== null) {

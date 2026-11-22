@@ -284,7 +284,8 @@ function sdwan_snapshot_steering_valid(mixed $steering): bool {
 	return true;
 }
 
-function sdwan_read_snapshot(): ?array {
+function sdwan_read_snapshot(?bool &$expired = null): ?array {
+	$expired = false;
 	$contents = @file_get_contents(SDWAN_SNAPSHOT_PATH);
 	if ($contents === false) {
 		return null;
@@ -292,10 +293,14 @@ function sdwan_read_snapshot(): ?array {
 	$data = json_decode($contents, true);
 	$when = $data['generated_at'] ?? null;
 	$now = time();
-	if (!is_int($when) || $when > $now || $now - $when > SDWAN_MAX_SNAPSHOT_AGE ||
+	if (!is_int($when) || $when < 0 || $when > $now ||
 	    !is_array($data['members'] ?? null) || !is_array($data['policies'] ?? null) ||
 	    !is_string($data['config_revision'] ?? null) ||
 	    !preg_match('/^[a-f0-9]{64}$/D', $data['config_revision'])) {
+		return null;
+	}
+	if ($now - $when > SDWAN_MAX_SNAPSHOT_AGE) {
+		$expired = true;
 		return null;
 	}
 	if (array_key_exists('steering', $data) && !sdwan_snapshot_steering_valid($data['steering'])) {
@@ -365,8 +370,8 @@ function sdwan_read_snapshot(): ?array {
 }
 
 /* The configuration may have changed in System > Routing since the last poll. */
-function sdwan_current_snapshot(array $config, array $inventory): ?array {
-	$snapshot = sdwan_read_snapshot();
+function sdwan_current_snapshot(array $config, array $inventory, ?bool &$expired = null): ?array {
+	$snapshot = sdwan_read_snapshot($expired);
 	if (($snapshot['config_revision'] ?? null) !== sdwan_config_revision($config) ||
 	    ($snapshot['gateway_inventory_revision'] ?? null) !== sdwan_gateway_inventory_revision($config, $inventory)) {
 		return null;

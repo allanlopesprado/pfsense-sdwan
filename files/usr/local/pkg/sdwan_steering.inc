@@ -553,6 +553,12 @@ function sdwan_steering_retire_observation(bool $startup = false): bool {
 		if (!$trackers) {
 			return $startup || !is_file($path) || unlink($path);
 		}
+		if ($startup && is_file(SDWAN_SNAPSHOT_PATH)) {
+			sdwan_read_snapshot($expired);
+			if ($expired) {
+				sdwan_log_event('sample_expired');
+			}
+		}
 		if (is_file(SDWAN_SNAPSHOT_PATH) && !unlink(SDWAN_SNAPSHOT_PATH)) {
 			return false;
 		}
@@ -619,6 +625,53 @@ function sdwan_steering_loaded_scope(string $rule): ?string {
 	return preg_match('/^inet6?\s/', $selectors) ? $parts[1] . ' ' . trim(preg_replace('/\s+/', ' ', $selectors)) : null;
 }
 
+function sdwan_steering_literal_scope(string $scope): ?array {
+	if (!preg_match('/^([a-z0-9_.-]+) (inet6?)(?: proto ([a-z0-9]+))? (.*)$/D', $scope, $head)) {
+		return null;
+	}
+	[, $device, $family, $protocol, $match] = $head;
+	if ($match === 'all') {
+		$match = 'from any to any';
+	}
+	if (!preg_match('/^from (\S+)(?: port = ([0-9]+))? to (\S+)(?: port = ([0-9]+))?$/D', $match, $endpoints)) {
+		return null;
+	}
+	$endpoint = static function (string $address, string $port): array {
+		$result = $address === 'any' ? ['any' => ''] : ['address' => $address];
+		return $port === '' ? $result : $result + ['port' => $port];
+	};
+	$source = $endpoint($endpoints[1], $endpoints[2] ?? '');
+	$destination = $endpoint($endpoints[3], $endpoints[4] ?? '');
+	return sdwan_preflight_endpoint($source, $family, $device) && sdwan_preflight_endpoint($destination, $family, $device)
+	    ? ['device' => $device, 'family' => $family, 'protocol' => $protocol, 'source' => $source,
+	       'destination' => $destination] : null;
+}
+
+/* Prove full coverage for plain quick rules. Rules with extra match options,
+ * anchors, aliases or partial overlap require a traffic test. */
+function sdwan_steering_loaded_shadow(array $lines, int $position, string $scope): bool {
+	$bound = sdwan_steering_literal_scope($scope);
+	if ($bound === null) {
+		return false;
+	}
+	for ($i = 0; $i < $position; $i++) {
+		$rule = preg_replace('/\s+label "(?:[^"\\\\]|\\\\.)*"/', '', $lines[$i]);
+		if (!preg_match('/^(?:pass|block(?: (?:drop|return))?) in (?:log(?: \([^)]*\))? )?quick on ' .
+		    '([a-z0-9_.-]+ inet6?(?: proto [a-z0-9]+)? (?:all|from \S+(?: port = [0-9]+)? to \S+(?: port = [0-9]+)?))' .
+		    '(?: flags (?:any|S\/SA))?(?: keep state(?: \((?:if-bound|floating)\))?)?(?: ridentifier [0-9]+)?$/D', $rule, $match)) {
+			continue;
+		}
+		$prior = sdwan_steering_literal_scope($match[1]);
+		if ($prior !== null && $prior['device'] === $bound['device'] && $prior['family'] === $bound['family'] &&
+		    ($prior['protocol'] === '' || $prior['protocol'] === $bound['protocol']) &&
+		    sdwan_preflight_endpoint_covers($prior['source'], $bound['source']) &&
+		    sdwan_preflight_endpoint_covers($prior['destination'], $bound['destination'])) {
+			return true;
+		}
+	}
+	return false;
+}
+
 function sdwan_steering_loaded_pass_metadata(string $line, string $rule, array $pair, array $pool, string $group): bool {
 	if (isset($pair['gateway_tiers'])) {
 		$tier = $pair['gateway_tiers'][$pool[0]] ?? null;
@@ -670,7 +723,8 @@ function sdwan_steering_pf_status(array $binding, array $state, array $inventory
 	$matched = [];
 	$guards = [];
 	$guard_ids = array_column($rule_pairs ?? [], 'guard');
-	foreach (array_values($lines) as $position => $line) {
+	$lines = array_values($lines);
+	foreach ($lines as $position => $line) {
 		$identifier = sdwan_steering_rule_tracker($line);
 		if (!in_array($identifier, $binding['trackers'], true)) {
 			if (in_array($identifier, $guard_ids, true)) {
@@ -706,7 +760,7 @@ function sdwan_steering_pf_status(array $binding, array $state, array $inventory
 		foreach ($matched as $identifier => [$position, $scope]) {
 			$guard = $rule_pairs[$identifier]['guard'] ?? '';
 			if (!isset($guards[$guard]) || $scope === null || $guards[$guard][0] <= $position ||
-			    $guards[$guard][1] !== $scope) {
+			    $guards[$guard][1] !== $scope || sdwan_steering_loaded_shadow($lines, $position, $scope)) {
 				return 'pending';
 			}
 		}

@@ -83,7 +83,7 @@ for round in 1 2 3; do
 for scenario in rfc3164-default rfc5424-default rfc5424-warning; do
     format=${scenario%-*}
     level=${scenario#*-}
-    if [ "$level" = warning ]; then general_count=5; else general_count=10; fi
+    if [ "$level" = warning ]; then general_count=6; else general_count=11; fi
     "$php" -n "$repo/tests/lab/native-system-log.php" prepare "$src" "$work" "$format" "$level"
     : >"$work/var/log/system.log"
     : >"$work/var/log/gateways.log"
@@ -110,7 +110,7 @@ for scenario in rfc3164-default rfc5424-default rfc5424-warning; do
     if [ "$round" -eq 3 ]; then
         jexec "$node" pkill -CONT -F /var/run/lab.pid syslogd
     fi
-    wait_for_count "$work/var/log/fixture-input.log" 'SD-WAN ' 10 &&
+    wait_for_count "$work/var/log/fixture-input.log" 'SD-WAN ' 11 &&
         wait_for_count "$work/var/log/fixture-input.log" native-ident-control 1 &&
         wait_for_count "$work/var/log/system.log" 'SD-WAN ' "$general_count" || { diagnostics; exit 1; }
     # Each control uses a separate external logger(1) connection and must

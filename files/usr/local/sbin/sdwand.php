@@ -114,12 +114,15 @@ function sdwan_observe_once(): void {
 		$receipt = null;
 		$action = null;
 		$invalid_bindings = false;
+		$prior = sdwan_current_snapshot($config, $inventory, $expired);
+		if ($expired) {
+			sdwan_log_event('sample_expired');
+		}
 		/* Stock systems without bindings never run the native adapter. */
 		$bound = config_get_path('gateways/sdwan_bindings/item', []);
 		if ($bound || is_file($receipt_path)) {
 			sdwan_load_steering();
 			if (sdwan_steering_supported()) {
-				$prior = sdwan_current_snapshot($config, $inventory);
 				try {
 					$bindings = sdwan_steering_bindings();
 					$rule_pairs = [];

@@ -162,6 +162,12 @@ def observer(binary, *, two_bindings=False):
         snapshot.write_text(json.dumps(old))
         lookup = php(binary, *params, "-r", include + "echo json_encode(sdwan_read_snapshot());")
         results.append(case("expired_observation", "withdrawn", "withdrawn" if lookup == "null" else "usable"))
+        observe()
+        expired_event = event_times().get("sample_expired")
+        results.append(case("expired_observation_noticed_on_next_poll", "reported", "reported" if expired_event else "silent"))
+        observe()
+        results.append(case("fresh_observation_does_not_repeat_expiry", "unchanged",
+                            "unchanged" if event_times().get("sample_expired") == expired_event else "repeated"))
         results.extend(unbind_cleanup(observe, config, receipt, events))
         return results
 
@@ -216,8 +222,8 @@ def unbind_cleanup(observe, config, receipt, events):
 
 
 def unbind_one_of_two(observe, config, receipt, retained_binding):
-    g_block = "block drop in quick on igb0 inet all ridentifier 301"
-    h_block = "block drop in quick on igb0 inet all ridentifier 311"
+    g_block = "block drop in quick on igb0 inet from 192.0.2.0/24 to any ridentifier 301"
+    h_block = "block drop in quick on igb0 inet from 198.51.100.0/24 to any ridentifier 311"
     g_guard = g_block.replace("301", "302")
     h_guard = h_block.replace("311", "312")
     config["fixture_pf_rules"] = [g_block, g_guard, h_block, h_guard]
@@ -226,7 +232,7 @@ def unbind_one_of_two(observe, config, receipt, retained_binding):
         raise RuntimeError("The fixture did not confirm both original bindings")
 
     # Native tier 1 restores GW_A. Keep the old GW_B path loaded for the removed group.
-    g_native = "pass in quick on igb0 route-to (igb1 192.0.2.1) inet all ridentifier 301"
+    g_native = "pass in quick on igb0 route-to (igb1 192.0.2.1) inet from 192.0.2.0/24 to any ridentifier 301"
     g_stale = g_native.replace("igb1 192.0.2.1", "igb2 198.51.100.1")
     config["gateways/sdwan_bindings"] = {"item": [retained_binding]}
     config["gateways/sdwan_bindings/item"] = [retained_binding]
