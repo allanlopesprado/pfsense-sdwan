@@ -328,6 +328,9 @@ function sdwan_snapshot_steering_valid(mixed $steering, ?int $sample_time = null
 			}
 		}
 		if (!array_key_exists('pool', $state)) {
+			if (array_key_exists('recovering', $state)) {
+				return false;
+			}
 			continue;
 		}
 		$pool = $state['pool'];
@@ -340,6 +343,17 @@ function sdwan_snapshot_steering_valid(mixed $steering, ?int $sample_time = null
 				return false;
 			}
 			$seen[$gateway] = true;
+		}
+		if (array_key_exists('recovering', $state)) {
+			if (!$pool || !is_array($state['recovering']) || !$state['recovering']) {
+				return false;
+			}
+			foreach ($state['recovering'] as $gateway => $since) {
+				if ((string)$gateway === '' || isset($seen[$gateway]) || !is_int($since) || $since < 0 ||
+				    ($sample_time !== null && $since > $sample_time)) {
+					return false;
+				}
+			}
 		}
 	}
 	return true;

@@ -311,9 +311,9 @@ elseif (!$display_form): ?>
 		$section->addInput(new Form_Input('degrade_samples', gettext('WAN degradation samples'), 'number',
 		    $sdwan_record['degrade_samples'] ?? '', ['min' => 1, 'max' => 6, 'placeholder' => '1']))
 		    ->setHelp(gettext('The default excludes a path on the first SLA breach. Higher values allow a currently applied path to remain briefly when service checks still pass. Down links and missing measurements take effect immediately.'));
-		$section->addInput(new Form_Input('recover_seconds', gettext('Preferred path recovery (seconds)'), 'number',
-		    $sdwan_record['recover_seconds'] ?? '', ['min' => 0, 'max' => 300, 'placeholder' => '30']))
-		    ->setHelp(gettext('For lowest cost or lowest RTT, keep the current healthy path while the preferred path recovers. The default is 30 seconds.'));
+		$section->addInput(new Form_Input('recover_seconds', gettext('Path recovery hold (seconds)'), 'number',
+		    $sdwan_record['recover_seconds'] ?? '', ['min' => 0, 'max' => 300]))
+		    ->setHelp(gettext('Lowest cost and lowest RTT wait before replacing a healthy path. The default is 30 seconds. Weighted balancing waits before rejoining a path when another healthy path remains in the pool. The default for balancing is immediate.'));
 	}
 	$form->add($section);
 	if ($collection === 'policies' && (array_column($sdwan['members'], 'probe_primary') ||

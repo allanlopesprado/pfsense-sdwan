@@ -417,7 +417,21 @@ function sdwan_steering_state(array $config, array $binding, array $result, arra
 		$metadata += ['degraded' => $degraded, 'degraded_at' => $now];
 	}
 	if (($policy['strategy'] ?? null) === 'balance') {
-		$pool = array_values(array_intersect($binding['gateways'], $eligible));
+		$pool = array_intersect($binding['gateways'], $eligible);
+		$hold = (int)($policy['recover_seconds'] ?? 0);
+		$retained = array_intersect($pool, $prior['pool'] ?? []);
+		// A surviving healthy path allows other members to wait without delaying recovery of the pool.
+		if ($hold > 0 && array_diff($retained, array_keys($degraded))) {
+			foreach (array_diff($pool, $retained) as $index => $gateway) {
+				$since = $prior['recovering'][$gateway] ?? null;
+				$since = is_int($since) && $since >= 0 && $since <= $now ? $since : $now;
+				if ($now - $since < $hold) {
+					$metadata['recovering'][$gateway] = $since;
+					unset($pool[$index]);
+				}
+			}
+		}
+		$pool = array_values($pool);
 		return $metadata + ['gateway' => $pool[0] ?? null, 'pool' => $pool];
 	}
 	if (isset($degraded[$prior['gateway'] ?? ''])) {

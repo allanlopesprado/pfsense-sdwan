@@ -167,6 +167,75 @@ $both_applied = array_replace($only_b_applied, ['gateway' => 'A', 'pool' => ['A'
 $balanced_state = sdwan_steering_state($balanced, $balanced_binding, $quality, $both_applied, $verification_time, true);
 verify($balanced_state['pool'] === ['A', 'B'] && $balanced_state['degraded'] === ['A' => 1],
     'an opt-in weighted pool retains only previously applied degrading members');
+$weighted = $balanced;
+$weighted['members'][] = ['name' => 'c', 'gateway' => 'C', 'cost' => '40'];
+$weighted['policies'][0]['members'][] = 'c';
+$weighted_binding = array_replace($balanced_binding, ['gateways' => ['A', 'B', 'C'],
+	'policy_revision' => sdwan_steering_policy_revision($weighted, 'p')]);
+$weighted_prior = ['revision' => sdwan_config_revision($weighted_binding), 'gateway' => 'A', 'pool' => ['A', 'B', 'C']];
+$weighted_result = static fn($a, $b, $c) => ['candidates' => ['a' => $a, 'b' => $b, 'c' => $c]];
+$removed = sdwan_steering_state($weighted, $weighted_binding,
+    $weighted_result('Gateway is down', 'Eligible', 'Required service check failed'), $weighted_prior, 100);
+verify($removed['pool'] === ['B'] && !isset($removed['recovering']), 'a weighted pool withdraws failed paths immediately');
+$only_a_recovered = $weighted_result('Eligible', 'Eligible', 'Gateway is down');
+$first_recovering = sdwan_steering_state($weighted, $weighted_binding, $only_a_recovered, $removed, 101);
+$all_recovered = $weighted_result('Eligible', 'Eligible', 'Eligible');
+$both_recovering = sdwan_steering_state($weighted, $weighted_binding, $all_recovered, $first_recovering, 103);
+verify($both_recovering['pool'] === ['B'] && $both_recovering['recovering'] === ['A' => 101, 'C' => 103] &&
+    sdwan_steering_signature(['G' => $removed]) === sdwan_steering_signature(['G' => $both_recovering]),
+    'weighted recovery timers start independently and do not alter the effective rules while waiting');
+$first_readmitted = sdwan_steering_state($weighted, $weighted_binding, $all_recovered, $both_recovering, 106);
+$both_readmitted = sdwan_steering_state($weighted, $weighted_binding, $all_recovered, $first_readmitted, 108);
+verify(sdwan_steering_state($weighted, $weighted_binding, $all_recovered, $both_recovering, 105) === $both_recovering &&
+    $first_readmitted['pool'] === ['A', 'B'] && $first_readmitted['recovering'] === ['C' => 103] &&
+    sdwan_steering_state($weighted, $weighted_binding, $all_recovered, $first_readmitted, 107) === $first_readmitted &&
+    $both_readmitted['pool'] === ['A', 'B', 'C'] && !isset($both_readmitted['recovering']),
+    'each eligible member rejoins the weighted pool exactly at its own recovery boundary');
+$a_restarts = sdwan_steering_state($weighted, $weighted_binding,
+    $weighted_result('No verified required service measurement', 'Eligible', 'Eligible'), $both_recovering, 104);
+verify($a_restarts['recovering'] === ['C' => 103] &&
+    sdwan_steering_state($weighted, $weighted_binding, $all_recovered, $a_restarts, 105)['recovering'] === ['A' => 105, 'C' => 103],
+    'an interrupted service measurement restarts only that member’s recovery timer');
+verify(sdwan_steering_state($weighted, $weighted_binding, $all_recovered, $both_recovering, 100)['recovering'] === ['A' => 100, 'C' => 100],
+    'a clock rollback restarts any future-dated weighted timers');
+$only_a_remains = sdwan_steering_state($weighted, $weighted_binding,
+    $weighted_result('Eligible', 'Gateway is down', 'Gateway is down'), $both_recovering, 104);
+verify($only_a_remains['pool'] === ['A'] && !isset($only_a_remains['recovering']),
+    'a weighted recovery timer never delays the only eligible gateway');
+$b_degraded = $weighted_result('Gateway is down', 'Loss exceeds the SLA', 'Eligible') + ['soft' => ['b']];
+$healthy_after_degradation = sdwan_steering_state($weighted, $weighted_binding, $b_degraded, $both_recovering, 104, true);
+verify($healthy_after_degradation['pool'] === ['B', 'C'] && !isset($healthy_after_degradation['recovering']),
+    'an already applied degraded path does not delay a healthy member');
+verify(sdwan_steering_state($weighted, $weighted_binding, $all_recovered, [], 104)['pool'] === ['A', 'B', 'C'],
+    'a new or changed binding admits its healthy weighted paths immediately');
+foreach (['0', null] as $hold) {
+	$immediate = $weighted;
+	if ($hold === null) {
+		unset($immediate['policies'][0]['recover_seconds']);
+	} else {
+		$immediate['policies'][0]['recover_seconds'] = $hold;
+	}
+	$immediate_binding = array_replace($weighted_binding, ['policy_revision' => sdwan_steering_policy_revision($immediate, 'p')]);
+	$immediate_prior = array_replace($removed, ['revision' => sdwan_config_revision($immediate_binding)]);
+	$joined = sdwan_steering_state($immediate, $immediate_binding, $all_recovered, $immediate_prior, 104);
+	verify($joined['pool'] === ['A', 'B', 'C'] && !isset($joined['recovering']),
+	    'zero or omitted recovery hold preserves immediate weighted admission');
+}
+verify(sdwan_snapshot_steering_valid(['G' => $both_recovering], 103), 'snapshot reader accepts independent weighted recovery timers');
+foreach ([
+	['recovering' => ['C' => 104]],
+	['recovering' => ['A' => -1]],
+	['recovering' => ['A' => '101']],
+	['recovering' => ['B' => 101]],
+	['recovering' => []],
+	['pool' => [], 'gateway' => null],
+] as $malformed_hold) {
+	verify(!sdwan_snapshot_steering_valid(['G' => array_replace($both_recovering, $malformed_hold)], 103),
+	    'snapshot reader rejects malformed weighted recovery timers');
+}
+$not_weighted = $both_recovering;
+unset($not_weighted['pool']);
+verify(!sdwan_snapshot_steering_valid(['G' => $not_weighted], 103), 'snapshot reader requires a weighted pool for weighted timers');
 $critical = sdwan_evaluate($tuned, ['A' => $wan_a, 'B' => $sample], $verification_time, $inventory, [
     'a' => ['probe_primary' => 'Timed out'],
 ])['policies']['p'];

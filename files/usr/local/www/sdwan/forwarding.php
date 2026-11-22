@@ -196,6 +196,9 @@ if ($preview !== null):
 			<?php if ($filter_status === 'applied' && !empty($steering['degraded'])): ?>
 			<dt><?=gettext('Degradation hold')?></dt><dd><?=sdwan_ui_escape(implode(', ', array_keys($steering['degraded'])))?></dd>
 			<?php endif; ?>
+			<?php if ($target !== null && !empty($steering['recovering'])): ?>
+			<dt><?=gettext('Recovery hold')?></dt><dd><?=sdwan_ui_escape(implode(', ', array_keys($steering['recovering'])))?></dd>
+			<?php endif; ?>
 			<?php endif; ?>
 			<?php if ($default_families): ?>
 			<dt><?=gettext('Default gateway')?></dt><dd><?=sdwan_ui_escape(implode(', ', $default_families))?></dd>
