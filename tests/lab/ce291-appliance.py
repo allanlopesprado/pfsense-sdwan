@@ -816,6 +816,26 @@ def recovery(qemu, cleanup, _provider, *, restart, image):
     wait_lease(qemu, B, GATEWAYS["GW_B"][1], "em2")
     assert command(qemu, f"php {LAB}/ce291-guest.php capture_config") == config_hash
     management("restored on em interfaces", certificate)
+    blocked = loaded(qemu)
+    assert set(blocked) == {"41001", "41003"} and all(
+        line.startswith("block ") and " on em1 " in line for line in blocked.values()
+    ), blocked
+    tcp_pair("restored bindings require reapproval", (None, None))
+    print("REMAPPED_BINDINGS_REFUSED_PREVIOUS_PHYSICAL_SCOPE", flush=True)
+    for group, tracker in (("G", "41001"), ("B", "41003")):
+        command(qemu, f"php {LAB}/ce291-guest.php unbind {group}")
+        deadline = time.monotonic() + 90
+        while time.monotonic() < deadline:
+            native_rule = loaded(qemu).get(tracker, "")
+            if native_rule.startswith("pass ") and "route-to (em0 198.51.100.2)" in native_rule and not (
+                observations(qemu)["receipt"].get("withdrawal")
+            ):
+                break
+            time.sleep(1)
+        else:
+            diagnostics(qemu)
+            raise RuntimeError(f"The native rule did not return after unbinding {group}")
+    command(qemu, f"php {LAB}/ce291-guest.php bind")
     # Exercise a service-only failure and confirm the new physical devices in PF.
     fault(f'iifname "sw-wire0" ip saddr {A} ip daddr {{ {ERP}, 192.0.2.164 }} tcp dport 7 drop')
     try:
