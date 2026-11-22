@@ -613,8 +613,15 @@ def run(php, classes, screenshot_dir=None):
         assert traffic["interfaces"]["igb0"]["at_ns"].isdigit()
         assert traffic["interfaces"]["igb0"]["inbytes"] == "18446744073709551615"
         assert traffic["interfaces"]["igb0"]["outbytes"] == "0"
+        native_float = json.loads(request("diagnostics", native=inventory, get=sample_traffic,
+                                          interface_counters={"igb0": {"inbytes": 2.0,
+                                                                       "outbytes": float(2**53 - 1)}}))
+        assert native_float["interfaces"]["igb0"]["inbytes"] == "2"
+        assert native_float["interfaces"]["igb0"]["outbytes"] == "9007199254740991"
         for options in ({}, {"interface_counters": {"igb0": {"inbytes": "18446744073709551616", "outbytes": 0}}},
-                        {"interface_counters": {"igb0": {"inbytes": 100}}}):
+                        {"interface_counters": {"igb0": {"inbytes": 100}}},
+                        {"interface_counters": {"igb0": {"inbytes": 2.5, "outbytes": 0}}},
+                        {"interface_counters": {"igb0": {"inbytes": 0, "outbytes": float(2**53)}}}):
             missing = json.loads(request("diagnostics", native=inventory, get=sample_traffic, **options))
             assert missing["interfaces"] == {}
         assert not request("diagnostics", native=inventory, get={**sample_traffic, "policy": ":deleted"},
