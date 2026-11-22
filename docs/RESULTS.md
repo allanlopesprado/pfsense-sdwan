@@ -8,7 +8,7 @@ The current release notes link to the exact GitHub Actions run. PHP and native f
 
 On a CE 2.9.2 appliance with the matching experimental core and two working WANs, SD-WAN 0.4.27 selected WAN2 for new LAN connections while the default route remained on WAN1. PF showed the rule tracker, next hop and both directions of real TCP and UDP flows. The NAT state translated them to WAN2's address. External HTTPS management and the two port forwards answered on both WANs. The isolated CE 2.9.2 lab observed reboot and restore separately. Physical circuit interruption and combined HA and IPsec interoperability require their own evidence. [Isolated CE 2.9.2 acceptance](benchmarks/ce292-interface-original.md)
 
-[Current release evidence](https://github.com/allanlopesprado/pfsense-sdwan/releases/latest) ? [Compatibility matrix](PACKAGE-COMPATIBILITY.md) ? [Acceptance procedure](LAB.md)
+[Current release evidence](https://github.com/allanlopesprado/pfsense-sdwan/releases/latest) · [Compatibility matrix](PACKAGE-COMPATIBILITY.md) · [Acceptance procedure](LAB.md)
 
 ## Two-WAN interface interruption on CE 2.9.2
 
