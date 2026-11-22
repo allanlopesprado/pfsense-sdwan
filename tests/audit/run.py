@@ -11,7 +11,7 @@ import sys
 
 
 ROOT = Path(__file__).resolve().parents[2]
-DRIVERS = ("forwarding.php", "decision.php", "transitions.php", "lifecycle.py")
+DRIVERS = ("forwarding.php", "decision.php", "dynamic-route.php", "transitions.php", "lifecycle.py", "webui.py")
 ID = re.compile(r"[a-z0-9_]+(?:\.[a-z0-9_]+)+")
 
 

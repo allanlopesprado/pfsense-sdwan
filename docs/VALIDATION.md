@@ -8,6 +8,8 @@ The appliance targets are pfSense CE 2.9.1 and 2.9.2. The package uses native ga
 
 The run summary and the `sdwan-divergence-audit` artifact record the revision, seed, expected values, and observed values. An unexpected mismatch fails the audit. A previously reproduced discrepancy remains visible as a warning while it matches its recorded outcome. When its expected behavior starts passing, the audit reports it as resolved. GitHub can disable scheduled runs in public repositories after 60 days of inactivity. [GitHub schedule behavior](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#schedule)
 
+When an audit exposes a discrepancy, preserve a minimal reproduction and the nearest controls that delimit the failure. The follow-up checks cover a refused or accepted reload during binding removal, fresh and expired snapshots, rendering when the observer is unavailable, and resolved addresses and next hops during DHCP changes. The fixtures run with synthetic observations and rule text. The FreeBSD and appliance logs provide the separate evidence for real PF and packet delivery. [Appliance and FreeBSD measurements](benchmarks/README.md)
+
 Reproduce an offline run with PHP CLI and Python 3. Use its run ID as the seed.
 
 ```sh
