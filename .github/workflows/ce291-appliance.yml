@@ -27,7 +27,7 @@ on:
         description: Acceptance, focused path checks, application benchmark, or system recovery
         type: choice
         default: acceptance
-        options: [acceptance, paths, benchmark, recovery, shared-target, inspection]
+        options: [acceptance, paths, benchmark, recovery, shared-target, inspection, activation-guard]
       pairs:
         description: Number of native versus SD-WAN pairs for the benchmark
         type: number
@@ -144,6 +144,9 @@ jobs:
               ;;
             shared-target)
               sudo /usr/bin/python3 tests/lab/ce-shared-target.py "$CE_LAB.raw" "$CE_VERSION" | tee -a "$CE_LAB-result.log"
+              ;;
+            activation-guard)
+              sudo /usr/bin/python3 tests/lab/ce-shared-target.py "$CE_LAB.raw" "$CE_VERSION" --activation-guard | tee -a "$CE_LAB-result.log"
               ;;
             inspection)
               sudo /usr/bin/python3 tests/lab/ce-sdwan-inspection.py "$CE_LAB.raw" "$CE_VERSION" | tee -a "$CE_LAB-result.log"

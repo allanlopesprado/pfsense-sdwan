@@ -133,7 +133,13 @@ def verify_activation_guard(ce, qemu):
         ce.assert_rules(loaded, {"G": None, "B": "GW_A"})
         assert loaded["41003"] == native["41003"], (loaded, native)
         print(f"ERP awaiting its first observation PF {loaded['41001']}", flush=True)
-        ce.tcp_pair("only the new ERP binding is guarded", (None, ce.A))
+        try:
+            ce.tcp_pair("only the new ERP binding is guarded", (None, ce.A))
+        except AssertionError:
+            print("PF after mismatched activation traffic", flush=True)
+            print(ce.command(qemu, """pfctl -P -vvsr 2>/dev/null | grep -A2 -E 'on vtnet1|ridentifier 41001$' | head -100
+pfctl -vvss 2>/dev/null | grep -A3 -F '192.0.2.162:7' | head -35"""), flush=True)
+            raise
         ce.management("waiting for first bound observation", certificate)
         assert_native_routing(ce, qemu, routing)
     finally:
@@ -242,9 +248,7 @@ php {script}""")
 
 
 def exercise(ce, benchmark, qemu, cleanup, provider):
-    version, _ = ce.install_candidate(qemu)
-    verify_activation_guard(ce, qemu)
-    ce.command(qemu, f"php {ce.LAB}/ce291-guest.php bind B")
+    version, _ = ce.install_bound_candidate(qemu)
     active = ce.wait_paths(qemu, "before installed package verification", NATIVE_PATHS)
     verify_interface_traffic(ce, qemu, active)
     verification = ce.command(qemu, f"sh {ce.LAB}/verify-appliance.sh {version} --forwarding", timeout=90)
@@ -308,15 +312,22 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("image", type=Path)
     parser.add_argument("ce_version", choices=("2.9.1", "2.9.2"))
+    parser.add_argument("--activation-guard", action="store_true",
+                        help="isolate first binding activation with the observer suspended")
     args = parser.parse_args()
     benchmark = load_benchmark()
     ce = benchmark.appliance_module()
 
     def scenario(qemu, cleanup, provider):
-        exercise(ce, benchmark, qemu, cleanup, provider)
+        if args.activation_guard:
+            ce.install_candidate(qemu)
+            verify_activation_guard(ce, qemu)
+        else:
+            exercise(ce, benchmark, qemu, cleanup, provider)
 
     ce.appliance(args.image.resolve(), args.ce_version, scenario=scenario)
-    print(f"CE_{args.ce_version.replace('.', '')}_READINESS_OK", flush=True)
+    if not args.activation_guard:
+        print(f"CE_{args.ce_version.replace('.', '')}_READINESS_OK", flush=True)
 
 
 if __name__ == "__main__":
