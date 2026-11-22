@@ -4,6 +4,8 @@ require_once('pkg-utils.inc');
 require_once('pfsense-utils.inc');
 require_once('/usr/local/pkg/sdwan_release.inc');
 define('SDWAN_GUI', true);
+// The package manager remains available when this version cannot read the policy settings.
+define('SDWAN_UI_WITHOUT_CONFIG', true);
 require_once(__DIR__ . '/ui.inc.php');
 require_once('/usr/local/pkg/sdwan_log.inc');
 

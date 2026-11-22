@@ -31,6 +31,30 @@ $sdwanRender = static function (): void {
 		echo '<p class="sdwan-widget-note">' . $escape(gettext('The stored SD-WAN configuration cannot be read.')) . '</p>';
 		return;
 	}
+	$can_view_forwarding = sdwan_can_view_forwarding();
+	$bindings_by_policy = [];
+	$bindings_error = false;
+	if ($can_view_forwarding) {
+		require_once('/usr/local/pkg/sdwan_steering.inc');
+		$policies = array_fill_keys(array_column($config['policies'], 'name'), true);
+		$orphaned = false;
+		try {
+			foreach (sdwan_steering_bindings() as $binding) {
+				if (isset($policies[$binding['policy']])) {
+					$bindings_by_policy[$binding['policy']][] = $binding;
+				} else {
+					$orphaned = true;
+				}
+			}
+		} catch (UnexpectedValueException $error) {
+			$bindings_error = true;
+		}
+		if ($orphaned) {
+			echo '<p class="sdwan-widget-note">' .
+			    $escape(gettext('A forwarding binding refers to a policy that no longer exists.')) .
+			    ' <a href="/sdwan/forwarding.php">' . $escape(gettext('Review Forwarding')) . '</a></p>';
+		}
+	}
 	if (!$config['policies']) {
 		echo '<p class="sdwan-widget-note">' . $escape(gettext('No SD-WAN policies configured.'));
 		if (isAllowedPage('/sdwan/policies.php')) {
@@ -44,24 +68,11 @@ $sdwanRender = static function (): void {
 	$snapshot = sdwan_service_state() === 'running' ? sdwan_current_snapshot($config, $inventory) : null;
 	$members = array_column($config['members'], 'gateway', 'name');
 	$can_inspect = isAllowedPage('/sdwan/diagnostics.php');
-	$can_view_forwarding = sdwan_can_view_forwarding();
-	$bindings_by_policy = [];
-	$bindings_error = false;
 	$native = null;
 	$pf_rules = null;
-	if ($can_view_forwarding) {
-		require_once('/usr/local/pkg/sdwan_steering.inc');
-		try {
-			foreach (sdwan_steering_bindings() as $binding) {
-				$bindings_by_policy[$binding['policy']][] = $binding;
-			}
-		} catch (UnexpectedValueException $error) {
-			$bindings_error = true;
-		}
-		if ($snapshot !== null && $bindings_by_policy && sdwan_steering_supported()) {
-			$pf_rules = sdwan_steering_pf_rules();
-			$native = sdwan_steering_native($inventory);
-		}
+	if ($snapshot !== null && $bindings_by_policy && sdwan_steering_supported()) {
+		$pf_rules = sdwan_steering_pf_rules();
+		$native = sdwan_steering_native($inventory);
 	}
 	?>
 	<div class="table-responsive">

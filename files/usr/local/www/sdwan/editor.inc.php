@@ -29,6 +29,11 @@ $original = $editing;
 $display_form = isset($_GET['edit']) || isset($_GET['add']);
 $errors = [];
 $sdwan_record = [];
+$optional_fields = match ($collection) {
+	'members' => ['probe_primary', 'probe_secondary'],
+	'slas' => ['rttsd_ms'],
+	default => [],
+};
 $used_by = [];
 foreach ($sdwan['policies'] as $policy) {
 	$references = $collection === 'members' ? $policy['members'] :
@@ -37,26 +42,63 @@ foreach ($sdwan['policies'] as $policy) {
 		$used_by[$reference][] = $policy['name'];
 	}
 }
+$bound_policies = [];
+$binding_error = '';
+if ($collection === 'policies') {
+	require_once('/usr/local/pkg/sdwan_steering.inc');
+	try {
+		foreach (sdwan_steering_bindings() as $binding) {
+			$bound_policies[$binding['policy']] = true;
+		}
+	} catch (UnexpectedValueException) {
+		$binding_error = gettext('Review the saved forwarding bindings before deleting policies.');
+	}
+}
+$bound_message = gettext('Remove the forwarding binding before deleting this policy.');
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 	$action = sdwan_ui_scalar($_POST, 'action');
-	$original = sdwan_ui_scalar($_POST, 'original');
+	$submitted_original = $_POST['original'] ?? null;
+	$original = is_string($submitted_original) ? $submitted_original : '';
 	$position = array_search($original, $names, true);
 	$expected_revision = sdwan_ui_scalar($_POST, 'revision');
 	if (!hash_equals($revision, $expected_revision)) {
 		$errors[] = gettext('Configuration changed. Reload this page and review the current values.');
+		$display_form = false;
+	} elseif ($submitted_original !== '' && !sdwan_valid_name($submitted_original)) {
+		$errors[] = gettext('This entry could not be identified. Reload this page and try again.');
 		$display_form = false;
 	} elseif ($original !== '' && $position === false) {
 		$errors[] = gettext('This entry no longer exists.');
 	} elseif ($action === 'delete' && $original !== '') {
 		if (isset($used_by[$original])) {
 			$errors[] = sprintf(gettext('Remove this entry from the following policies first: %s.'), implode(', ', $used_by[$original]));
+		} elseif ($binding_error !== '') {
+			$errors[] = $binding_error;
+		} elseif (isset($bound_policies[$original])) {
+			$errors[] = $bound_message;
 		} else {
 			unset($rows[$position]);
 		}
 	} elseif ($action === 'save') {
 		$display_form = true;
+		$saved = $position === false ? [] : $rows[$position];
+		$sdwan_record = $saved;
+		$cleared = [];
 		foreach ($columns[$collection] as $key => $label) {
-			if ($key === 'members') {
+			if (in_array($key, $optional_fields, true)) {
+				if (!array_key_exists($key, $_POST)) {
+					continue;
+				}
+				$raw = $_POST[$key];
+				$value = sdwan_ui_scalar($_POST, $key);
+				if ($value !== '') {
+					$sdwan_record[$key] = $value;
+				} elseif (is_string($raw) && strlen($raw) <= 512 && trim($raw, ' ') === '') {
+					$cleared[$key] = true;
+				} else {
+					$errors[] = sprintf(gettext('Enter a valid value for %s.'), $label);
+				}
+			} elseif ($key === 'members') {
 				$selected = $_POST[$key] ?? [];
 				if (!is_array($selected) || array_filter($selected, 'is_string') !== $selected) {
 					$errors[] = gettext('Select valid members.');
@@ -69,9 +111,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 				$sdwan_record[$key] = sdwan_ui_scalar($_POST, $key);
 			}
 		}
-		$cleared = [];
 		if ($collection === 'policies') {
-			$previous = $position !== false ? ($rows[$position]['probe_requirements'] ?? []) : [];
+			$previous = $saved['probe_requirements'] ?? [];
 			$overrides = array_column($previous, null, 'member');
 			$requirements = [];
 			foreach (array_keys($service_fields) as $field) {
@@ -128,19 +169,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 				$cleared['probe_requirements'] = true;
 			}
 		}
-		$optional = ['members' => ['probe_primary', 'probe_secondary'], 'slas' => ['rttsd_ms']];
-		foreach ($optional[$collection] ?? [] as $field) {
-			if ($sdwan_record[$field] === '') {
-				unset($sdwan_record[$field]);
-				$cleared[$field] = true;
-			}
-		}
+		$sdwan_record = array_diff_key($sdwan_record, $cleared);
 		if ($original === '') {
 			$rows[] = $sdwan_record;
 		} elseif ($sdwan_record['name'] === $original) {
-			$rows[$position] = array_diff_key(array_replace($rows[$position], $sdwan_record), $cleared);
+			$rows[$position] = $sdwan_record;
 		} else {
 			$errors[] = gettext('An existing entry must keep its name.');
+			$sdwan_record['name'] = $original;
 		}
 	} else {
 		$errors[] = gettext('Unknown action.');
@@ -154,7 +190,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 			exit;
 		}
 	}
-} elseif ($editing !== '') {
+} elseif (isset($_GET['edit'])) {
 	$position = array_search($editing, $names, true);
 	if ($position === false) {
 		$errors[] = gettext('Entry not found.');
@@ -227,8 +263,16 @@ if (!$display_form): ?>
 				<input type="hidden" name="original" value="<?=sdwan_ui_escape($row['name'])?>">
 				<a class="fa-solid fa-pencil" href="<?=$url?>?edit=<?=rawurlencode($row['name'])?>"
 				    title="<?=gettext('Edit entry')?>" aria-label="<?=gettext('Edit entry')?>"></a>
-				<?php if (isset($used_by[$row['name']])): ?>
-				<?php $in_use = sdwan_ui_escape(sprintf(gettext('Used by: %s'), implode(', ', $used_by[$row['name']]))); ?>
+				<?php
+				$reason = $binding_error;
+				if (isset($used_by[$row['name']])) {
+					$reason = sprintf(gettext('Used by: %s'), implode(', ', $used_by[$row['name']]));
+				} elseif (isset($bound_policies[$row['name']])) {
+					$reason = $bound_message;
+				}
+				if ($reason !== ''):
+					$in_use = sdwan_ui_escape($reason);
+				?>
 				<i class="fa-solid fa-lock" title="<?=$in_use?>" aria-hidden="true"></i><span class="sr-only"><?=$in_use?></span>
 				<?php else: ?>
 				<button type="submit" name="action" value="delete" class="btn btn-link btn-xs fa-solid fa-trash-can"

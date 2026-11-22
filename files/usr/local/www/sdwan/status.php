@@ -3,7 +3,8 @@ require_once('guiconfig.inc');
 define('SDWAN_GUI', true);
 require_once(__DIR__ . '/ui.inc.php');
 
-$snapshot = sdwan_ui_snapshot($sdwan);
+$inventory = sdwan_gateways();
+$snapshot = sdwan_ui_snapshot($sdwan, $inventory);
 $path_states = [
 	'single' => ['bg-success', gettext('Single path')],
 	'no_eligible' => ['bg-danger', gettext('No eligible path')],
@@ -30,8 +31,10 @@ if (!$sdwan['members']) {
 			<th scope="col" class="text-right"><?=gettext('Loss')?></th><th scope="col"><?=gettext('Status')?></th></tr></thead>
 		<tbody>
 		<?php foreach ($sdwan['members'] as $member):
-			$reading = $snapshot['members'][$member['name']] ?? [];
-			[$cell_class, $state_text] = sdwan_ui_gateway_state($reading['status'] ?? null);
+			$issue = sdwan_ui_gateway_config_issue($member['gateway'], $inventory);
+			$reading = $issue === null ? ($snapshot['members'][$member['name']] ?? []) : [];
+			[$cell_class, $state_text] = $issue === null ?
+			    sdwan_ui_gateway_state($reading['status'] ?? null) : ['bg-warning', $issue];
 		?>
 			<tr><th scope="row"><?=sdwan_ui_escape($member['name'])?></th><td><?=sdwan_ui_escape($member['gateway'])?></td>
 				<td class="text-right text-nowrap"><?=sdwan_ui_metric($reading['rtt_ms'] ?? null, ' ms')?></td>

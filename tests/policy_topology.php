@@ -129,11 +129,15 @@ verify(sdwan_monitor_matches($gateway, $process), 'link-local dynamic gateway ma
 verify(!sdwan_monitor_matches($gateway, array_replace($process, ['targetip' => 'fe80::a%igb1'])), 'same link-local next hop on another interface is rejected');
 verify(!sdwan_monitor_matches($gateway, array_replace($process, ['targetip' => 'fe80::c%igb0'])), 'stale DHCP target is ignored');
 verify(!sdwan_monitor_matches($gateway, array_replace($process, ['srcip' => 'fe80::e%igb0'])), 'stale bind address is ignored');
+verify(sdwan_monitor_matches($gateway + ['static_source' => '2001:db8::10'], $process),
+    'a gateway with a static global address still uses its link-local source for a scoped monitor');
 $source = '2001:db8:ffff:ffff:ffff:ffff:ffff:aaaa';
 $current['fixture_sources']['igb0'] = $source;
 $global = array_replace($gateway, ['monitor' => '2001:db8:ffff:ffff:ffff:ffff:ffff:bbbb']);
 $hashed = ['srcip' => substr(md5($source), 0, 8), 'targetip' => $global['monitor']];
 verify(sdwan_monitor_matches($global, $hashed), 'native shortened source field is matched to the live IPv6 source');
+verify(!sdwan_monitor_matches($global + ['static_source' => '2001:db8::10'], $hashed),
+    'a global IPv6 monitor cannot keep qualifying after the configured source changes');
 $hashed['srcip'] = substr(md5('previous source'), 0, 8);
 verify(!sdwan_monitor_matches($global, $hashed), 'obsolete shortened source field is rejected');
 unset($current['fixture_dynamic_targets']['wan']);

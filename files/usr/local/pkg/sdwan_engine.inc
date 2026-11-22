@@ -58,9 +58,10 @@ function sdwan_monitor_matches(array $gateway, array $process): bool {
 	if ($target === null || $target !== sdwan_monitor_address($process['targetip'] ?? '', $family, $device, false)) {
 		return false;
 	}
+	$link_local = $family === 'inet6' && str_contains($target, '%');
 	if ($family === 'inet') {
 		$source = find_interface_ip($device, true);
-	} elseif (str_contains($target, '%')) {
+	} elseif ($link_local) {
 		$source = find_interface_ipv6_ll($device, true);
 		if (is_string($source) && $source !== '' && !str_contains($source, '%')) {
 			$source .= '%' . $device;
@@ -73,6 +74,10 @@ function sdwan_monitor_matches(array $gateway, array $process): bool {
 	}
 	$expected = sdwan_monitor_address($source, $family, $device, false);
 	if ($expected === null || $expected === '0.0.0.0' || $expected === '::') {
+		return false;
+	}
+	if (!$link_local && isset($gateway['static_source']) &&
+	    $expected !== sdwan_monitor_address($gateway['static_source'], $family, $device, false)) {
 		return false;
 	}
 	/* Native long socket names shorten only the source to eight hex digits. */

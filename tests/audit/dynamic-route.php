@@ -199,6 +199,31 @@ fixture_publish($settings, $wire, $observations);
 $current['fixture/source/em0'] = '192.0.2.11';
 fixture_append($result, 'dynamic_source_with_static_next_hop', 'stale/none', fixture_decision($settings, $wire, $rule));
 
+// The native interface editor can change the address or mask without touching the gateway row.
+$current = $initial;
+$current['interfaces']['wan'] += ['subnet' => '24'];
+$current['interfaces']['wan']['ipaddr'] = '192.0.2.10';
+$current['gateways/gateway_item'][0]['gateway'] = '192.0.2.1';
+$current['gateways/gateway_item'][0]['monitor'] = '192.0.2.1';
+$static = $current;
+$wire = fixture_wire_binding($settings);
+fixture_publish($settings, $wire, $observations);
+fixture_append($result, 'static_source_original', 'current/A', fixture_decision($settings, $wire, $rule));
+$current['interfaces']['wan']['ipaddr'] = '192.0.2.11';
+fixture_append($result, 'static_source_changed', 'stale/none', fixture_decision($settings, $wire, $rule));
+fixture_append($result, 'static_source_old_monitor', 'rejected',
+    sdwan_monitor_matches(sdwan_gateways()['A'], $next) ? 'matching' : 'rejected');
+$current['fixture/source/em0'] = '192.0.2.11';
+fixture_append($result, 'static_source_reconfigured_monitor', 'matching',
+    sdwan_monitor_matches(sdwan_gateways()['A'], array_replace($next, ['srcip' => '192.0.2.11'])) ? 'matching' : 'rejected');
+$current = $static;
+$current['interfaces']['wan']['subnet'] = '25';
+fixture_append($result, 'static_prefix_changed', 'stale/none', fixture_decision($settings, $wire, $rule));
+$current = $static;
+$current['interfaces']['wan']['descr'] = 'Renamed in the display';
+$current['interfaces']['wan']['ipaddrv6'] = '2001:db8::10';
+fixture_append($result, 'unrelated_static_interface_edit', 'current/A', fixture_decision($settings, $wire, $rule));
+
 // Change only the saved route used by an existing service check.
 $current = $initial;
 $settings['members'][0]['probe_primary'] = 'tcp://203.0.113.53:443';

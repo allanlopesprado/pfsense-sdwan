@@ -49,11 +49,11 @@ function sdwan_ui_choice_value(string $value): string {
 	return str_starts_with($value, ':') ? substr($value, 1) : $value;
 }
 
-function sdwan_ui_snapshot(array $config): ?array {
+function sdwan_ui_snapshot(array $config, ?array $inventory = null): ?array {
 	if (sdwan_service_state() !== 'running') {
 		return null;
 	}
-	return sdwan_current_snapshot($config, sdwan_gateways());
+	return sdwan_current_snapshot($config, $inventory ?? sdwan_gateways());
 }
 
 function sdwan_ui_empty(string $message, int $columns): void {
@@ -71,6 +71,14 @@ function sdwan_ui_gateway_state(?string $state): array {
 		'degraded' => ['bg-warning', gettext('Warning')],
 		'down' => ['bg-danger', gettext('Offline')],
 		default => ['bg-info', gettext('Unknown')],
+	};
+}
+
+function sdwan_ui_gateway_config_issue(string $gateway, array $inventory): ?string {
+	return match (true) {
+		!isset($inventory[$gateway]) => gettext('Gateway unavailable'),
+		!empty($inventory[$gateway]['monitor_disabled']) => gettext('Gateway monitoring disabled'),
+		default => null,
 	};
 }
 
@@ -147,6 +155,9 @@ function sdwan_ui_actions(array $links, bool $events = false): void {
 	}
 }
 
+if (defined('SDWAN_UI_WITHOUT_CONFIG')) {
+	return;
+}
 try {
 	$sdwan = sdwan_get_config();
 } catch (UnexpectedValueException $error) {

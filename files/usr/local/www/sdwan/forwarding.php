@@ -21,25 +21,6 @@ $is_post = $_SERVER['REQUEST_METHOD'] === 'POST';
 $form_source = $is_post ? $_POST : $_GET;
 $policy_name = sdwan_ui_choice_value(sdwan_ui_scalar($form_source, 'policy'));
 $group_name = sdwan_ui_choice_value(sdwan_ui_scalar($form_source, 'group'));
-$policy_names = array_column($sdwan['policies'], 'name');
-$groups = config_get_path('gateways/gateway_group', []);
-$groups_by_name = array_column(is_array($groups) ? $groups : [], null, 'name');
-try {
-	$bindings_by_group = sdwan_steering_bindings();
-} catch (UnexpectedValueException $error) {
-	include('head.inc');
-	sdwan_ui_tabs('forwarding');
-	print_input_errors([$error->getMessage()]);
-	include('foot.inc');
-	return;
-}
-if (!$is_post && $group_name === '' && $policy_name === '' && count($bindings_by_group) === 1) {
-	$only = reset($bindings_by_group);
-	$group_name = $only['group'];
-	$policy_name = $only['policy'];
-}
-$binding = $bindings_by_group[$group_name] ?? null;
-$preview = null;
 $errors = [];
 $notice = '';
 
@@ -70,6 +51,28 @@ if ($is_post) {
 		exit;
 	}
 }
+
+/* A denied edit can reload config.xml. Build the page from one current view. */
+try {
+	$sdwan = sdwan_get_config();
+	$bindings_by_group = sdwan_steering_bindings();
+} catch (UnexpectedValueException $error) {
+	include('head.inc');
+	sdwan_ui_tabs('forwarding');
+	print_input_errors(array_unique([...$errors, $error->getMessage()]));
+	include('foot.inc');
+	return;
+}
+$policy_names = array_column($sdwan['policies'], 'name');
+$groups = config_get_path('gateways/gateway_group', []);
+$groups_by_name = array_column(is_array($groups) ? $groups : [], null, 'name');
+if (!$is_post && $group_name === '' && $policy_name === '' && count($bindings_by_group) === 1) {
+	$only = reset($bindings_by_group);
+	$group_name = $only['group'];
+	$policy_name = $only['policy'];
+}
+$binding = $bindings_by_group[$group_name] ?? null;
+$preview = null;
 if ($policy_name !== '' || $group_name !== '') {
 	$preview = sdwan_steering_preview($sdwan, $policy_name, $group_name);
 }
@@ -289,10 +292,16 @@ if ($bindings_by_group): ?>
 	<div class="panel-body">
 	<div class="table-responsive"><table class="table table-striped table-hover table-condensed">
 		<thead><tr><th scope="col"><?=gettext('Gateway Group')?></th><th scope="col"><?=gettext('Policy')?></th><th scope="col"><?=gettext('Actions')?></th></tr></thead><tbody>
-		<?php $revision = sdwan_steering_revision();
-		foreach ($bindings_by_group as $item): ?>
+		<?php
+		$revision = $native_edit ? sdwan_steering_revision() : '';
+		$native = $native_edit ? sdwan_steering_native() : [];
+		foreach ($bindings_by_group as $item):
+			$withdrawal_errors = $native_edit ? sdwan_steering_withdrawal_errors($item, $native) : [];
+		?>
 		<tr><td><a href="<?=sdwan_ui_escape('/sdwan/forwarding.php?' . http_build_query(['group' => $item['group'], 'policy' => $item['policy']]))?>"><?=sdwan_ui_escape($item['group'])?></a></td><td><?=sdwan_ui_escape($item['policy'])?></td>
-		<td><?php if ($native_edit): ?>
+		<td><?php if ($withdrawal_errors): ?>
+		<?php foreach ($withdrawal_errors as $error): ?><span class="help-block"><?=sdwan_ui_escape($error)?></span><?php endforeach; ?>
+		<?php elseif ($native_edit): ?>
 		<form method="post" action="/sdwan/forwarding.php" class="form-inline">
 			<input type="hidden" name="group" value="<?=sdwan_ui_escape($item['group'])?>">
 			<input type="hidden" name="policy" value="<?=sdwan_ui_escape($item['policy'])?>">

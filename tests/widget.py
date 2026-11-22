@@ -203,6 +203,16 @@ echo json_encode([http_response_code() ?: 200, $body, $sdwan_title_link,
     assert "No current data" in retargeted and "GW_B" not in retargeted
     fixture["gateways/gateway_item"][0].pop("monitor")
     config.write_text(json.dumps(fixture))
+    gateway = fixture["gateways/gateway_item"].pop(0)
+    config.write_text(json.dumps(fixture))
+    removed = render("ajax")[1]
+    assert "No current data" in removed and all(label not in removed for label in ("GW_A", "GW_B", "Applied"))
+    fixture["gateways/gateway_item"].insert(0, {**gateway, "monitor_disable": ""})
+    config.write_text(json.dumps(fixture))
+    disabled = render("ajax")[1]
+    assert "No current data" in disabled and all(label not in disabled for label in ("GW_A", "GW_B", "Applied"))
+    fixture["gateways/gateway_item"][0] = gateway
+    config.write_text(json.dumps(fixture))
 
     def voice_paths(voice):
         save({"policies": dict(snapshot["policies"], Voice=voice)})
@@ -247,11 +257,22 @@ echo json_encode([http_response_code() ?: 200, $body, $sdwan_title_link,
     fixture["gateways/sdwan_bindings"] = {"item": [{"group": "Invalid"}]}
     config.write_text(json.dumps(fixture))
     assert "Bindings unreadable" in row(render("ajax")[1], "Voice")
+    fixture["gateways/sdwan_bindings"] = {"item": bindings}
+    settings["policies"]["item"] = [rule for rule in rules if rule["name"] != "Voice"]
+    config.write_text(json.dumps(fixture))
+    orphaned = render("ajax")[1]
+    assert 'href="/sdwan/forwarding.php">Review Forwarding' in orphaned and "policy that no longer exists" in orphaned
+    assert "policy=Voice" not in orphaned and "Applied" not in orphaned
+    assert "policy that no longer exists" not in render("ajax", "view")[1]
+    settings.pop("policies")
+    config.write_text(json.dumps(fixture))
+    orphaned = render("ajax")[1]
+    assert "policy that no longer exists" in orphaned and "No SD-WAN policies configured" in orphaned
     config.write_text("{}")
     assert "No SD-WAN policies configured." in render("ajax")[1]
     config.write_text(json.dumps({"installedpackages/sdwan": {"version": "invalid"}}))
     assert "cannot be read" in render("ajax")[1]
-    print("ok - verified egress and standby paths, blocked and pending rules, stale data and role-scoped links")
+    print("ok - verified egress and standby paths, stale data, native gateway drift and role-scoped orphan warnings")
     return preview, body
 
 

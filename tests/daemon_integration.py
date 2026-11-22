@@ -57,9 +57,11 @@ def fixture(sandbox):
     }
 
 
-def answer(listener, sample):
+def answer(listener, sample, before_reply=None):
     connection, _ = listener.accept()
     with connection:
+        if before_reply is not None:
+            before_reply()
         connection.sendall((sample + "\n").encode("ascii"))
 
 
@@ -218,6 +220,21 @@ def run(binary, require_unix):
                    "echo json_encode(sdwan_current_snapshot(sdwan_get_config(), sdwan_gateways()));")
         def current_snapshot():
             return json.loads(php(binary, "-d", f"include_path={sandbox}", "-r", current))
+
+        edited = fixture(sandbox)
+        edited["interfaces"]["opt1"].update(ipaddr="192.0.2.101", subnet="25")
+        config_path.write_bytes(original_config)
+        replies = [
+            workers.submit(answer, listeners["GW_A"], healthy["GW_A"],
+                           lambda: config_path.write_text(json.dumps(edited))),
+            workers.submit(answer, listeners["GW_B"], healthy["GW_B"]),
+        ]
+        expect_failure("Observation failed")
+        for reply in replies:
+            reply.result()
+        assert current_snapshot() is None
+        config_path.write_bytes(original_config)
+        print("ok - a native address edit during collection prevents publishing a stale recommendation")
 
         assert current_snapshot() == second
         primary, secondary = baseline["gateways/gateway_item"]

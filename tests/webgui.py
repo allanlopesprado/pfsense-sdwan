@@ -194,7 +194,8 @@ def run(php, classes, screenshot_dir=None):
         for module in ("sdwan.inc", "sdwan_engine.inc", "sdwan_preflight.inc", "sdwan_steering.inc",
                        "sdwan_release.inc", "sdwan_log.inc", "sdwan_probe.inc"):
             shutil.copyfile(SOURCE / "pkg" / module, root / module)
-        for ui in (root / "sdwan/ui.inc.php", root / "sdwan/forwarding.php", root / "sdwan/updates.php"):
+        for ui in (root / "sdwan/ui.inc.php", root / "sdwan/editor.inc.php", root / "sdwan/forwarding.php",
+                   root / "sdwan/updates.php"):
             ui.write_text(ui.read_text().replace("'/usr/local/pkg/", "__DIR__ . '/../"))
         version = root / "pfsense-version"
         supervisor = root / "sdwand.pid"
@@ -321,6 +322,98 @@ def run(php, classes, screenshot_dir=None):
         blocked = request("members", post={"action": "delete", "original": "backup", "__csrf_magic": form.tokens[0]})
         assert "following policies first: VOICE." in blocked
         assert json.loads(blocked.split("SAVED=")[1]) == [0, config]
+        shared = {**config, "policies": [config["policies"][0], {**config["policies"][0], "name": "ERP"}]}
+        for page, name in (("members", "01"), ("slas", "01")):
+            shared_form = Choices(request(page, config=shared))
+            blocked = request(page, config=shared, post={"action": "delete", "original": name,
+                               "__csrf_magic": shared_form.tokens[0], "revision": shared_form.revisions[0]})
+            assert "following policies first: VOICE, ERP." in blocked, blocked
+            assert json.loads(blocked.split("SAVED=")[1]) == [0, shared]
+        sole_member = {**config, "members": [config["members"][1]],
+                       "policies": [{**config["policies"][0], "members": ["01"]}]}
+        sole_form = Choices(request("policies", config=sole_member, get={"edit": "VOICE"}))
+        blocked = request("policies", config=sole_member, post={
+            **posted, "members": [], "__csrf_magic": sole_form.tokens[0], "revision": sole_form.revisions[0]})
+        assert "Select at least one member" in blocked
+        assert json.loads(blocked.split("SAVED=")[1]) == [0, sole_member]
+        binding = {"group": "PBR", "policy": "VOICE", "gateways": {"item": ["GW1", "GW2"]},
+                   "trackers": {"item": ["50321"]}, "policy_revision": "a" * 64, "rules_revision": "b" * 64}
+        active_policy = {**native, "gateways/sdwan_bindings": {"item": [binding]},
+                         "gateways/sdwan_bindings/item": [binding]}
+        for privileges in ({}, {"/firewall_rules.php": False}):
+            active_list = request("policies", native=active_policy, privileges=privileges)
+            assert "Remove the forwarding binding before deleting this policy" in active_list, active_list
+            assert 'value="delete"' not in active_list, active_list
+            if privileges:
+                assert "PBR" not in active_list, active_list
+            controls = Choices(active_list)
+            deleted = request("policies", native=active_policy, privileges=privileges, post={
+                "action": "delete", "original": "VOICE", "__csrf_magic": controls.tokens[0],
+                "revision": controls.revisions[0]})
+            assert "Remove the forwarding binding before deleting this policy" in deleted, deleted
+            assert json.loads(deleted.split("SAVED=")[1]) == [0, config]
+        invalid_bindings = {**active_policy, "gateways/sdwan_bindings": {"item": [None]}}
+        invalid_list = request("policies", native=invalid_bindings)
+        assert "Review the saved forwarding bindings before deleting policies" in invalid_list
+        assert 'value="delete"' not in invalid_list
+        controls = Choices(invalid_list)
+        blocked = request("policies", native=invalid_bindings, post={
+            "action": "delete", "original": "VOICE", "__csrf_magic": controls.tokens[0],
+            "revision": controls.revisions[0]})
+        assert "Review the saved forwarding bindings before deleting policies" in blocked
+        assert json.loads(blocked.split("SAVED=")[1]) == [0, config]
+        unbound_list = request("policies")
+        assert 'value="delete"' in unbound_list
+        controls = Choices(unbound_list)
+        deleted = request("policies", post={"action": "delete", "original": "VOICE",
+                          "__csrf_magic": controls.tokens[0], "revision": controls.revisions[0]})
+        assert json.loads(deleted.split("SAVED=")[1]) == [1, {**config, "policies": []}], deleted
+        print("ok - a policy can be deleted only after its forwarding binding is removed")
+
+        thresholds = [dict(sla, rttsd_ms="1.5") for sla in config["slas"]]
+        optional_config = {**probe_config, "slas": thresholds}
+        for page, name, required, optional_field, html_value in (
+            ("members", "01", {"gateway": ":GW2", "cost": "3", "probe_primary": "tcp://192.0.2.21:443"},
+             "probe_secondary", "dns://example.com 198.51.100.21"),
+            ("slas", "01", {"latency_ms": "25", "loss_pct": "0"}, "rttsd_ms", "1.5"),
+        ):
+            controls = Choices(request(page, config=optional_config, get={"edit": name}))
+            edit = {**required, "action": "save", "name": name, "original": name,
+                    "__csrf_magic": controls.tokens[0], "revision": controls.revisions[0]}
+            omission = request(page, config=optional_config, post=edit)
+            assert json.loads(omission.split("SAVED=")[1]) == [0, optional_config], omission
+            for malformed_value in ([], None, "\u0000", "x" * 513):
+                invalid = request(page, config=optional_config, post={**edit, optional_field: malformed_value})
+                assert "Enter a valid value for" in invalid, invalid
+                assert Choices(invalid).forms[0][1][optional_field] == html_value, invalid
+                assert json.loads(invalid.split("SAVED=")[1]) == [0, optional_config], invalid
+            cleared = request(page, config=optional_config, post={**edit, optional_field: ""})
+            writes, cleared_config = json.loads(cleared.split("SAVED=")[1])
+            cleared_rows = [r for r in cleared_config[page] if r["name"] == name]
+            assert writes == 1 and optional_field not in cleared_rows[0], cleared
+        required_checks = {**optional_config, "policies": [
+            {**config["policies"][0], "secondary_check": "required"}]}
+        controls = Choices(request("members", config=required_checks, get={"edit": "01"}))
+        blocked = request("members", config=required_checks, post={
+            "action": "save", "original": "01", "name": "01", "gateway": ":GW2", "cost": "3",
+            "probe_primary": "tcp://192.0.2.21:443", "probe_secondary": "",
+            "__csrf_magic": controls.tokens[0], "revision": controls.revisions[0]})
+        assert "Configure the required service check on 01 for policy VOICE" in blocked
+        assert json.loads(blocked.split("SAVED=")[1]) == [0, required_checks]
+        print("ok - missing or malformed optional inputs preserve settings and only an explicit blank clears them")
+
+        add_form = Choices(request("members", get={"add": "1"}))
+        new_member = {"action": "save", "name": "free", "gateway": ":FREE", "cost": "7",
+                      "__csrf_magic": add_form.tokens[0], "revision": add_form.revisions[0]}
+        for bad_identity in (new_member, {**new_member, "original": []}):
+            blocked = request("members", post=bad_identity)
+            assert "This entry could not be identified" in blocked
+            assert json.loads(blocked.split("SAVED=")[1]) == [0, config]
+        added = request("members", post={**new_member, "original": ""})
+        writes, added_config = json.loads(added.split("SAVED=")[1])
+        assert writes == 1 and added_config["members"][-1] == {"name": "free", "gateway": "FREE", "cost": "7"}
+        assert "Entry not found" in request("members", get={"edit": []})
+
         empty = {**config, "members": [], "slas": [], "policies": []}
         for page, message in [("policies", "one member and one performance SLA"), ("members", "unused gateway")]:
             html = request(page, config=empty, native={}, get={"add": "1"})
@@ -333,6 +426,9 @@ def run(php, classes, screenshot_dir=None):
 
         assert "diagnostics.php?policy=VOICE" in request("status")
         assert "diagnostics.php?policy=VOICE" not in request("status", inspect=False)
+        native_without_backup = native
+        native = {**native, "gateways/gateway_item": [*native["gateways/gateway_item"],
+                  {"interface": "wan", "name": "GONE"}]}
         sample = {"status": "online", "rtt_ms": 1, "rttsd_ms": 0, "loss_pct": 0}
         policy = {"candidates": {"backup": "Eligible", "01": "Eligible"}, "selected": "backup",
                   "path_status": "alternatives", "eligible_count": 2, "shared_interface": False,
@@ -340,6 +436,26 @@ def run(php, classes, screenshot_dir=None):
         snapshot = {"members": {"backup": sample, "01": sample}, "policies": {"VOICE": policy}}
         fresh = request("status", snapshot=snapshot)
         assert "2 of 2" in fresh and "Members share a transport interface" in fresh
+        observed = json.loads((root / "observer.json").read_text())
+        disabled_monitor = {**native, "gateways/gateway_item": [
+            {**gateway, "monitor_disable": ""} if gateway["name"] == "GONE" else gateway
+            for gateway in native["gateways/gateway_item"]]}
+        for changed_native, issue in (
+            (native_without_backup, "Gateway unavailable"),
+            ({**native, "interfaces": {"wan": {}}}, "Gateway unavailable"),
+            (disabled_monitor, "Gateway monitoring disabled"),
+        ):
+            changed_status = request("status", native=changed_native, snapshot=observed)
+            assert issue in changed_status and "2 of 2" not in changed_status and "1.00 ms" not in changed_status
+            changed_report = request("diagnostics", native=changed_native, snapshot=observed)
+            assert f"backup (GONE): {issue}." in changed_report and "System &gt; Routing" in changed_report
+            assert 'aria-label="Member evaluation"' not in changed_report and "Recommended</strong>" not in changed_report
+        deleted = {**config, "policies": []}
+        deleted_status = request("status", config=deleted, snapshot=observed)
+        assert "No policies configured" in deleted_status and "2 of 2" not in deleted_status
+        deleted_policy = request("diagnostics", config=deleted, get={"policy": "VOICE"}, snapshot=observed)
+        assert "no longer configured" in deleted_policy and 'aria-label="Member evaluation"' not in deleted_policy
+        print("ok - deleted policies, native gateways and monitor settings cannot display stale health")
         excluded = {**policy, "candidates": {"backup": "Loss above SLA", "01": "Loss above SLA"},
                     "selected": None, "eligible_count": 0, "path_status": "no_eligible"}
         unavailable = request("status", snapshot={**snapshot, "policies": {"VOICE": excluded}})
@@ -429,6 +545,11 @@ def run(php, classes, screenshot_dir=None):
         assert Choices(updates).posts == 1 and len(Choices(updates).tokens) == 1
         assert "/pkg_mgr_installed.php" not in Choices(updates).links and "Installed Packages" not in updates
         assert 'name="upgrade_release"' not in updates
+        unreadable = {**config, "slas": []}
+        assert "The stored SD-WAN configuration cannot be read" in request("status", config=unreadable)
+        repair_updates = request("updates", config=unreadable)
+        assert "Installed Version" in repair_updates and "0.4.7" in repair_updates and "Check GitHub" in repair_updates
+        assert Choices(repair_updates).posts == 1 and len(Choices(repair_updates).tokens) == 1
         checked = {"check_release": "1", "__csrf_magic": Choices(updates).tokens[0]}
         offered = request("updates", post=checked)
         assert "Upgrade to 0.4.8" in offered and "/pkg_mgr_installed.php" not in Choices(offered).links
@@ -524,11 +645,14 @@ def run(php, classes, screenshot_dir=None):
                                         "LTE": {**sample, "status": "degraded", "rtt_ms": 76.1, "rttsd_ms": 5.8}},
                              "policies": {"Office": {**policy, "candidates": {"Fiber": "Eligible", "LTE": "RTT exceeds the SLA"},
                                  "selected": "Fiber", "path_status": "degraded", "eligible_count": 1, "shared_underlay": False}}}
-            pages = {page: request(page, config=demo, snapshot=demo_snapshot)
+            demo_native = {**native, "gateways/gateway_item": [
+                {"interface": "wan", "name": member["gateway"]} for member in demo["members"]]}
+            pages = {page: request(page, config=demo, native=demo_native, snapshot=demo_snapshot)
                      for page in ("status", "diagnostics", "members", "updates")}
             pages["members-edit"] = request("members", get={"edit": "1"})
             pages["updates"] = offered.split("</html>", 1)[0] + "</html>"
-            pages["status-stopped"] = request("status", config=demo, snapshot=demo_snapshot, service_state="stopped")
+            pages["status-stopped"] = request("status", config=demo, native=demo_native, snapshot=demo_snapshot,
+                                              service_state="stopped")
 
         native_group = {"name": "PBR", "item": ["GW1|1|address", "GW2|2|address"]}
         rule = {"tracker": "50321", "interface": "lan", "gateway": "PBR", "ipprotocol": "inet", "type": "pass",
@@ -620,14 +744,20 @@ def run(php, classes, screenshot_dir=None):
         probe_binding = json.loads(revised.split("BINDINGS=")[1].split("\nSAVED=")[0])["item"][0]
         assert probe_binding["policy_revision"] != data["item"][0]["policy_revision"]
         assert probe_binding["rules_revision"] == data["item"][0]["rules_revision"]
-        orphan = {**fixture, "gateways/sdwan_bindings": data, "gateways/gateway_group": []}
-        rollback = request("forwarding", native=orphan)
+        unbound_rule = {key: value for key, value in rule.items() if key != "gateway"}
+        orphan = {**active, "gateways/gateway_group": [], "filter/rule": [unbound_rule, guard]}
+        blocked = request("forwarding", native=orphan, steering_abi=True)
+        assert "Firewall rule 50321 has no valid native gateway" in blocked and 'value="unbind"' not in blocked
+        rollback_ready = {**orphan, "filter/rule": [{**unbound_rule, "disabled": ""}, guard]}
+        rollback = request("forwarding", native=rollback_ready)
         assert 'value="unbind"' in rollback and 'value="bind"' not in rollback, rollback
         controls = Choices(rollback)
         post = {**names, "action": "unbind", "revision": controls.revisions[0], "__csrf_magic": controls.tokens[0]}
-        reverted = request("forwarding", native=orphan, post=post, capture_bindings=True)
+        denied = request("forwarding", native=orphan, post=post)
+        assert "Settings changed" in denied and "SAVED=[0," in denied
+        reverted = request("forwarding", native=rollback_ready, post=post, capture_bindings=True)
         assert json.loads(reverted.split("SAVED=")[1])[0] == 1 and '"item":[]' in reverted, reverted
-        print("ok - stock preview, native permissions, identified rules, opt-in hook and orphan rollback form")
+        print("ok - stock preview, native permissions, opt-in binding and guarded orphan rollback")
 
 
 if __name__ == "__main__":

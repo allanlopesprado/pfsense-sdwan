@@ -4,6 +4,8 @@ Versions are listed newest first, in numeric order. The [dist directory](dist/) 
 
 **Unreleased** · Harden service probes, validate SLA measurements and PF pool weights, recover failed package updates, and verify package metadata and source in CI.
 
+Reject stale measurements after native interface edits, protect bindings after gateway group removal, and preserve optional values when an edit omits them.
+
 | Version | Main changes | Notes |
 | --- | --- | --- |
 | 0.4.28 | Enable CE 2.9.2 updates and verify PF reconciliation, supervised recovery, sticky pools, and VTI transports. | [Notes](docs/releases/v0.4.28.md) |

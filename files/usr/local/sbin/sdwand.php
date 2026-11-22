@@ -104,8 +104,14 @@ function sdwan_observe_once(): void {
 		}
 		$snapshot = sdwan_evaluate($config, $observations, $started, $inventory, $service_checks);
 		$snapshot['config_revision'] = sdwan_config_revision($config);
-		if (sdwan_gateway_inventory_revision($config, $inventory) !== $inventory_revision) {
-			throw new RuntimeException('Gateway path changed during observation');
+		// A native or SD-WAN edit can land while the observer waits on probe I/O.
+		if (!config_read_file(false, true)) {
+			throw new RuntimeException('Cannot refresh pfSense configuration');
+		}
+		$current_config = sdwan_get_config();
+		if (sdwan_config_revision($current_config) !== $snapshot['config_revision'] ||
+		    sdwan_gateway_inventory_revision($current_config, sdwan_gateways()) !== $inventory_revision) {
+			throw new RuntimeException('Configuration or gateway path changed during observation');
 		}
 		$snapshot['gateway_inventory_revision'] = $inventory_revision;
 		$snapshot['observer'] = ['pid' => getmypid(), 'version' => SDWAN_OBSERVER_PACKAGE_VERSION];

@@ -254,6 +254,32 @@ function sdwan_steering_unbind(string $group, string $expected_revision): array 
 	return sdwan_steering_edit($group, null, $expected_revision);
 }
 
+/* Preserve a bound tracker until its enabled pass rule has a native route. */
+function sdwan_steering_withdrawal_errors(array $binding, array $native): array {
+	$targets = array_map(static fn($gateway) => [$gateway['family']], $native['gateways']);
+	foreach ($native['groups'] as $group) {
+		foreach ((array)($group['item'] ?? []) as $item) {
+			[$member, $tier] = array_pad(is_string($item) ? explode('|', $item, 3) : [], 2, '');
+			if (isset($native['gateways'][$member], $group['name']) && in_array($tier, ['1', '2', '3', '4', '5'], true)) {
+				$targets[$group['name']][] = $native['gateways'][$member]['family'];
+			}
+		}
+	}
+	$errors = [];
+	foreach ($native['rules'] as $rule) {
+		$tracker = $rule['tracker'] ?? '';
+		if ((!is_string($tracker) && !is_int($tracker)) || !in_array((string)$tracker, $binding['trackers'], true) ||
+		    isset($rule['disabled']) || ($rule['type'] ?? '') !== 'pass') {
+			continue;
+		}
+		$gateway = $rule['gateway'] ?? null;
+		if (!is_string($gateway) || !in_array($rule['ipprotocol'] ?? null, $targets[$gateway] ?? [], true)) {
+			$errors[] = "Firewall rule {$tracker} has no valid native gateway for its address family. Assign one or disable the rule before removing the binding.";
+		}
+	}
+	return $errors;
+}
+
 function sdwan_steering_edit(string $group, ?string $policy, string $expected_revision): array {
 	if ($policy !== null && !sdwan_steering_supported()) {
 		return ['Forwarding requires a supported native pfSense steering integration.'];
@@ -268,16 +294,24 @@ function sdwan_steering_edit(string $group, ?string $policy, string $expected_re
 		if (!config_read_file(false, false)) {
 			return ['The current pfSense configuration could not be read.'];
 		}
-		if (!hash_equals(sdwan_steering_revision(), $expected_revision)) {
+		$config = sdwan_get_config();
+		$rows = sdwan_steering_rows();
+		$native = sdwan_steering_native();
+		if (!hash_equals(sdwan_config_revision([$config, $rows, $native]), $expected_revision)) {
 			return ['Settings changed. Review the current preview before applying.'];
 		}
-		$rows = sdwan_steering_rows();
+		$active = sdwan_steering_bindings();
 		if ($policy === null) {
-			$updated = array_values(array_filter($rows, static fn($row) =>
-			    sdwan_steering_group($row['group'] ?? null) !== $group));
-			if ($updated === $rows) {
+			$binding = $active[$group] ?? null;
+			if ($binding === null) {
 				return ['This group has no saved binding.'];
 			}
+			$errors = sdwan_steering_withdrawal_errors($binding, $native);
+			if ($errors) {
+				return $errors;
+			}
+			$updated = array_values(array_filter($rows, static fn($row) =>
+			    sdwan_steering_group($row['group'] ?? null) !== $group));
 			if (sdwan_steering_supported()) {
 				$observation_lock = @fopen(SDWAN_SNAPSHOT_PATH . '.lock', 'c');
 				if (!is_resource($observation_lock) || !flock($observation_lock, LOCK_EX | LOCK_NB)) {
@@ -289,17 +323,11 @@ function sdwan_steering_edit(string $group, ?string $policy, string $expected_re
 				    'signature' => sdwan_config_revision([]), 'attempts' => 0, 'requested_at' => 0,
 				    'accepted' => false, 'confirmed' => false,
 				];
-				try {
-					$active = sdwan_steering_bindings();
-					$known = [...($receipt['trackers'] ?? []), ...sdwan_steering_trackers($active)];
-					$receipt['trackers'] = array_values(array_unique($known));
-					sort($receipt['trackers'], SORT_STRING);
-					unset($active[$group]);
-					$receipt['withdrawal'] = sdwan_steering_withdrawal($receipt, sdwan_steering_trackers($active));
-				} catch (UnexpectedValueException $e) {
-					$receipt['withdrawal'] = ['trackers' => $receipt['withdrawal']['trackers'] ?? [],
-					    'unknown' => true, 'since_ns' => hrtime(true)];
-				}
+				$known = [...($receipt['trackers'] ?? []), ...sdwan_steering_trackers($active)];
+				$receipt['trackers'] = array_values(array_unique($known));
+				sort($receipt['trackers'], SORT_STRING);
+				unset($active[$group]);
+				$receipt['withdrawal'] = sdwan_steering_withdrawal($receipt, sdwan_steering_trackers($active));
 				$receipt = array_replace($receipt, ['attempts' => 0, 'requested_at' => 0,
 				    'accepted' => false, 'confirmed' => false]);
 				if (!sdwan_steering_write_receipt($path, $receipt)) {
@@ -307,12 +335,13 @@ function sdwan_steering_edit(string $group, ?string $policy, string $expected_re
 				}
 			}
 		} else {
-			$preview = sdwan_steering_preview(sdwan_get_config(), $policy, $group);
+			$preview = sdwan_steering_preflight($config, $policy, $group, $native);
 			if ($preview['errors']) {
 				return $preview['errors'];
 			}
 			$row = $preview['binding'];
-			foreach (sdwan_steering_bindings() as $saved) {
+			$row['policy_revision'] = sdwan_steering_policy_revision($config, $policy);
+			foreach ($active as $saved) {
 				if ($saved['group'] === $group || array_intersect($row['trackers'], $saved['trackers'])) {
 					return ['Roll back the existing binding before binding these rules.'];
 				}
@@ -335,6 +364,8 @@ function sdwan_steering_edit(string $group, ?string $policy, string $expected_re
 			sdwan_log_event('binding_error');
 			return ['pfSense could not save the forwarding binding.'];
 		}
+	} catch (UnexpectedValueException $error) {
+		return [$error->getMessage()];
 	} finally {
 		if (is_resource($observation_lock)) {
 			fclose($observation_lock);
@@ -1127,6 +1158,8 @@ function sdwan_steering_reconnect(string $group, string $gateway, string $revisi
 			$count += (int)$match[1];
 		}
 		return ['errors' => [], 'count' => $count];
+	} catch (UnexpectedValueException $error) {
+		return ['errors' => [$error->getMessage()]];
 	} finally {
 		sdwan_unlock($lock);
 	}

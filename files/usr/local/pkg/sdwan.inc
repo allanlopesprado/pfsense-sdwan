@@ -265,8 +265,10 @@ function sdwan_gateways(): array {
 		$ip = explode('%', $address, 2)[0];
 		$family = filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6) ? 'inet6' :
 		    (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) ? 'inet' : ($gateway['ipprotocol'] ?? 'inet'));
-		$source_type = $interfaces[$interface][$family === 'inet6' ? 'ipaddrv6' : 'ipaddr'] ?? '';
+		$ipv6 = $family === 'inet6';
+		$source_type = $interfaces[$interface][$ipv6 ? 'ipaddrv6' : 'ipaddr'] ?? '';
 		$dynamic_source = in_array($source_type, ['dhcp', 'pppoe', 'ppp', 'pptp', 'l2tp', 'dhcp6', 'slaac', 'track6', '6rd'], true);
+		$static_source = filter_var($source_type, FILTER_VALIDATE_IP, $ipv6 ? FILTER_FLAG_IPV6 : FILTER_FLAG_IPV4);
 		$probe = [];
 		foreach (['latencyhigh', 'latencylow', 'losshigh', 'losslow', 'interval', 'loss_interval',
 		    'time_period', 'alert_interval', 'data_payload'] as $setting) {
@@ -282,6 +284,10 @@ function sdwan_gateways(): array {
 			'transport' => str_starts_with($device, 'ipsec') ? ($transports[$device] ?? '') : $interface,
 			'address' => $address,
 			...($dynamic_source ? ['dynamic_source' => true] : []),
+			...($static_source !== false ? [
+				'static_source' => $static_source,
+				'static_prefix' => $interfaces[$interface][$ipv6 ? 'subnetv6' : 'subnet'] ?? null,
+			] : []),
 			'monitor' => !empty($gateway['monitor']) ? $gateway['monitor'] : $address,
 			'family' => $family,
 			'monitor_disabled' => isset($gateway['monitor_disable']),

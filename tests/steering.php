@@ -414,6 +414,47 @@ $receipt_path = SDWAN_SNAPSHOT_PATH . '.forwarded';
 $before_requests = $pending;
 $before_writes = $writes;
 $current = $disk;
+$revision_before_native_edit = sdwan_steering_revision();
+$disk['gateways/gateway_group'] = [];
+unset($disk['filter/rule'][0]['gateway']);
+$changed_native = $disk;
+verify(sdwan_steering_unbind('G', $revision_before_native_edit) !== [] && $current === $changed_native &&
+    $writes === $before_writes && $pending === $before_requests && !is_file($receipt_path),
+    'a tab opened before native group removal cannot withdraw a binding');
+$errors = sdwan_steering_unbind('G', sdwan_steering_revision());
+verify(str_contains($errors[0] ?? '', 'Firewall rule 301 has no valid native gateway') && $disk === $changed_native &&
+    isset(sdwan_steering_bindings()['G']) && $writes === $before_writes && $pending === $before_requests && !is_file($receipt_path),
+    'reviewing the new configuration still protects an enabled pass rule without a native gateway');
+$disk['filter/rule'][0]['gateway'] = 'G';
+$current = $disk;
+verify(sdwan_steering_unbind('G', sdwan_steering_revision()) !== [] && !is_file($receipt_path),
+    'an obsolete group name is insufficient to withdraw a binding');
+$edited_native = sdwan_steering_native();
+$edited_native['groups'] = [['name' => 'G', 'item' => ['Missing|1|']]];
+verify(sdwan_steering_withdrawal_errors(sdwan_steering_bindings()['G'], $edited_native) !== [],
+    'a group with no available configured member cannot receive a withdrawn rule');
+$edited_native['groups'][0]['item'] = ['A|6|'];
+verify(sdwan_steering_withdrawal_errors(sdwan_steering_bindings()['G'], $edited_native) !== [],
+    'a disabled gateway tier cannot receive a withdrawn rule');
+$edited_native['rules'][0]['gateway'] = 'A';
+verify(sdwan_steering_withdrawal_errors(sdwan_steering_bindings()['G'], $edited_native) === [],
+    'assigning an existing gateway in the correct address family permits withdrawal');
+$disk['filter/rule'][0]['disabled'] = '';
+$current = $disk;
+verify(sdwan_steering_unbind('G', sdwan_steering_revision()) === [] && !sdwan_steering_bindings() &&
+    $disk['filter/rule'][0]['disabled'] === '' && ($disk['filter/rule'][0]['gateway'] ?? null) === 'G' &&
+    sdwan_steering_read_receipt($receipt_path)['withdrawal']['trackers'] === ['301'],
+    'disabling the affected rule permits withdrawal and retains its native data and PF evidence');
+unlink($receipt_path);
+$disk = $current = $before_unbind;
+$pending = $before_requests;
+$writes = $before_writes;
+$disk[SDWAN_BINDINGS_PATH] = 'invalid restored bindings';
+verify(sdwan_steering_unbind('G', $revision_before_native_edit) === ['Unsupported forwarding binding format.'] &&
+    sdwan_steering_reconnect('G', 'A', $revision_before_native_edit)['errors'] === ['Unsupported forwarding binding format.'] &&
+    $writes === $before_writes && $pending === $before_requests && !is_file($receipt_path),
+    'configuration altered between the form and the save reports invalid bindings without a partial change');
+$current = $disk = $before_unbind;
 $fail = true;
 verify(sdwan_steering_unbind('G', sdwan_steering_revision()) !== [] && $current === $disk &&
     !is_file($receipt_path) && $pending === $before_requests,

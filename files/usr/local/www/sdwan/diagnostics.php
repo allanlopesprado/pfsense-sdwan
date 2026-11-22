@@ -3,7 +3,8 @@ require_once('guiconfig.inc');
 define('SDWAN_GUI', true);
 require_once(__DIR__ . '/ui.inc.php');
 
-$snapshot = sdwan_ui_snapshot($sdwan);
+$inventory = sdwan_gateways();
+$snapshot = sdwan_ui_snapshot($sdwan, $inventory);
 $policies = array_column($sdwan['policies'], null, 'name');
 $requested = sdwan_ui_choice_value(sdwan_ui_scalar($_GET, 'policy'));
 $current = $requested !== '' ? $requested : ($sdwan['policies'][0]['name'] ?? '');
@@ -29,6 +30,18 @@ if (!$policies) {
 	], gettext('Inspect'));
 }
 if ($policy !== null):
+	$issues = [];
+	foreach ($policy['members'] as $member) {
+		$gateway = $members[$member]['gateway'];
+		$issue = sdwan_ui_gateway_config_issue($gateway, $inventory);
+		if ($issue !== null) {
+			$issues[] = sdwan_ui_escape(sprintf(gettext('%1$s (%2$s): %3$s. Check System > Routing.'),
+			    $member, $gateway, $issue));
+		}
+	}
+	if ($issues) {
+		print_info_box(implode('<br>', $issues), 'warning', false);
+	}
 	$sla = $slas[$policy['sla']];
 	$use_pool = $policy['strategy'] === 'balance';
 	$selected = $use_pool ? null : ($result['selected'] ?? null);
