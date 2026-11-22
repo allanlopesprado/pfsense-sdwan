@@ -625,45 +625,97 @@ function sdwan_steering_loaded_scope(string $rule): ?string {
 	return preg_match('/^inet6?\s/', $selectors) ? $parts[1] . ' ' . trim(preg_replace('/\s+/', ' ', $selectors)) : null;
 }
 
-function sdwan_steering_literal_scope(string $scope): ?array {
-	if (!preg_match('/^([a-z0-9_.-]+) (inet6?)(?: proto ([a-z0-9]+))? (.*)$/D', $scope, $head)) {
+function sdwan_steering_scope_fields(string $scope, bool $options = false): ?array {
+	if (!preg_match('/^([a-z0-9_.-]+) (inet6?)(?: proto ([a-z0-9_-]+))? (.*)$/D', $scope, $head)) {
 		return null;
 	}
 	[, $device, $family, $protocol, $match] = $head;
+	if ($protocol === 'icmp6') {
+		$protocol = 'ipv6-icmp';
+	}
 	if ($match === 'all') {
 		$match = 'from any to any';
 	}
-	if (!preg_match('/^from (\S+)(?: port = ([0-9]+))? to (\S+)(?: port = ([0-9]+))?$/D', $match, $endpoints)) {
+	$port = '(?: port ((?:[<>=]{1,2} )?[0-9]{1,5}(?:(?: >< |:)[0-9]{1,5})?))?';
+	$qualifier = $options ? '(?: (?:icmp6?-type|tos|prio)\b.*)?' : '';
+	if (!preg_match("/^from (\\S+){$port} to (\\S+){$port}{$qualifier}$/D", $match, $endpoints)) {
 		return null;
 	}
 	$endpoint = static function (string $address, string $port): array {
-		$result = $address === 'any' ? ['any' => ''] : ['address' => $address];
-		return $port === '' ? $result : $result + ['port' => $port];
+		if (preg_match('/^<([A-Z0-9]+)__NETWORK(?::[0-9]+)?>$/D', $address, $table)) {
+			$result = ['network' => strtolower($table[1])];
+		} else {
+			$result = $address === 'any' ? ['any' => ''] : ['address' => $address];
+		}
+		if ($port === '') {
+			return $result;
+		}
+		if (preg_match('/^([0-9]+) >< ([0-9]+)$/D', $port, $range)) {
+			$port = ((int)$range[1] + 1) . '-' . ((int)$range[2] - 1);
+		} elseif (preg_match('/^(<=|>=|=) ([0-9]+)$/D', $port, $limit)) {
+			$port = match ($limit[1]) {
+				'<=' => '1-' . $limit[2],
+				'>=' => $limit[2] . '-65535',
+				'=' => $limit[2],
+			};
+		}
+		return $result + ['port' => $port];
 	};
-	$source = $endpoint($endpoints[1], $endpoints[2] ?? '');
-	$destination = $endpoint($endpoints[3], $endpoints[4] ?? '');
-	return sdwan_preflight_endpoint($source, $family, $device) && sdwan_preflight_endpoint($destination, $family, $device)
-	    ? ['device' => $device, 'family' => $family, 'protocol' => $protocol, 'source' => $source,
-	       'destination' => $destination] : null;
+	return ['device' => $device, 'family' => $family, 'protocol' => $protocol,
+	    'source' => $endpoint($endpoints[1], $endpoints[2] ?? ''),
+	    'destination' => $endpoint($endpoints[3], $endpoints[4] ?? '')];
+}
+
+function sdwan_steering_scope_endpoint(array $endpoint): array {
+	$endpoint = array_intersect_key($endpoint, ['any' => true, 'address' => true, 'network' => true, 'port' => true]);
+	if (sdwan_preflight_unrestricted($endpoint)) {
+		$endpoint = ['any' => ''] + array_intersect_key($endpoint, ['port' => true]);
+	}
+	if (in_array($endpoint['port'] ?? null, ['1-65535', '1:65535'], true)) {
+		unset($endpoint['port']);
+	}
+	return $endpoint;
+}
+
+function sdwan_steering_scope_matches(array $actual, array $expected): bool {
+	if ($actual['device'] !== $expected['device'] || $actual['family'] !== $expected['family'] ||
+	    !in_array($actual['protocol'], $expected['protocols'], true)) {
+		return false;
+	}
+	foreach (['source', 'destination'] as $field) {
+		$loaded = sdwan_steering_scope_endpoint($actual[$field]);
+		$configured = sdwan_steering_scope_endpoint($expected[$field]);
+		$ingress = $configured['network'] ?? '';
+		if (!sdwan_preflight_endpoint($loaded, $expected['family'], $ingress) ||
+		    !sdwan_preflight_endpoint_covers($configured, $loaded) ||
+		    !sdwan_preflight_endpoint_covers($loaded, $configured)) {
+			return false;
+		}
+	}
+	return true;
 }
 
 /* Prove full coverage for plain quick rules. Rules with extra match options,
  * anchors, aliases or partial overlap require a traffic test. */
 function sdwan_steering_loaded_shadow(array $lines, int $position, string $scope): bool {
-	$bound = sdwan_steering_literal_scope($scope);
+	$bound = sdwan_steering_scope_fields($scope);
 	if ($bound === null) {
 		return false;
 	}
 	for ($i = 0; $i < $position; $i++) {
 		$rule = preg_replace('/\s+label "(?:[^"\\\\]|\\\\.)*"/', '', $lines[$i]);
-		if (!preg_match('/^(?:pass|block(?: (?:drop|return))?) in (?:log(?: \([^)]*\))? )?quick on ' .
-		    '([a-z0-9_.-]+ inet6?(?: proto [a-z0-9]+)? (?:all|from \S+(?: port = [0-9]+)? to \S+(?: port = [0-9]+)?))' .
-		    '(?: flags (?:any|S\/SA))?(?: keep state(?: \((?:if-bound|floating)\))?)?(?: ridentifier [0-9]+)?$/D', $rule, $match)) {
+		if (!preg_match('/^(?:pass|block(?: (?:drop|return))?) (?:in )?(?:log(?: \([^)]*\))? )?quick ' .
+		    '(?:on ([a-z0-9_.-]+) )?(?:(inet6?) )?((?:proto [a-z0-9_-]+ )?(?:all|from .+))$/D', $rule, $match)) {
 			continue;
 		}
-		$prior = sdwan_steering_literal_scope($match[1]);
+		$selectors = preg_replace('/(?: flags (?:any|S\/SA))?(?:(?: keep state(?: \((?:if-bound|floating)\))?)| no state)?' .
+		    '(?: ridentifier [0-9]+)?$/D', '', $match[3]);
+		$prior = sdwan_steering_scope_fields(($match[1] ?: $bound['device']) . ' ' .
+		    ($match[2] ?: $bound['family']) . ' ' . $selectors);
 		if ($prior !== null && $prior['device'] === $bound['device'] && $prior['family'] === $bound['family'] &&
 		    ($prior['protocol'] === '' || $prior['protocol'] === $bound['protocol']) &&
+		    sdwan_preflight_endpoint($prior['source'], $prior['family'], $bound['source']['network'] ?? '') &&
+		    sdwan_preflight_endpoint($prior['destination'], $prior['family'], $bound['destination']['network'] ?? '') &&
 		    sdwan_preflight_endpoint_covers($prior['source'], $bound['source']) &&
 		    sdwan_preflight_endpoint_covers($prior['destination'], $bound['destination'])) {
 			return true;
@@ -722,43 +774,62 @@ function sdwan_steering_pf_status(array $binding, array $state, array $inventory
 	}
 	$matched = [];
 	$guards = [];
-	$guard_ids = array_column($rule_pairs ?? [], 'guard');
+	$guard_pairs = [];
+	$expected_count = 0;
+	foreach ($binding['trackers'] as $tracker) {
+		$pair = $rule_pairs[$tracker] ?? [];
+		$expected_count += count($pair['scope']['protocols'] ?? ['']);
+		if (isset($pair['guard'])) {
+			$guard_pairs[$pair['guard']] = $pair;
+		}
+	}
 	$lines = array_values($lines);
 	foreach ($lines as $position => $line) {
 		$identifier = sdwan_steering_rule_tracker($line);
-		if (!in_array($identifier, $binding['trackers'], true)) {
-			if (in_array($identifier, $guard_ids, true)) {
-				[$rule] = explode(' label "', $line, 2);
-				if (isset($guards[$identifier]) || !str_starts_with($rule, 'block ')) {
-					return 'pending';
-				}
-				$guards[$identifier] = [$position, sdwan_steering_loaded_scope($rule)];
-			}
+		$is_bound = in_array($identifier, $binding['trackers'], true);
+		$pair = $is_bound ? ($rule_pairs[$identifier] ?? []) : ($guard_pairs[$identifier] ?? null);
+		if ($pair === null) {
 			continue;
 		}
-		if ($rule_pairs !== null && isset($matched[$identifier])) {
+		[$rule] = explode(' label "', $line, 2);
+		$scope = $rule_pairs === null ? null : sdwan_steering_loaded_scope($rule);
+		$protocol = '';
+		if (isset($pair['scope'])) {
+			$actual = $scope === null ? null : sdwan_steering_scope_fields($scope, true);
+			if ($actual === null || !sdwan_steering_scope_matches($actual, $pair['scope'])) {
+				return 'pending';
+			}
+			$protocol = $actual['protocol'];
+		}
+		$key = $identifier . ':' . $protocol;
+		if (!$is_bound) {
+			if (isset($guards[$key]) || !str_starts_with($rule, 'block ')) {
+				return 'pending';
+			}
+			$guards[$key] = [$position, $scope];
+			continue;
+		}
+		if ($rule_pairs !== null && isset($matched[$key])) {
 			return 'pending';
 		}
-		[$rule] = explode(' label "', $line, 2);
 		if ($target === null) {
 			if (!preg_match('/^block (?:drop |return\S*(?: \([^)]*\))? )?in (?:log(?: \([^)]*\))? )?quick on /', $rule) ||
-			    ($rule_pairs !== null && empty($rule_pairs[$identifier]['explicit_tcp_flags']) &&
+			    ($rule_pairs !== null && empty($pair['explicit_tcp_flags']) &&
 			    preg_match('/\bflags\s+(?!any(?:\s|$))\S+/', $rule))) {
 				return 'pending';
 			}
 		} elseif (!sdwan_steering_loaded_path_matches($rule, $gateways) || ($rule_pairs !== null &&
 		    (preg_match('/\b(?:no|modulate|synproxy) state(?:\s|$)/', $rule) ||
-		    !sdwan_steering_loaded_pass_metadata($line, $rule, $rule_pairs[$identifier] ?? [], $pool, $binding['group'] ?? '')))) {
+		    !sdwan_steering_loaded_pass_metadata($line, $rule, $pair, $pool, $binding['group'] ?? '')))) {
 			return 'pending';
 		}
-		$matched[$identifier] = [$position, $rule_pairs === null ? null : sdwan_steering_loaded_scope($rule)];
+		$matched[$key] = [$position, $scope, ($pair['guard'] ?? '') . ':' . $protocol];
 	}
-	if (count($matched) !== count($binding['trackers'])) {
+	if (count($matched) !== $expected_count) {
 		return 'pending';
 	}
 	if ($rule_pairs !== null) {
-		foreach ($matched as $identifier => [$position, $scope]) {
-			$guard = $rule_pairs[$identifier]['guard'] ?? '';
+		foreach ($matched as [$position, $scope, $guard]) {
 			if (!isset($guards[$guard]) || $scope === null || $guards[$guard][0] <= $position ||
 			    $guards[$guard][1] !== $scope || sdwan_steering_loaded_shadow($lines, $position, $scope)) {
 				return 'pending';

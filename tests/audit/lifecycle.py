@@ -147,8 +147,10 @@ def observer(binary, *, two_bindings=False):
         observe()
         logged = "filter_divergent" in event_times()
         results.append(case("accepted_with_divergent_pf", "reported", "reported" if logged else "silent"))
-        config["fixture_pf_rules"] = ["block drop in quick on igb0 inet all ridentifier 301",
-                                      "block drop in quick on igb0 inet all ridentifier 302"]
+        config["fixture_pf_rules"] = [
+            "block drop in quick on igb0 inet from 192.0.2.0/24 to any ridentifier 301",
+            "block drop in quick on igb0 inet from 192.0.2.0/24 to any ridentifier 302",
+        ]
         observe()
         current = json.loads(receipt.read_bytes())
         state = "confirmed_with_fresh_budget" if current["confirmed"] and current["attempts"] == 0 else "unconfirmed"

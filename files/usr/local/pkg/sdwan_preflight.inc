@@ -384,9 +384,19 @@ function sdwan_preflight_native_rules(array $native, string $group, string $fami
 			return sdwan_preflight_error("Place a permanent native block or reject directly after rule {$tracker}, with the same match, its own tracker and no gateway.");
 		}
 		$trackers[] = $tracker;
+		$protocol = $rule['protocol'] ?? '';
+		$protocols = match ($protocol) {
+			'tcp/udp' => ['tcp', 'udp'],
+			'icmp' => [$family === 'inet6' ? 'ipv6-icmp' : 'icmp'],
+			'any' => [''],
+			'' => [!empty($rule['source']['port']) || !empty($rule['destination']['port']) ? 'tcp' : ''],
+			default => [$protocol],
+		};
 		$rule_pairs[$tracker] = ['guard' => (string)$guard_id, 'action' => $guard['type'],
 		    'explicit_tcp_flags' => !empty($rule['tcpflags2']),
-		    'state_policy' => !empty($rule['statepolicy']) ? $rule['statepolicy'] : ($native['statepolicy'] ?? null)];
+		    'state_policy' => !empty($rule['statepolicy']) ? $rule['statepolicy'] : ($native['statepolicy'] ?? null),
+		    'scope' => ['device' => $device, 'family' => $family, 'protocols' => $protocols,
+		        'source' => $rule['source'], 'destination' => $rule['destination']]];
 		unset($rule['created'], $rule['updated'], $rule['descr']);
 		$rule['tracker'] = $tracker;
 		$scope[] = [$rule, $device, (string)$guard_id, $guard['type']];

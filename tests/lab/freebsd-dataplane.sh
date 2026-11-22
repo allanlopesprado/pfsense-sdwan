@@ -206,7 +206,11 @@ if [ -n "${SDWAN_RENDERED_RULES:-}" ]; then
                 "A" => ["interface" => $argv[2], "family" => "inet", "address" => "198.51.100.2"],
                 "B" => ["interface" => $argv[3], "family" => "inet", "address" => "203.0.113.2"],
             ];
-            $pairs = [41001 => ["guard" => "41002", "action" => "block"]];
+            $protocols = $argv[7] === "tcp/udp" ? ["tcp", "udp"] : ["tcp"];
+            $scope = ["device" => $argv[6], "family" => "inet", "protocols" => $protocols,
+                "source" => ["address" => "192.0.2.11"],
+                "destination" => ["address" => "192.0.2.162", "port" => "7"]];
+            $pairs = [41001 => ["guard" => "41002", "action" => "block", "scope" => $scope]];
             $rules = sdwan_steering_pf_rules();
             $status = sdwan_steering_pf_status($binding, $state, $inventory, $rules, $pairs);
             if ($status !== $argv[5]) {
@@ -226,11 +230,17 @@ if [ -n "${SDWAN_RENDERED_RULES:-}" ]; then
                     exit(1);
                 }
             }
-        ' -- "$repo" "$wan_a" "$wan_b" "$1" "$2"
+        ' -- "$repo" "$wan_a" "$wan_b" "$1" "$2" "$lan" "${3:-tcp}"
     }
     verify_pf "$firewall" A applied
     verify_pf "$firewall" B pending
     echo 'ok - the package distinguishes matching and mismatched native PF rules'
+    sed 's/proto tcp/proto { tcp udp }/g' "$work/selected.pf" >"$work/tcp-udp.pf"
+    cp "$work/tcp-udp.pf" "$work/selected.pf"
+    load_rules
+    verify_pf "$firewall" A applied tcp/udp
+    echo 'ok - the package verifies both kernel expansions of a TCP/UDP rule and its guard'
+    steer a
 fi
 
 # Hold one TCP session open on A. After switching the rule to B, a second

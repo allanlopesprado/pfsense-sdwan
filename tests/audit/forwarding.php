@@ -119,6 +119,44 @@ $rows[] = audit_case('earlier_rule_restricted_to_other_port_keeps_policy_effecti
 	$status($state, [str_replace('inet from', 'inet proto tcp from', str_replace('to any', 'to any port = 22', $earlier_pass)), $pass, $guard]));
 $rows[] = audit_case('earlier_rule_with_additional_match_requires_lab_verification', 'applied',
 	$status($state, [str_replace(' ridentifier', ' tagged testlab ridentifier', $earlier_pass), $pass, $guard]));
+$rows[] = audit_case('earlier_global_floating_quick_shadows_policy', 'pending',
+	$status($state, [str_replace(' in quick on em1', ' quick', $earlier_pass), $pass, $guard]), 'applied');
+$rows[] = audit_case('earlier_global_floating_non_quick_does_not_end_evaluation', 'applied',
+	$status($state, [str_replace(' in quick on em1', '', $earlier_pass), $pass, $guard]));
+$rows[] = audit_case('earlier_out_quick_does_not_cover_ingress', 'applied',
+	$status($state, [str_replace(' in quick on em1', ' out quick on em1', $earlier_pass), $pass, $guard]));
+$scoped_pairs = $rule_pairs;
+$scope = ['device' => 'em1', 'family' => 'inet', 'protocols' => ['tcp'],
+	'source' => ['address' => '192.168.1.10/32'], 'destination' => ['address' => '0.0.0.0/0', 'port' => '18080']];
+$scoped_pairs['771292101']['scope'] = $scope;
+$scoped_status = static fn(array $rules, array $pairs): string =>
+	sdwan_steering_pf_status($binding, $state, $inventory, $rules, $pairs);
+$rows[] = audit_case('pf_matches_approved_literal_scope', 'applied', $scoped_status([$pass, $guard], $scoped_pairs));
+$rows[] = audit_case('pf_pair_matches_each_other_but_not_approved_port', 'pending',
+	$scoped_status(str_replace('port = 18080', 'port = 18081', [$pass, $guard]), $scoped_pairs), 'applied');
+$rows[] = audit_case('pf_pair_matches_each_other_but_not_approved_device', 'pending',
+	$scoped_status(str_replace('on em1', 'on em3', [$pass, $guard]), $scoped_pairs), 'applied');
+$range_pairs = $scoped_pairs;
+$range_pairs['771292101']['scope']['destination']['port'] = '18080-18090';
+$rows[] = audit_case('pf_compiled_port_range_matches_approved_range', 'applied',
+	$scoped_status(str_replace('port = 18080', 'port 18079 >< 18091', [$pass, $guard]), $range_pairs));
+$network_pairs = $scoped_pairs;
+$network_pairs['771292101']['scope']['source'] = ['network' => 'lan'];
+$rows[] = audit_case('pf_native_lan_network_table', 'applied',
+	$scoped_status(str_replace('from 192.168.1.10', 'from <LAN__NETWORK:0>', [$pass, $guard]), $network_pairs));
+$rows[] = audit_case('pf_previous_interface_network_table', 'pending',
+	$scoped_status(str_replace('from 192.168.1.10', 'from <OPT1__NETWORK:0>', [$pass, $guard]), $network_pairs));
+$dual_pairs = $scoped_pairs;
+$dual_pairs['771292101']['scope']['protocols'] = ['tcp', 'udp'];
+[$udp_pass, $udp_guard] = str_replace(['proto tcp', 'flags S/SA '], ['proto udp', ''], [$pass, $guard]);
+$rows[] = audit_case('pf_tcp_udp_expands_both_protocols_under_one_tracker', 'applied',
+	$scoped_status([$pass, $udp_pass, $guard, $udp_guard], $dual_pairs), 'pending');
+$rows[] = audit_case('pf_tcp_udp_requires_both_protocols', 'pending',
+	$scoped_status([$pass, $guard, $udp_guard], $dual_pairs));
+$rows[] = audit_case('pf_tcp_udp_requires_both_guards', 'pending',
+	$scoped_status([$pass, $udp_pass, $guard], $dual_pairs));
+$rows[] = audit_case('pf_tcp_udp_rejects_duplicate_same_protocol', 'pending',
+	$scoped_status([$pass, $pass, $udp_pass, $guard, $udp_guard], $dual_pairs));
 $rows[] = audit_case('block_wrong_ingress', 'pending',
 	$status($blocked_state, [str_replace('on em1', 'on em3', $block), $guard]), 'blocked');
 $rows[] = audit_case('block_wrong_scope', 'pending',
