@@ -535,11 +535,13 @@ def verify_unapplied_reload(qemu, primary, certificate):
 
 def verify_expired_sample(qemu, primary, certificate):
     worker = command(qemu, 'pgrep -f -P "$(cat /var/run/sdwand.pid)" /usr/local/sbin/sdwand.php')
-    queue = command(qemu, "pgrep -u 0 -x check_reload_status")
-    assert worker.isdecimal() and queue.isdecimal(), (worker, queue)
+    queue = command(qemu, "pgrep -u 0 -x check_reload_status").splitlines()
+    pids = [worker, *queue]
+    assert queue and all(re.fullmatch(r"[1-9][0-9]*", pid) for pid in pids), pids
+    processes = " ".join(pids)
     command(qemu, "/usr/local/etc/rc.d/sdwand.sh watchdog_status")
-    command(qemu, f"kill -STOP {worker} {queue}")
     try:
+        command(qemu, f"kill -STOP {processes}")
         wait_receipt(qemu, lambda s: not s["snapshot"], 48)
         command(qemu, """i=0
             until grep -Fq 'Active PF rules confirmed withdrawal of the expired forwarding passes.' /var/log/system.log; do
@@ -550,7 +552,7 @@ def verify_expired_sample(qemu, primary, certificate):
         tcp_pair("stale observation", (None, None))
         management("stale observation", certificate)
     finally:
-        command(qemu, f"kill -CONT {queue} {worker}")
+        command(qemu, f"kill -CONT {processes}")
     wait_paths(qemu, "fresh observation after expiry", primary)
     command(qemu, "grep -Fq 'Previous observation expired. Its result cannot be reused' /var/log/system.log")
     tcp_pair("fresh observation after expiry", (A, A))
@@ -767,16 +769,31 @@ def acceptance(qemu, cleanup, provider, *, cold_restart):
     print("NATIVE_AND_PACKAGE_ROLLBACK_OK", flush=True)
 
 
-def recovery(qemu, cleanup, _provider, *, restart, image):
+def install_bound_candidate(qemu):
     package = f"{LAB}/candidate.pkg"
     command(qemu, f'test "$(sha256 -q {package})" = "$(cat {LAB}/candidate.sha256)"')
     version = command(qemu, f"pkg query -F {package} '%v'")
-    assert command(qemu, "cat /etc/version") == "2.9.1-RELEASE"
     command(qemu, f"pkg add {package}", timeout=180)
     command(qemu, f"php {LAB}/ce291-guest.php settings")
     stock_hash = command(qemu, "sha256 -q /etc/inc/filter.inc")
     command(qemu, f"cp {LAB}/filter*.inc /etc/inc/; /usr/local/etc/rc.d/sdwand.sh restart")
     command(qemu, f"php {LAB}/ce291-guest.php bind")
+    return version, stock_hash
+
+
+def path_checks(qemu, _cleanup, _provider):
+    install_bound_candidate(qemu)
+    primary = {"G": "GW_A", "B": "GW_A"}
+    wait_paths(qemu, "before focused path checks", primary)
+    certificate = management("before focused path checks")
+    verify_expired_sample(qemu, primary, certificate)
+    same_target_probes(qemu)
+    print("CE_PATH_CHECKS_OK", flush=True)
+
+
+def recovery(qemu, cleanup, _provider, *, restart, image):
+    assert command(qemu, "cat /etc/version") == "2.9.1-RELEASE"
+    version, stock_hash = install_bound_candidate(qemu)
     primary = {"G": "GW_A", "B": "GW_A"}
     wait_paths(qemu, "before OS transaction", primary)
     tcp_pair("before OS transaction", (A, A))
@@ -935,6 +952,7 @@ if __name__ == "__main__":
         if ce_version not in ("2.9.1", "2.9.2"):
             raise SystemExit(f"Unsupported pfSense CE release: {ce_version}")
         scenario = sys.argv[3] if len(sys.argv) > 3 else "acceptance"
-        if scenario not in ("acceptance", "recovery") or (scenario == "recovery" and ce_version != "2.9.1"):
+        scenarios = {"acceptance": acceptance, "paths": path_checks, "recovery": recovery}
+        if scenario not in scenarios or (scenario == "recovery" and ce_version != "2.9.1"):
             raise SystemExit(f"Unsupported scenario for CE {ce_version}: {scenario}")
-        appliance(Path(sys.argv[1]).resolve(), ce_version, recovery if scenario == "recovery" else acceptance)
+        appliance(Path(sys.argv[1]).resolve(), ce_version, scenarios[scenario])
