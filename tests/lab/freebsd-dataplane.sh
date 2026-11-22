@@ -127,7 +127,7 @@ if [ "${SDWAN_ERP_ONLY:-0}" = 1 ]; then
 fi
 baseline() {
     jexec "$firewall" pfctl -sn
-    jexec "$firewall" pfctl -sr | awk '!/label "(descr=)?(path-a|path-b|path-c|no-member)"/'
+    jexec "$firewall" pfctl -sr | awk '!/label "(descr=)?(path-a|path-b|path-c|no-member|native-guard)"/'
     jexec "$firewall" route -n get default | awk '/gateway:|interface:/ {print}'
 }
 baseline >"$work/baseline"
@@ -210,10 +210,16 @@ if [ -n "${SDWAN_RENDERED_RULES:-}" ]; then
             $rules = sdwan_steering_pf_rules();
             $status = sdwan_steering_pf_status($binding, $state, $inventory, $rules, $pairs);
             if ($status !== $argv[5]) {
-                fwrite(STDERR, "Expected {$argv[5]}, found {$status}\n");
+                $tracked = array_filter($rules ?? [], static fn($row) =>
+                    in_array(sdwan_steering_rule_tracker($row), ["41001", "41002"], true));
+                fwrite(STDERR, "Expected {$argv[5]}, found {$status}\n" . implode("\n", $tracked) . "\n");
                 exit(1);
             }
             if ($status === "applied") {
+                if (!preg_grep("/port = 7(?:\s|$)/", $rules)) {
+                    fwrite(STDERR, "Confirmation did not read the PF service port numerically\n");
+                    exit(1);
+                }
                 $without_guard = array_filter($rules, static fn($row) => sdwan_steering_rule_tracker($row) !== "41002");
                 if (sdwan_steering_pf_status($binding, $state, $inventory, $without_guard, $pairs) !== "pending") {
                     fwrite(STDERR, "PF confirmation did not require the loaded fallback guard\n");

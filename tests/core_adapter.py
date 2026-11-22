@@ -311,9 +311,11 @@ def run(php, core, output, replay, family, links, vti=False):
         print("ok - one decision per reload; stale samples, native drift, missing guard/provider and duplicate bindings block")
         if output:
             output.mkdir(parents=True, exist_ok=True)
+            guard = json.loads(compile_rule("render-pair"))["rules"][1]
+            assert guard.startswith("block") and "ridentifier 41002" in guard, guard
             for label, line in rules.items():
                 prefix = ("triple-" if links == 3 else "") + ("ipv6-" if family == "inet6" else "")
-                (output / f"{prefix}{label}.pf").write_text(line + "\n")
+                (output / f"{prefix}{label}.pf").write_text(line + "\n" + guard + "\n")
 
 
 if __name__ == "__main__":
