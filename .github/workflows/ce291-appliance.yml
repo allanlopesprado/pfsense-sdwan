@@ -24,10 +24,10 @@ on:
         default: '2.9.1'
         options: ['2.9.1', '2.9.2']
       scenario:
-        description: Acceptance, application benchmark, or operating system recovery
+        description: Acceptance, focused path checks, application benchmark, or system recovery
         type: choice
         default: acceptance
-        options: [acceptance, benchmark, recovery]
+        options: [acceptance, paths, benchmark, recovery]
       pairs:
         description: Number of native versus SD-WAN pairs for the benchmark
         type: number
@@ -124,8 +124,8 @@ jobs:
               sudo /usr/bin/python3 tests/lab/ce-ab-benchmark.py "$CE_LAB.raw" "$CE_VERSION" \
                 --pairs "$CE_PAIRS" --soak-hours "$CE_SOAK_HOURS" --output ce-ab-results | tee -a "$CE_LAB-result.log"
               ;;
-            recovery)
-              sudo /usr/bin/python3 tests/lab/ce291-appliance.py "$CE_LAB.raw" "$CE_VERSION" recovery | tee -a "$CE_LAB-result.log"
+            paths|recovery)
+              sudo /usr/bin/python3 tests/lab/ce291-appliance.py "$CE_LAB.raw" "$CE_VERSION" "$CE_SCENARIO" | tee -a "$CE_LAB-result.log"
               ;;
           esac
       - uses: actions/upload-artifact@v4
