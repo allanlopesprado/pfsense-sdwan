@@ -102,7 +102,8 @@ def stage_engine(ce, qemu):
     )
     print(packages.splitlines()[-8:], flush=True)
     metadata = ce.command(qemu, "pkg query '%n %v' suricata; suricata --build-info | grep -i netmap")
-    if not re.search(r"^\s*netmap support:\s*yes\s*$", metadata, re.IGNORECASE | re.MULTILINE):
+    if not re.search(r"^\s*netmap support:[ \t]*yes(?:[ \t]+v[0-9]+\+?)?[ \t]*$",
+                     metadata, re.IGNORECASE | re.MULTILINE):
         raise RuntimeError(f"The signed Suricata engine has no netmap support: {metadata}")
     print(metadata, flush=True)
 
