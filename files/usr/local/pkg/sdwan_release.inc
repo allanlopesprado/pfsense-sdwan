@@ -115,9 +115,7 @@ function sdwan_release_verify_installation(string $version, ?int $installed_sinc
 	}
 	// The native rc status tracks the daemon supervisor, including between worker restarts.
 	$supervisor = trim((string)@file_get_contents('/var/run/sdwand.pid', false, null, 0, 32));
-	if (!preg_match('/\A[1-9][0-9]{0,9}\z/', $supervisor) ||
-	    mwexec('/bin/pgrep -P ' . $supervisor . ' -u 0 -fx ' .
-	        escapeshellarg('/usr/local/bin/php /usr/local/sbin/sdwand\.php'), true) !== 0) {
+	if (!preg_match('/\A[1-9][0-9]{0,9}\z/', $supervisor)) {
 		return 'verify';
 	}
 	require_once(__DIR__ . '/sdwan.inc');
@@ -127,7 +125,16 @@ function sdwan_release_verify_installation(string $version, ?int $installed_sinc
 	} catch (UnexpectedValueException $e) {
 		return 'verify';
 	}
-	return $snapshot !== null && $snapshot['generated_at'] >= ($installed_since ?? 0) ? 'verified' : 'verify';
+	$observer = $snapshot['observer'] ?? null;
+	$pid = $observer['pid'] ?? null;
+	if (!is_array($observer) || !is_int($pid) || $pid <= 0 || ($observer['version'] ?? null) !== $version ||
+	    $snapshot['generated_at'] < ($installed_since ?? 0)) {
+		return 'verify';
+	}
+	// Confirm that the current supervised worker published the sample from its installed build.
+	$worker = '/bin/pgrep -P ' . $supervisor . ' -u 0 -fx ' .
+	    escapeshellarg('/usr/local/bin/php /usr/local/sbin/sdwand\.php');
+	return mwexec($worker . ' | /usr/bin/grep -Fx ' . $pid, true) === 0 ? 'verified' : 'verify';
 }
 
 /* The WebGUI caller checks the native install privilege and verifies CSRF before calling this. */

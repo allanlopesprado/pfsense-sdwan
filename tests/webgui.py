@@ -421,6 +421,9 @@ def run(php, classes, screenshot_dir=None):
         still_unready = request("updates", post=retry, worker_failure=True, snapshot=snapshot, **installed_state)
         assert "observer readiness could not be verified" in still_unready and "UPGRADES=0" in still_unready
         assert "REQUESTS=0" in still_unready
+        prior = {**snapshot, "observer": {"pid": 502, "version": "0.4.7"}}
+        stale = request("updates", post=retry, snapshot=prior, **installed_state)
+        assert "observer readiness could not be verified" in stale and "UPGRADES=0" in stale and "REQUESTS=0" in stale
         recovered = request("updates", post=retry, snapshot=snapshot, **installed_state)
         assert "0.4.8 is installed and the observer has a current sample" in recovered and "REQUESTS=0" in recovered
         assert "UPGRADES=0" in recovered and 'name="verify_installation"' not in recovered

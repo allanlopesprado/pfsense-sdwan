@@ -39,7 +39,9 @@ def build(metadata, pkg, output, epoch):
             path = entry if entry.startswith("/") else f"{PREFIX}/{entry}"
             source = original / path.lstrip("/")
             data = source.read_bytes()
-            if path == f"{PREFIX}/share/{name}/info.xml":
+            if path in (f"{PREFIX}/share/{name}/info.xml", f"{PREFIX}/sbin/sdwand.php"):
+                if data.count(b"%%PKGVERSION%%") != 1:
+                    raise ValueError(f"Expected one package version template in {path}")
                 data = data.replace(b"%%PKGVERSION%%", version.encode())
             target = stage / path.lstrip("/")
             target.parent.mkdir(parents=True, exist_ok=True)

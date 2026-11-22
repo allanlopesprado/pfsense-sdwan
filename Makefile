@@ -30,7 +30,9 @@ do-install:
 	${INSTALL_DATA} ${FILESDIR}/usr/local/www/widgets/include/sdwan.inc ${STAGEDIR}${PREFIX}/www/widgets/include/
 	${INSTALL_DATA} ${FILESDIR}/usr/local/www/widgets/widgets/sdwan.widget.php ${STAGEDIR}${PREFIX}/www/widgets/widgets/
 	${INSTALL_DATA} ${FILESDIR}/etc/inc/priv/sdwan.priv.inc ${STAGEDIR}/etc/inc/priv/
-	${INSTALL_SCRIPT} ${FILESDIR}/usr/local/sbin/sdwand.php ${STAGEDIR}${PREFIX}/sbin/
+	${SED} 's|%%PKGVERSION%%|${PKGVERSION}|g' \
+		${FILESDIR}/usr/local/sbin/sdwand.php > ${WRKDIR}/sdwand.php
+	${INSTALL_SCRIPT} ${WRKDIR}/sdwand.php ${STAGEDIR}${PREFIX}/sbin/
 	${INSTALL_SCRIPT} ${FILESDIR}/usr/local/etc/rc.d/sdwand.sh ${STAGEDIR}${PREFIX}/etc/rc.d/
 	${SED} 's|%%PKGVERSION%%|${PKGVERSION}|g' \
 		${FILESDIR}/usr/local/share/${PORTNAME}/info.xml > ${WRKDIR}/info.xml

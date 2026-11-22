@@ -333,13 +333,14 @@ require $work . '/sdwan.inc';
 require $work . '/sdwan_engine.inc';
 require $work . '/sdwan_release.inc';
 
-function publish_sample(int $when, bool $valid = true): void {
+function publish_sample(int $when, bool $valid = true, ?string $version = null, int $pid = 502): void {
     $config = sdwan_get_config();
     $inventory = sdwan_gateways();
     $snapshot = sdwan_evaluate($config, [], $when, $inventory);
     $snapshot['config_revision'] = sdwan_config_revision($config);
     $snapshot['gateway_inventory_revision'] = $valid ?
         sdwan_gateway_inventory_revision($config, $inventory) : str_repeat('0', 64);
+    $snapshot['observer'] = ['pid' => $pid, 'version' => $version ?? $GLOBALS['version']];
     file_put_contents(SDWAN_SNAPSHOT_PATH, json_encode($snapshot, JSON_THROW_ON_ERROR));
 }
 
@@ -363,7 +364,7 @@ function pkg_exec($command, &$stdout, &$stderr): int {
         $GLOBALS['adds']++;
         $GLOBALS['version'] = '0.4.29';
         if ($GLOBALS['publishAfterInstall']) {
-            publish_sample(time());
+            publish_sample($GLOBALS['fixture_install_time'] ?? time());
         }
     } elseif ($command === 'check -s pfSense-pkg-SDWAN') {
         return $GLOBALS['filesValid'] ? 0 : 1;
@@ -376,8 +377,9 @@ function mwexec($command, $quiet): int {
     if ($quiet && $command === '/usr/local/etc/rc.d/sdwand.sh status') {
         return $GLOBALS['supervisorRunning'] ? 0 : 1;
     }
-    if ($quiet && str_starts_with($command, '/bin/pgrep -P 501 -u 0 -fx ')) {
-        return $GLOBALS['workerRunning'] ? 0 : 1;
+    if ($quiet && str_starts_with($command, '/bin/pgrep -P 501 -u 0 -fx ') &&
+        preg_match('~ \| /usr/bin/grep -Fx ([1-9][0-9]*)\z~', $command, $matches)) {
+        return $GLOBALS['workerRunning'] && $matches[1] === '502' ? 0 : 1;
     }
     throw new RuntimeException('Unexpected service verification command');
 }
@@ -425,13 +427,28 @@ $workerRunning = false;
 $supervisorOnly = sdwan_release_upgrade($target);
 $workerRunning = true;
 $version = '0.4.28';
-publish_sample(time() - 5);
+publish_sample(time() - 5, true, '0.4.29');
 $previousSample = sdwan_release_upgrade($target);
 $version = '0.4.28';
+$fixture_install_time = time();
+publish_sample($fixture_install_time);
+$sameSecond = sdwan_release_upgrade($target);
+$sameVersionRetry = sdwan_release_upgrade($target, true);
+unset($fixture_install_time);
+publish_sample(time(), true, '0.4.29', 503);
+$previousWorker = sdwan_release_upgrade($target, true);
+$legacy = sdwan_read_snapshot();
+unset($legacy['observer']);
+file_put_contents(SDWAN_SNAPSHOT_PATH, json_encode($legacy, JSON_THROW_ON_ERROR));
+$unmarked = sdwan_release_upgrade($target, true);
+if (sdwan_read_snapshot() === null) { throw new RuntimeException('A legacy sample should still show observation results'); }
+$version = '0.4.28';
 $publishAfterInstall = true;
+$fixture_install_time = time();
 $success = sdwan_release_upgrade($target);
 echo json_encode([$locked, $afterInstall, $retry, $supervisorOnly, $workerAbsentRetry, $expired,
-    $changedSample, $verified, $corrupt, $invalidPid, $downgrade, $verifyAfterRollback, $previousSample, $success], JSON_THROW_ON_ERROR);
+    $changedSample, $verified, $corrupt, $invalidPid, $downgrade, $verifyAfterRollback, $previousSample,
+    $sameSecond, $sameVersionRetry, $previousWorker, $unmarked, $success], JSON_THROW_ON_ERROR);
 """
 
 
@@ -452,6 +469,7 @@ def upgrade(binary):
         release = (PKG / "sdwan_release.inc").read_text()
         for source, fixture_name in [("/etc/version", "pfsense-version"), ("/var/run/sdwand.pid", "supervisor.pid")]:
             release = release.replace(source, (work / fixture_name).as_posix())
+        release = release.replace("$installed_since = time();", "$installed_since = $GLOBALS['fixture_install_time'] ?? time();")
         (work / "sdwan_release.inc").write_text(release)
         observed = run_php_fixture(binary, UPGRADE_FIXTURE.replace("{{FIXTURE_DIR}}", json.dumps(work.as_posix())))
     expected = [
@@ -468,6 +486,10 @@ def upgrade(binary):
         ("upgrade_rejects_downgrade", "not_newer", None),
         ("upgrade_local_retry_after_rollback", "not_newer", None),
         ("upgrade_does_not_confirm_pre_install_sample", "verify", None),
+        ("upgrade_rejects_same_second_prior_version_sample", "verify", "success"),
+        ("upgrade_reverification_rejects_prior_version_sample", "verify", "verified"),
+        ("upgrade_reverification_rejects_previous_worker_sample", "verify", None),
+        ("upgrade_reverification_rejects_unmarked_sample", "verify", None),
         ("upgrade_verifies_fresh_post_install_sample", "success", None),
     ]
     return [case(name, value, result, known) for (name, value, known), result in zip(expected, observed, strict=True)]

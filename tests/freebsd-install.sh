@@ -114,9 +114,11 @@ sed -e "s|/var/run/sdwand.pid|$root/sdwand.pid|" \
     "$dbroot/usr/local/etc/rc.d/sdwand.sh" > "$root/sdwand.sh"
 wait_for_child() {
     for attempt in 1 2 3 4 5 6 7 8 9 10 11 12; do
-        if [ -s "$root/child.pid" ]; then
+        if [ -s "$root/child.pid" ] && [ -s "$root/sdwand.pid" ]; then
             current=$(cat "$root/child.pid")
-            if [ -n "$current" ] && [ "$current" != "$1" ] && kill -0 "$current" 2>/dev/null; then
+            parent=$(cat "$root/sdwand.pid")
+            if [ -n "$current" ] && [ "$current" != "$1" ] &&
+                /bin/pgrep -P "$parent" -u 0 -fx '/bin/sleep 120' | /usr/bin/grep -Fxq "$current"; then
                 printf '%s\n' "$current"
                 return 0
             fi
@@ -133,6 +135,7 @@ first=$(wait_for_child '')
 kill -KILL "$first"
 recovered=$(wait_for_child "$first")
 test "$(cat "$root/sdwand.pid")" = "$supervisor"
+if /bin/pgrep -P "$supervisor" -u 0 -fx '/bin/sleep 120' | /usr/bin/grep -Fxq "$first"; then exit 1; fi
 sh "$root/sdwand.sh" restart
 restarted=$(wait_for_child "$recovered")
 test -f "$root/invalidated"

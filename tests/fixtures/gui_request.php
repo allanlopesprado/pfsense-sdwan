@@ -67,8 +67,9 @@ function mwexec($command, $quiet) {
 	if ($quiet && $command === '/usr/local/etc/rc.d/sdwand.sh status') {
 		return !empty($GLOBALS['request']['service_failure']) ? 1 : 0;
 	}
-	if ($quiet && str_starts_with($command, '/bin/pgrep -P 501 -u 0 -fx ')) {
-		return !empty($GLOBALS['request']['worker_failure']) ? 1 : 0;
+	if ($quiet && str_starts_with($command, '/bin/pgrep -P 501 -u 0 -fx ') &&
+	    preg_match('~ \| /usr/bin/grep -Fx ([1-9][0-9]*)\z~', $command, $matches)) {
+		return empty($GLOBALS['request']['worker_failure']) && $matches[1] === '502' ? 0 : 1;
 	}
 	throw new RuntimeException('Unexpected service command');
 }
@@ -134,6 +135,7 @@ function fixture_write_snapshot(array $snapshot, array $config): void {
 		'generated_at' => time(),
 		'config_revision' => sdwan_config_revision($config),
 		'gateway_inventory_revision' => sdwan_gateway_inventory_revision($config, sdwan_gateways()),
+		'observer' => ['pid' => 502, 'version' => $GLOBALS['installed_release']],
 	];
 	file_put_contents($GLOBALS['web'] . '/observer.json', json_encode($snapshot));
 }

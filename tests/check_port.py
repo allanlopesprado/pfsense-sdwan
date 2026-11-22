@@ -56,7 +56,7 @@ def check_distributed_package(installed):
             fail("Distributed package file list differs from port")
         for name in contents:
             expected = (FILES / name.lstrip("/")).read_bytes()
-            if name.endswith("/share/pfSense-pkg-SDWAN/info.xml"):
+            if name in ("/usr/local/share/pfSense-pkg-SDWAN/info.xml", "/usr/local/sbin/sdwand.php"):
                 expected = expected.replace(b"%%PKGVERSION%%", version.encode())
             if archive.extractfile(name).read() != expected:
                 fail("Distributed package contains stale source: " + name)

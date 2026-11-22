@@ -2,6 +2,7 @@
 <?php
 
 const SDWAN_LOG_DEDICATED_CLI = true;
+const SDWAN_OBSERVER_PACKAGE_VERSION = '%%PKGVERSION%%';
 
 require_once('config.inc');
 require_once('gwlb.inc');
@@ -106,6 +107,7 @@ function sdwan_observe_once(): void {
 			throw new RuntimeException('Gateway path changed during observation');
 		}
 		$snapshot['gateway_inventory_revision'] = $inventory_revision;
+		$snapshot['observer'] = ['pid' => getmypid(), 'version' => SDWAN_OBSERVER_PACKAGE_VERSION];
 		if (!$members) {
 			// Show native gateways on the dashboard before any members are configured.
 			$snapshot['gateways'] = array_map('sdwan_member_sample', $observations);
