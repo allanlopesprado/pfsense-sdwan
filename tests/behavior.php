@@ -173,6 +173,15 @@ $result = sdwan_evaluate($checks, $gateways, 1700000000, $inventory, [
     'a' => ['probe_primary' => 'Timed out', 'probe_secondary' => 'Passed'],
 ]);
 check('a healthy secondary service check keeps a link eligible', $result['policies']['calls']['selected'] === 'a');
+$requires_marker = $checks;
+$requires_marker['members'][0]['probe_primary'] .= ' expect=ready';
+$requires_marker['policies'][0]['primary_check'] = 'required';
+$result = sdwan_evaluate($requires_marker, $gateways, 1700000000, $inventory, [
+    'a' => ['probe_primary' => 'HTTPS response marker mismatch', 'probe_secondary' => 'Passed'],
+]);
+check('a valid TLS response with the wrong required marker makes that path ineligible',
+    $result['policies']['calls']['selected'] !== 'a' &&
+    $result['policies']['calls']['candidates']['a'] === 'Required service check failed');
 
 $requirements = $checks;
 $requirements['members'][1] += [
@@ -258,6 +267,20 @@ check('service targets require a supported protocol and a concrete destination I
     sdwan_probe_target('https://admin@example.com 192.0.2.53') === null &&
     sdwan_probe_target('dns://example.com 127.0.0.1') === null &&
     sdwan_probe_target('dns://example.com ::ffff:127.0.0.1') === null);
+check('an exact HTTPS response marker is optional, bounded and compatible with a selected FIB',
+    sdwan_probe_target('fib=2 https://status.example/ready 192.0.2.40 expect=erp-ready')['expect'] === 'erp-ready' &&
+    !isset(sdwan_probe_target('https://status.example/ready 192.0.2.40')['expect']) &&
+    sdwan_probe_target('dns://status.example 192.0.2.40 expect=erp-ready') === null &&
+    sdwan_probe_target('https://status.example 192.0.2.40 expect=') === null &&
+    sdwan_probe_target('https://status.example 192.0.2.40 expect=' . str_repeat('x', 65)) === null &&
+    sdwan_probe_target('https://status.example 192.0.2.40 expect=erp%20ready') === null);
+check('HTTPS accepts an exact response marker with an optional line ending',
+    sdwan_probe_https_marker_matches('ready', 'ready') &&
+    sdwan_probe_https_marker_matches("ready\n", 'ready') &&
+    sdwan_probe_https_marker_matches("ready\r\n", 'ready') &&
+    !sdwan_probe_https_marker_matches('not-ready', 'ready') &&
+    !sdwan_probe_https_marker_matches("ready\nmaintenance", 'ready') &&
+    !sdwan_probe_https_marker_matches(" ready", 'ready'));
 check('probe destinations and HTTPS paths preserve the explicit check boundary',
     sdwan_probe_target('tcp://169.254.1.1:443') === null &&
     sdwan_probe_target('dns://example.com fe80::1') === null &&

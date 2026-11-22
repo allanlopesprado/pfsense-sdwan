@@ -11,6 +11,7 @@ python3 -B tests/audit_report.py
 python3 -B tests/package_lifecycle.py "$PHP_BIN"
 python3 -B tests/lab/test_observe_path.py
 python3 -B tests/lab/test_ce_ab_benchmark.py
+python3 -B tests/verify_appliance.py "$PHP_BIN"
 "$PHP_BIN" tests/behavior.php
 "$PHP_BIN" tests/policy_topology.php
 "$PHP_BIN" tests/system_logs.php

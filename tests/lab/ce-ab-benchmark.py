@@ -160,15 +160,16 @@ class Health(http.server.BaseHTTPRequestHandler):
         pass
 
 
-def serve_probes(cert, key):
+def serve_probes(cert, key, dns_hosts=("192.0.2.164", "192.0.2.165"),
+                 https_hosts=("192.0.2.166", "192.0.2.167")):
     ce = appliance_module()
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     context.load_cert_chain(cert, key)
     with ExitStack() as stack:
-        for host in ("192.0.2.164", "192.0.2.165"):
+        for host in dns_hosts:
             server = stack.enter_context(socketserver.UDPServer((host, 53), ce.DnsEcho))
             threading.Thread(target=server.serve_forever, daemon=True).start()
-        for host in ("192.0.2.166", "192.0.2.167"):
+        for host in https_hosts:
             server = stack.enter_context(http.server.ThreadingHTTPServer((host, 443), Health))
             server.socket = context.wrap_socket(server.socket, server_side=True)
             threading.Thread(target=server.serve_forever, daemon=True).start()
@@ -176,7 +177,7 @@ def serve_probes(cert, key):
         threading.Event().wait()
 
 
-def setup_probes(ce, qemu, cleanup):
+def setup_probes(ce, qemu, cleanup, *, shared_host=None):
     temp = Path(cleanup.enter_context(tempfile.TemporaryDirectory(prefix="sdwan-ab-")))
     ca, ca_key, req, leaf, key, ext = [temp / name for name in ("ca.pem", "ca.key", "tls.csr", "tls.pem", "tls.key", "tls.ext")]
     ext.write_text(f"subjectAltName=DNS:{TLS_NAME}\nextendedKeyUsage=serverAuth\n", encoding="ascii")
@@ -188,7 +189,10 @@ def setup_probes(ce, qemu, cleanup):
          "-days", "8", "-out", leaf),
     ):
         subprocess.run(["openssl", *args], check=True, timeout=15, capture_output=True)
-    server = subprocess.Popen(ce.in_ns("sdwan-peer", sys.executable, SCRIPT, "serve-probes", leaf, key),
+    command = [sys.executable, SCRIPT, "serve-probes", leaf, key]
+    if shared_host is not None:
+        command.append(shared_host)
+    server = subprocess.Popen(ce.in_ns("sdwan-peer", *command),
                               stdout=subprocess.PIPE, text=True)
     cleanup.callback(server.stdout.close)
     cleanup.callback(ce.stop, server)
@@ -205,13 +209,14 @@ printf '%s\\n' 'curl.cainfo={cert_path}' >"$scan/99-sdwan-benchmark.ini"
 /usr/local/bin/php -r 'exit(ini_get("curl.cainfo") === "{cert_path}" ? 0 : 1);'""")
 
 
-def setup_package(ce, qemu):
+def setup_package(ce, qemu, recovery_hold_seconds):
     package = f"{ce.LAB}/candidate.pkg"
     digest = ce.command(qemu, f"sha256 -q {package}")
     if digest != ce.command(qemu, f"cat {ce.LAB}/candidate.sha256"):
         raise RuntimeError("Candidate package digest mismatch.")
     ce.command(qemu, f"pkg add -f {package}", timeout=180)
     ce.command(qemu, f"php {ce.LAB}/ce291-guest.php settings")
+    hold = str(recovery_hold_seconds) if recovery_hold_seconds is not None else ""
     ce.command(qemu, f"""php <<'BENCH_PHP'
 <?php
 require_once('config.inc');
@@ -225,6 +230,12 @@ foreach ($candidate['members'] as $index => &$member) {{
     $member['probe_secondary'] = 'https://{TLS_NAME}/healthz 192.0.2.' . (166 + $index);
 }}
 unset($member);
+if ('{hold}' !== '') {{
+    foreach ($candidate['policies'] as &$policy) {{
+        $policy['recover_seconds'] = '{hold}';
+    }}
+    unset($policy);
+}}
 $errors = sdwan_save_config($candidate, sdwan_config_revision($original), true);
 if ($errors) {{
     fwrite(fopen('php://stderr', 'w'), implode('; ', $errors) . PHP_EOL);
@@ -261,7 +272,7 @@ class Experiment:
         self.resources = cleanup.enter_context((self.output / "resources.ndjson").open("x", encoding="utf-8", buffering=1))
         self.certificate = ce.management("benchmark baseline")
         setup_probes(ce, qemu, cleanup)
-        self.digest = setup_package(ce, qemu)
+        self.digest = setup_package(ce, qemu, options.recovery_hold_seconds)
         self.reference = ce.route_and_nat(qemu)
         self.next_resources = time.monotonic_ns()
         self.clients = {}
@@ -410,6 +421,10 @@ class Experiment:
             }
         summary = {"ce_version": self.options.ce_version, "package_sha256": self.digest,
                    "pairs": self.options.pairs, "soak_hours_requested": self.options.soak_hours,
+                   "recovery_hold_seconds": self.options.recovery_hold_seconds,
+                   "soak_completed_incidents": sum(1 for p in self.phases if p["phase"] == "soak_wan1_return"),
+                   "soak_elapsed_seconds": sum((p["end_ns"] - p["start_ns"]) / NS for p in self.phases
+                                                if p["phase"].startswith("soak_")),
                    "soak_healthy_seconds": sum((p["end_ns"] - p["start_ns"]) / NS for p in self.phases
                                                if p["phase"] == "soak_healthy"),
                    "unexpected_steady_source_replies": unexpected, "tail_mismatches": mismatches,
@@ -426,7 +441,12 @@ def main():
         client(sys.argv[2], float(sys.argv[3]), Path(sys.argv[4]))
         return
     if sys.argv[1:2] == ["serve-probes"]:
-        serve_probes(Path(sys.argv[2]), Path(sys.argv[3]))
+        cert, key = Path(sys.argv[2]), Path(sys.argv[3])
+        if len(sys.argv) == 5:
+            host = (sys.argv[4],)
+            serve_probes(cert, key, host, host)
+        else:
+            serve_probes(cert, key)
         return
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("image", type=Path, help="disposable unbooted raw disk")
@@ -439,6 +459,7 @@ def main():
     parser.add_argument("--sample-seconds", type=float, default=60)
     parser.add_argument("--soak-hours", type=float, default=0)
     parser.add_argument("--fault-interval-seconds", type=float, default=1800)
+    parser.add_argument("--recovery-hold-seconds", type=int, choices=range(301), metavar="0..300")
     options = parser.parse_args()
     ranges = {"pairs": (0, 32), "interval": (.25, 5), "outage_seconds": (15, 300),
               "recovery_seconds": (35, 300), "sample_seconds": (1, 3600),

@@ -27,7 +27,7 @@ on:
         description: Acceptance, focused path checks, application benchmark, or system recovery
         type: choice
         default: acceptance
-        options: [acceptance, paths, benchmark, recovery]
+        options: [acceptance, paths, benchmark, recovery, shared-target, inspection]
       pairs:
         description: Number of native versus SD-WAN pairs for the benchmark
         type: number
@@ -36,6 +36,14 @@ on:
         description: Optional continuous observation after benchmarking, for up to 3 hours
         type: number
         default: 0
+      fault_interval_seconds:
+        description: Healthy interval before each fault during continuous observation
+        type: number
+        default: 1800
+      recovery_hold_seconds:
+        description: SD-WAN preferred path qualification hold for this benchmark
+        type: number
+        default: 30
 permissions:
   contents: read
 concurrency:
@@ -54,6 +62,8 @@ jobs:
       CE_SCENARIO: ${{ inputs.scenario || 'acceptance' }}
       CE_PAIRS: ${{ inputs.pairs }}
       CE_SOAK_HOURS: ${{ inputs.soak_hours }}
+      CE_FAULT_INTERVAL: ${{ inputs.fault_interval_seconds }}
+      CE_RECOVERY_HOLD: ${{ inputs.recovery_hold_seconds }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -66,14 +76,14 @@ jobs:
           if [ "$CE_SCENARIO" = recovery ]; then
             test "$CE_VERSION" = 2.9.1
           elif [ "$CE_SCENARIO" = benchmark ]; then
-            python3 -c 'import os; assert 1 <= int(os.environ["CE_PAIRS"]) <= 5; assert 0 <= float(os.environ["CE_SOAK_HOURS"]) <= 3'
+            python3 -c 'import os; pairs = int(os.environ["CE_PAIRS"]); soak = float(os.environ["CE_SOAK_HOURS"]); assert 0 <= pairs <= 5 and 0 <= soak <= 3 and (pairs or soak >= 6/3600); assert 6 <= int(os.environ["CE_FAULT_INTERVAL"]) <= 86400; assert 0 <= int(os.environ["CE_RECOVERY_HOLD"]) <= 300'
           fi
       - name: Recover the disposable disk for this pinned input
         id: disk
         uses: actions/cache/restore@v4
         with:
           path: ${{ env.CE_LAB }}.raw.gz
-          key: ${{ env.CE_LAB }}-candidate-disk-v5-${{ env.CE_SCENARIO == 'recovery' && 'recovery' || 'base' }}-${{ hashFiles('.github/workflows/ce291-appliance.yml', '.github/workflows/build-package.yml', 'tests/lab/ce291-disk.sh', 'tests/lab/ce291-guest.php', 'tests/lab/ce291-source.py', 'core/**', 'tools/prepare-core.py', 'tools/build-lab-pkg.py', 'tools/previous-dist-package.sh', 'files/**', 'Makefile', 'pkg-descr', 'pkg-plist', 'dist/pfSense-pkg-SDWAN-*.pkg*') }}
+          key: ${{ env.CE_LAB }}-candidate-disk-v6-${{ (env.CE_SCENARIO == 'recovery' || env.CE_SCENARIO == 'inspection') && env.CE_SCENARIO || 'base' }}-${{ hashFiles('.github/workflows/ce291-appliance.yml', '.github/workflows/build-package.yml', 'tests/lab/ce291-disk.sh', 'tests/lab/ce291-guest.php', 'tests/lab/ce291-source.py', 'core/**', 'tools/prepare-core.py', 'tools/build-lab-pkg.py', 'tools/previous-dist-package.sh', 'files/**', 'Makefile', 'pkg-descr', 'pkg-plist', 'dist/pfSense-pkg-SDWAN-*.pkg*') }}
       - uses: actions/download-artifact@v4
         if: steps.disk.outputs.cache-hit != 'true'
         with:
@@ -110,7 +120,7 @@ jobs:
           path: ${{ env.CE_LAB }}.raw.gz
           key: ${{ steps.disk.outputs.cache-primary-key }}
       - name: Install QEMU for the isolated appliance
-        run: sudo apt-get install -y --no-install-recommends qemu-system-x86 nftables python3-pexpect dnsmasq-base
+        run: sudo apt-get install -y --no-install-recommends qemu-system-x86 nftables python3-pexpect dnsmasq-base openssl
       - name: Run native installation, PF reload, reboot and rollback
         run: |
           set -euo pipefail
@@ -122,7 +132,14 @@ jobs:
               ;;
             benchmark)
               sudo /usr/bin/python3 tests/lab/ce-ab-benchmark.py "$CE_LAB.raw" "$CE_VERSION" \
-                --pairs "$CE_PAIRS" --soak-hours "$CE_SOAK_HOURS" --output ce-ab-results | tee -a "$CE_LAB-result.log"
+                --pairs "$CE_PAIRS" --soak-hours "$CE_SOAK_HOURS" --fault-interval-seconds "$CE_FAULT_INTERVAL" \
+                --recovery-hold-seconds "$CE_RECOVERY_HOLD" --output ce-ab-results | tee -a "$CE_LAB-result.log"
+              ;;
+            shared-target)
+              sudo /usr/bin/python3 tests/lab/ce-shared-target.py "$CE_LAB.raw" "$CE_VERSION" | tee -a "$CE_LAB-result.log"
+              ;;
+            inspection)
+              sudo /usr/bin/python3 tests/lab/ce-sdwan-inspection.py "$CE_LAB.raw" "$CE_VERSION" | tee -a "$CE_LAB-result.log"
               ;;
             paths|recovery)
               sudo /usr/bin/python3 tests/lab/ce291-appliance.py "$CE_LAB.raw" "$CE_VERSION" "$CE_SCENARIO" | tee -a "$CE_LAB-result.log"
