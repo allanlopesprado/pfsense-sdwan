@@ -35,7 +35,7 @@ sdwan_watchdog_rc()
 )
 
 # Called by rc.subr.
-# shellcheck disable=SC2329
+# shellcheck disable=SC2317,SC2329
 sdwan_watchdog_start()
 {
 	sdwan_watchdog_rc status >/dev/null 2>&1 || sdwan_watchdog_rc start
@@ -54,7 +54,7 @@ if [ "${SDWAN_PACKAGE_REMOVING:-0}" != 1 ]; then
 	stop_postcmd=sdwan_invalidate
 fi
 # Called by rc.subr.
-# shellcheck disable=SC2329
+# shellcheck disable=SC2317,SC2329
 sdwan_invalidate()
 {
 	/usr/local/bin/php -f /usr/local/pkg/sdwan_invalidate.inc
