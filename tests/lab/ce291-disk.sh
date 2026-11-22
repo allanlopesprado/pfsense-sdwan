@@ -5,7 +5,8 @@ test "$(uname -s)" = FreeBSD
 test "$(id -u)" = 0
 out=$(realpath "$1")
 set -- "$out"/ce291-package/*.pkg
-test "$#" -eq 1 && test -f "$1"
+test "$#" -eq 1
+test -f "$1"
 candidate=$1
 rollback="$out/dist/pfSense-pkg-SDWAN-0.4.27.pkg"
 for package in "$candidate" "$rollback"; do

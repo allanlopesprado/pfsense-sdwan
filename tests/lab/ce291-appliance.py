@@ -261,7 +261,17 @@ def observations(qemu):
     return json.loads(next(line for line in reversed(raw.splitlines()) if line.startswith("{")))
 
 
-def wait_paths(qemu, label, expected, wait_ack=False, wan2_hop=None, native_choices=None):
+def withdrawal_proven(state, started):
+    proof = state["withdrawal_proof"]
+    if not isinstance(proof, dict):
+        return False
+    generated = proof.get("started_ns")
+    return (type(generated) is int and started <= generated <= state["monotonic_ns"]
+            and proof.get("trackers") == ["41003"] and not state["receipt"].get("withdrawal")
+            and state["active_ruleset"] is not None and proof.get("ruleset") == state["active_ruleset"])
+
+
+def wait_paths(qemu, label, expected, wait_ack=False, wan2_hop=None, native_choices=None, withdrawal_after=None):
     started = time.monotonic()
     deadline = started + 135
     seen = set()
@@ -277,8 +287,9 @@ def wait_paths(qemu, label, expected, wait_ack=False, wan2_hop=None, native_choi
         steering = {name: row["gateway"] for name, row in snapshot.get("steering", {}).items()}
         verified = {name: ("blocked" if value is None else "applied") for name, value in expected.items()}
         signature = parsed["signature"]
+        proof_current = withdrawal_after is None or withdrawal_proven(parsed, withdrawal_after)
         if (steering == expected and parsed["pf"] == verified and receipt.get("confirmed")
-                and signature == receipt["signature"]):
+                and signature == receipt["signature"] and proof_current):
             if wait_ack:
                 assert signature in seen, (label, "missing native acknowledgement", seen)
             rules = loaded(qemu)
@@ -669,13 +680,18 @@ def acceptance(qemu, cleanup, provider):
     fault(f'iifname "sw-wire0" ip saddr {A} ip daddr 192.0.2.164 tcp dport 7 drop')
     wait_paths(qemu, "before ERP-only withdrawal", {"G": "GW_B", "B": "GW_A"})
     tcp_pair("before ERP-only withdrawal", (B, A))
-    command(qemu, f"php {LAB}/ce291-guest.php unbind G")
-    wait_paths(qemu, "after ERP-only withdrawal", {"B": "GW_A"}, native_choices={"G": "GW_A"})
+    request = command(qemu, f"php {LAB}/ce291-guest.php unbind G")
+    timestamps = re.findall(r"^WITHDRAWAL_START_NS=(\d+)$", request, flags=re.MULTILINE)
+    assert len(timestamps) == 1, request
+    started = int(timestamps[0])
+    removed = wait_paths(qemu, "after ERP-only withdrawal", {"B": "GW_A"}, native_choices={"G": "GW_A"},
+                         withdrawal_after=started)
     tcp_pair("after ERP-only withdrawal", (A, A))
     assert route_and_nat(qemu) == reference
     management("after ERP-only withdrawal", certificate)
     fault()
-    print("SINGLE_BINDING_WITHDRAWN_BY_NATIVE_QUEUE_OK", flush=True)
+    print("SINGLE_BINDING_WITHDRAWN_BY_NATIVE_QUEUE_OK "
+          f"request_after_ns={started} native_proof={removed['withdrawal_proof']}", flush=True)
 
     rollback_sessions = [held_connection(target, cleanup) for target in (ERP, BACKUP)]
     for stream in rollback_sessions:

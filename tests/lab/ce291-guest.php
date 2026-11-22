@@ -115,10 +115,14 @@ if ($action === 'observations') {
     $record = sdwan_steering_read_receipt(SDWAN_SNAPSHOT_PATH . '.forwarded');
     $signature = null;
     $filter_status = [];
+    $ruleset = null;
     if (isset($snapshot['steering'])) {
         $signature = sdwan_steering_runtime_signature($snapshot, $inventory);
         $native = sdwan_steering_native($inventory);
         $rules = sdwan_steering_pf_rules();
+        if ($rules !== null) {
+            $ruleset = sdwan_steering_loaded_ruleset($rules);
+        }
         foreach (sdwan_steering_bindings() as $group => $binding) {
             $check = sdwan_steering_preflight($package_settings, $binding['policy'], $group, $native);
             $filter_status[$group] = sdwan_steering_preflight_matches($binding, $check)
@@ -127,8 +131,12 @@ if ($action === 'observations') {
                 : 'binding_changed';
         }
     }
+    $path = g_get('varrun_path', '/var/run') . '/sdwan-filter-commit.json';
+    $raw = @file_get_contents($path, false, null, 0, 65537);
+    $proof = is_string($raw) && strlen($raw) <= 65536 ? json_decode($raw, true, 8) : null;
     echo json_encode(['snapshot' => $snapshot, 'receipt' => (object)$record,
-        'signature' => $signature, 'pf' => (object)$filter_status], JSON_THROW_ON_ERROR), PHP_EOL;
+        'signature' => $signature, 'pf' => (object)$filter_status, 'active_ruleset' => $ruleset,
+        'withdrawal_proof' => $proof, 'monotonic_ns' => hrtime(true)], JSON_THROW_ON_ERROR), PHP_EOL;
     exit;
 }
 if ($action === 'settings') {
@@ -152,6 +160,7 @@ if ($action === 'settings') {
     exit;
 }
 if ($action === 'bind' || $action === 'unbind') {
+    $started = hrtime(true);
     $groups = ['G' => 'ERP', 'B' => 'Backup'];
     if (isset($argv[2])) {
         if (!isset($groups[$argv[2]])) {
@@ -168,6 +177,9 @@ if ($action === 'bind' || $action === 'unbind') {
         if ($errors) {
             throw new RuntimeException("$group: " . implode('; ', $errors));
         }
+    }
+    if ($action === 'unbind') {
+        echo 'WITHDRAWAL_START_NS=', $started, PHP_EOL;
     }
     exit;
 }
