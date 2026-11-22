@@ -201,7 +201,8 @@ def run(php, classes, screenshot_dir=None):
         supervisor.write_text("501\n")
         release = root / "sdwan_release.inc"
         release.write_text(release.read_text().replace("'/etc/version'", repr(str(version))).replace(
-            "'/var/run/sdwand.pid'", repr(str(supervisor))))
+            "'/var/run/sdwand.pid'", repr(str(supervisor))).replace("sys_get_temp_dir() . '/sdwan-upgrade-'",
+                                                                 "__DIR__ . '/sdwan-upgrade-'"))
         engine = root / "sdwan_engine.inc"
         engine.write_text(engine.read_text().replace("'/var/run/sdwan-observer.json'", "__DIR__ . '/observer.json'"))
         upstream = (classes.parent / "guiconfig.inc").read_text()
@@ -457,6 +458,8 @@ def run(php, classes, screenshot_dir=None):
         failed = request("updates", post=action, install_failure=True)
         assert "the previous SD-WAN package was restored" in failed
         assert "UPGRADES=1" in failed and "ROLLBACKS=1" in failed
+        failed = request("updates", post=action, install_hook_failure=True)
+        assert "the previous SD-WAN package was restored" in failed and "ROLLBACKS=1" in failed
         failed = request("updates", post=action, broken_upgrade=True)
         assert "the previous SD-WAN package was restored" in failed
         assert "UPGRADES=1" in failed and "ROLLBACKS=1" in failed
@@ -466,6 +469,8 @@ def run(php, classes, screenshot_dir=None):
         assert "could not be prepared for rollback" in blocked
         assert "UPGRADES=0" in blocked and "ROLLBACKS=0" in blocked
         failed = request("updates", post=action, service_failure=True)
+        assert "service did not start after the update" in failed and "ROLLBACKS=1" in failed
+        failed = request("updates", post=action, worker_failure=True)
         assert "observer readiness could not be verified" in failed and "UPGRADES=1" in failed
         assert 'name="verify_installation"' in failed and 'name="upgrade_release"' not in failed
         retry_form = Choices(failed).forms[0][1]
