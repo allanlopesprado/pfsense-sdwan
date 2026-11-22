@@ -155,11 +155,16 @@ function sdwan_probe_dns_answer(string $reply, int $id, string $question): bool 
 	return isset($addresses[$name]);
 }
 
+function sdwan_probe_remaining_us(int $deadline): int {
+	return max(0, intdiv($deadline - hrtime(true), 1000));
+}
+
 /* All sockets are bound to the live interface source. Require a native host
  * route pinned to the gateway or its PPP link, and check it again before accepting results. */
-function sdwan_probe_path(array $target, array $gateway): ?array {
+function sdwan_probe_path(array $target, array $gateway, ?int $deadline = null): ?array {
 	$family = $target['family'];
-	if ($family !== $gateway['family'] || !function_exists('exec') ||
+	if (($deadline !== null && hrtime(true) >= $deadline) ||
+	    $family !== $gateway['family'] || !function_exists('exec') ||
 	    !is_executable('/sbin/route') || !is_executable('/bin/timeout')) {
 		return null;
 	}
@@ -181,7 +186,13 @@ function sdwan_probe_path(array $target, array $gateway): ?array {
 	if ($next === null) {
 		return null;
 	}
-	exec('/bin/timeout 0.3 /sbin/route -n get -' . $family . ' ' . escapeshellarg($target['address']) . ' 2>/dev/null', $lines, $result);
+	$timeout = $deadline === null ? 300000 : min(300000, sdwan_probe_remaining_us($deadline));
+	if ($timeout === 0) {
+		return null;
+	}
+	$seconds = sprintf('%.6F', $timeout / 1000000);
+	exec('/bin/timeout ' . $seconds . ' /sbin/route -n get -' . $family . ' ' .
+	    escapeshellarg($target['address']) . ' 2>/dev/null', $lines, $result);
 	if ($result !== 0) {
 		return null;
 	}
@@ -193,28 +204,90 @@ function sdwan_probe_path(array $target, array $gateway): ?array {
 			$direct_target = $target['address'];
 		}
 	}
-	return sdwan_probe_route_matches($output, $device, $next, $direct_target)
+	return sdwan_probe_route_matches($output, $device, $next, $direct_target) &&
+	    ($deadline === null || hrtime(true) <= $deadline)
 	    ? ['device' => $device, 'source' => $source, 'next_hop' => $next] : null;
+}
+
+function sdwan_probe_result(array $job, bool $replied, string $failure, int $deadline): string {
+	if ($replied && sdwan_probe_path($job['target'], $job['gateway'], $deadline) === $job['path']) {
+		return 'Passed';
+	}
+	return hrtime(true) >= $deadline ? 'Timed out' : $failure;
+}
+
+/* Start pending HTTPS work and consume ready replies without waiting for I/O. */
+function sdwan_probe_collect_ready(array &$jobs, array &$results, $curl, int $deadline): void {
+	if (!$jobs || hrtime(true) >= $deadline) {
+		return;
+	}
+	if ($curl !== null) {
+		curl_multi_exec($curl, $running);
+	}
+	foreach ($jobs as $index => $job) {
+		if (hrtime(true) >= $deadline) {
+			return;
+		}
+		if (!isset($job['socket'])) {
+			continue;
+		}
+		if ($job['target']['protocol'] === 'tcp') {
+			$replied = sdwan_probe_tcp_status($job['socket']);
+			if ($replied === null) {
+				continue;
+			}
+			$failure = 'TCP check failed';
+		} else {
+			$reply = @fread($job['socket'], 4096);
+			if (!is_string($reply) || $reply === '') {
+				continue;
+			}
+			$replied = sdwan_probe_dns_answer($reply, $job['id'], $job['question']);
+			$failure = 'DNS check failed';
+		}
+		$results[$job['member']][$job['field']] = sdwan_probe_result($job, $replied, $failure, $deadline);
+		fclose($job['socket']);
+		unset($jobs[$index]);
+	}
+	while ($curl !== null && hrtime(true) < $deadline && ($done = curl_multi_info_read($curl))) {
+		foreach ($jobs as $index => $job) {
+			if (($job['curl'] ?? null) !== $done['handle']) {
+				continue;
+			}
+			$status = curl_getinfo($job['curl'], CURLINFO_RESPONSE_CODE);
+			$replied = $done['result'] === CURLE_OK && $status >= 200 && $status < 300;
+			$results[$job['member']][$job['field']] = sdwan_probe_result($job, $replied, 'HTTPS check failed', $deadline);
+			curl_multi_remove_handle($curl, $job['curl']);
+			unset($jobs[$index]);
+			break;
+		}
+	}
 }
 
 function sdwan_probe_observe(array $members, array $inventory, array $observations): array {
 	$results = $jobs = [];
 	$curl = function_exists('curl_multi_init') ? curl_multi_init() : null;
 	$deadline = hrtime(true) + 2500000000;
-	foreach ($members as $member) {
-		$name = $member['name'];
-		$gateway = $inventory[$member['gateway']] ?? null;
-		foreach (['probe_primary', 'probe_secondary'] as $field) {
+	/* Give every member a chance at one result before running backups. */
+	foreach (['probe_primary', 'probe_secondary'] as $field) {
+		foreach ($members as $member) {
 			if (!isset($member[$field])) {
 				continue;
 			}
+			sdwan_probe_collect_ready($jobs, $results, $curl, $deadline);
+			$name = $member['name'];
+			$gateway = $inventory[$member['gateway']] ?? null;
 			$target = sdwan_probe_target($member[$field]);
 			$results[$name][$field] = 'Unavailable';
 			if ($target === null || $gateway === null ||
 			    ($observations[$member['gateway']]['status'] ?? null) !== 'online' || hrtime(true) >= $deadline) {
 				continue;
 			}
-			$path = sdwan_probe_path($target, $gateway);
+			$path = sdwan_probe_path($target, $gateway, $deadline);
+			$remaining = sdwan_probe_remaining_us($deadline);
+			if ($remaining === 0) {
+				continue;
+			}
 			if ($path === null) {
 				$results[$name][$field] = 'No matching host route or source';
 				continue;
@@ -236,7 +309,8 @@ function sdwan_probe_observe(array $members, array $inventory, array $observatio
 					}
 					continue;
 				}
-				$socket = @stream_socket_client("udp://{$destination}:53", $error, $message, 0.1, STREAM_CLIENT_CONNECT, $context);
+				$socket = @stream_socket_client("udp://{$destination}:53", $error, $message,
+				    min(100000, $remaining) / 1000000, STREAM_CLIENT_CONNECT, $context);
 				if ($socket === false) {
 					continue;
 				}
@@ -249,7 +323,7 @@ function sdwan_probe_observe(array $members, array $inventory, array $observatio
 					continue;
 				}
 				$jobs[] = $job + ['socket' => $socket, 'id' => $id, 'question' => $question];
-			} elseif ($curl !== null) {
+			} elseif ($curl !== null && $remaining >= 1000) {
 				$host = $target['host'];
 				$handle = curl_init('https://' . $host . $target['path']);
 				if ($handle === false) {
@@ -259,7 +333,8 @@ function sdwan_probe_observe(array $members, array $inventory, array $observatio
 					CURLOPT_INTERFACE => $source, CURLOPT_RESOLVE => ["{$host}:443:{$destination}"],
 					CURLOPT_PROXY => '', CURLOPT_FOLLOWLOCATION => false,
 					CURLOPT_SSL_VERIFYPEER => true, CURLOPT_SSL_VERIFYHOST => 2,
-					CURLOPT_CONNECTTIMEOUT_MS => 900, CURLOPT_TIMEOUT_MS => 1800,
+					CURLOPT_CONNECTTIMEOUT_MS => min(900, intdiv($remaining, 1000)),
+					CURLOPT_TIMEOUT_MS => min(1800, intdiv($remaining, 1000)),
 					CURLOPT_NOPROGRESS => true, CURLOPT_NOSIGNAL => true,
 					CURLOPT_WRITEFUNCTION => static function ($handle, string $chunk): int {
 						static $bytes = 0;
@@ -274,50 +349,13 @@ function sdwan_probe_observe(array $members, array $inventory, array $observatio
 		}
 	}
 	while ($jobs && hrtime(true) < $deadline) {
-		if ($curl !== null) {
-			curl_multi_exec($curl, $running);
-		}
-		foreach ($jobs as $index => $job) {
-			if (!isset($job['socket'])) {
-				continue;
-			}
-			if ($job['target']['protocol'] === 'tcp') {
-				$connected = sdwan_probe_tcp_status($job['socket']);
-				if ($connected === null) {
-					continue;
-				}
-				$success = $connected && sdwan_probe_path($job['target'], $job['gateway']) === $job['path'];
-				$results[$job['member']][$job['field']] = $success ? 'Passed' : 'TCP check failed';
-				fclose($job['socket']);
-				unset($jobs[$index]);
-				continue;
-			}
-			$reply = @fread($job['socket'], 4096);
-			if (!is_string($reply) || $reply === '') {
-				continue;
-			}
-			$success = sdwan_probe_dns_answer($reply, $job['id'], $job['question']) &&
-			    sdwan_probe_path($job['target'], $job['gateway']) === $job['path'];
-			$results[$job['member']][$job['field']] = $success ? 'Passed' : 'DNS check failed';
-			fclose($job['socket']);
-			unset($jobs[$index]);
-		}
-		while ($curl !== null && ($done = curl_multi_info_read($curl))) {
-			foreach ($jobs as $index => $job) {
-				if (($job['curl'] ?? null) !== $done['handle']) {
-					continue;
-				}
-				$status = curl_getinfo($job['curl'], CURLINFO_RESPONSE_CODE);
-				$success = $done['result'] === CURLE_OK && $status >= 200 && $status < 300 &&
-				    sdwan_probe_path($job['target'], $job['gateway']) === $job['path'];
-				$results[$job['member']][$job['field']] = $success ? 'Passed' : 'HTTPS check failed';
-				curl_multi_remove_handle($curl, $job['curl']);
-				unset($jobs[$index]);
-				break;
-			}
+		sdwan_probe_collect_ready($jobs, $results, $curl, $deadline);
+		$remaining = sdwan_probe_remaining_us($deadline);
+		if ($remaining === 0) {
+			break;
 		}
 		if ($jobs) {
-			usleep(25000);
+			usleep(min(25000, $remaining));
 		}
 	}
 	foreach ($jobs as $job) {
