@@ -1,0 +1,82 @@
+name: CE 2.9.1 two-WAN appliance
+on:
+  push:
+    branches: ['lab/ce291-candidate', 'fix/multiwan-reconciliation']
+    paths:
+      - '.github/workflows/ce291-appliance.yml'
+      - '.github/scripts/ubuntu-archive.sh'
+      - 'tests/lab/ce291-*'
+      - 'core/**'
+      - 'files/**'
+      - 'Makefile'
+      - 'pkg-descr'
+      - 'pkg-plist'
+      - 'tools/prepare-core.py'
+      - 'tools/build-lab-pkg.py'
+      - 'dist/pfSense-pkg-SDWAN-0.4.27.pkg*'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ce291-native-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  appliance:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Configure Ubuntu package mirror
+        run: bash .github/scripts/ubuntu-archive.sh
+      - name: Recover the disposable disk for this pinned input
+        id: disk
+        uses: actions/cache/restore@v4
+        with:
+          path: ce291.raw.gz
+          key: ce291-candidate-disk-v1-${{ hashFiles('tests/lab/ce291-disk.sh', 'tests/lab/ce291-guest.php', 'tests/lab/ce291-source.py', 'core/**', 'tools/prepare-core.py', 'tools/build-lab-pkg.py', 'files/**', 'Makefile', 'pkg-descr', 'pkg-plist', 'dist/pfSense-pkg-SDWAN-0.4.27.pkg*') }}
+      - name: Prepare the audited CE 2.9.1 adapter
+        if: steps.disk.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/pfSense-system-2.9.1.pkg"
+          curl --fail --silent --show-error --retry 2 --max-time 150 --proto '=https' \
+            --output "$archive" \
+            'https://pkg01-atx.netgate.com/pfSense_v2_9_1_amd64-pfSense_v2_9_1/All/pfSense-system-2.9.1.pkg'
+          python3 tests/lab/ce291-source.py "$archive" lab-ce291
+          python3 tools/prepare-core.py --ce-291-lab --source lab-ce291 --out lab-overlay
+      - name: Build the checked-out package and create a disk from signed Netgate packages
+        if: steps.disk.outputs.cache-hit != 'true'
+        uses: vmactions/freebsd-vm@4441bea20b31bfa77329a5af583199362489567e # v1.4.9
+        with:
+          release: "15.1"
+          usesh: true
+          prepare: |
+            env ASSUME_ALWAYS_YES=yes pkg bootstrap
+            pkg install -y python311
+          run: |
+            set -eu
+            /usr/local/bin/python3.11 tools/build-lab-pkg.py --pkg /usr/local/sbin/pkg-static --output ce291-package
+            sh tests/lab/ce291-disk.sh "$PWD"
+      - name: Cache the unbooted disk
+        if: steps.disk.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ce291.raw.gz
+          key: ${{ steps.disk.outputs.cache-primary-key }}
+      - name: Install QEMU for the isolated appliance
+        run: sudo apt-get install -y --no-install-recommends qemu-system-x86 nftables python3-pexpect dnsmasq-base
+      - name: Run native installation, PF reload, reboot and rollback
+        run: |
+          set -euo pipefail
+          gunzip ce291.raw.gz
+          printf 'CANDIDATE_GIT_SHA=%s\n' "$GITHUB_SHA" | tee ce291-result.log
+          sudo /usr/bin/python3 tests/lab/ce291-appliance.py ce291.raw | tee -a ce291-result.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ce291-result
+          path: |
+            ce291-result.log
+            ce291-console.log
