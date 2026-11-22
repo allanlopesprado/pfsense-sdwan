@@ -110,10 +110,13 @@ def by_phase(rows, phases):
 
 
 def transaction(target, marker, timeout):
+    stage = "connect"
     try:
         with socket.create_connection((target, 7), timeout=timeout) as conn:
+            stage = "send"
             conn.settimeout(timeout)
             conn.sendall(marker + b"\n")
+            stage = "reply"
             with conn.makefile("rb") as peer:
                 reply = peer.readline(256)
         fields = reply.removesuffix(b"\n").split(b" ", 1)
@@ -125,9 +128,9 @@ def transaction(target, marker, timeout):
             return {"status": "invalid_reply"}
         return {"status": "ok", "source": source}
     except TimeoutError:
-        return {"status": "timeout"}
+        return {"status": "timeout", "stage": stage}
     except OSError as error:
-        return {"status": "socket_error", "errno": error.errno}
+        return {"status": "socket_error", "stage": stage, "errno": error.errno}
 
 
 def client(flow, interval, output):
