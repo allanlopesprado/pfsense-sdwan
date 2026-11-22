@@ -87,11 +87,33 @@ jobs:
           openssl x509 -in "$audit_dir/recipient.pem" -noout > /dev/null
           python3 -m venv "$audit_dir/venv"
           "$audit_dir/venv/bin/python" -m pip --disable-pip-version-check --quiet install 'semgrep==1.186.0'
-          mapfile -d '' -t targets < <(git ls-files -z 'files/*.php' 'files/*.inc' 'core/*.inc' '.github/workflows/*.yml' 'tools/*.py')
-          test "${#targets[@]}" -gt 0
-          "$audit_dir/venv/bin/semgrep" scan --metrics off --disable-version-check --no-git-ignore \
-            --scan-unknown-extensions --config p/php --config p/github-actions --config p/python \
-            --json --quiet --output "$audit_dir/result.json" -- "${targets[@]}"
+          mkdir "$audit_dir/php"
+          git ls-files -z 'files/*.php' 'files/*.inc' 'core/*.inc' | AUDIT_ROOT="$audit_dir/php" python3 -c '
+          import os, shutil, sys
+          from pathlib import Path
+          root = Path(os.environ["AUDIT_ROOT"])
+          for name in sys.stdin.buffer.read().decode().split("\0"):
+              if not name:
+                  continue
+              source = Path(name)
+              target = root / (name + ".php" if source.suffix == ".inc" else name)
+              target.parent.mkdir(parents=True, exist_ok=True)
+              shutil.copyfile(source, target)
+          '
+          scan() {
+            rulepack=$1
+            report=$2
+            target=$3
+            "$audit_dir/venv/bin/semgrep" scan --metrics off --disable-version-check --no-git-ignore \
+              --config "$rulepack" --json --quiet --output "$audit_dir/$report.json" -- "$target"
+          }
+          (cd "$audit_dir/php"; scan p/php php .)
+          scan p/github-actions workflows .github/workflows
+          scan p/python python tools
+          jq -s '{version: .[0].version,
+            paths: {scanned: ([.[].paths.scanned[]] | unique)},
+            results: [.[].results[]], errors: [.[].errors[]]}' \
+            "$audit_dir/php.json" "$audit_dir/workflows.json" "$audit_dir/python.json" > "$audit_dir/result.json"
           jq -e '.paths.scanned | length > 0' "$audit_dir/result.json" > /dev/null
           openssl cms -encrypt -binary -aes-256-gcm -in "$audit_dir/result.json" \
             -outform DER -out "$RUNNER_TEMP/sdwan-source-scan.cms" "$audit_dir/recipient.pem"
