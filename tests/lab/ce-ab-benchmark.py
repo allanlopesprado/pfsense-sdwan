@@ -109,6 +109,23 @@ def by_phase(rows, phases):
             yield index, group
 
 
+def activation_stats(rows, end_ns):
+    replies = boundary = 0
+    errors = defaultdict(int)
+    for row in rows:
+        if row["end_ns"] >= end_ns:
+            boundary += 1
+        elif row["status"] == "ok":
+            replies += 1
+        else:
+            kind = row["status"]
+            if "stage" in row:
+                kind = f"{row['stage']}_{kind}"
+            errors[kind] += 1
+    return {"attempts": replies + sum(errors.values()), "successful_replies": replies,
+            "excluded_boundary_attempts": boundary, "errors": dict(errors)}
+
+
 def transaction(target, marker, timeout):
     stage = "connect"
     try:
@@ -295,7 +312,10 @@ class Experiment:
         self.output = options.output
         self.mode = self.pair = None
         self.phases = []
+        self.activations = []
         self.event_file = cleanup.enter_context((self.output / "phases.ndjson").open("x", encoding="utf-8", buffering=1))
+        self.activation_file = cleanup.enter_context(
+            (self.output / "activations.ndjson").open("x", encoding="utf-8", buffering=1))
         self.resources = cleanup.enter_context((self.output / "resources.ndjson").open("x", encoding="utf-8", buffering=1))
         self.certificate = ce.management("benchmark baseline")
         setup_probes(ce, qemu, cleanup)
@@ -312,21 +332,34 @@ class Experiment:
 
     def activate(self, mode):
         ce, qemu = self.ce, self.qemu
-        if self.mode == "sdwan" and mode == "native":
-            # Await the first native reload before asking to restore the next binding.
-            ce.command(qemu, f"php {ce.LAB}/ce291-guest.php unbind G")
-            ce.wait_paths(qemu, "benchmark unbind ERP", {"B": "GW_A"}, native_choices={"G": "GW_A"})
-            ce.command(qemu, f"php {ce.LAB}/ce291-guest.php unbind B")
-            ce.command(qemu, "/etc/rc.filter_configure_sync")
-        if mode == "sdwan" and self.mode != mode:
-            ce.command(qemu, f"php {ce.LAB}/ce291-guest.php bind")
-            ce.wait_paths(qemu, "benchmark bind", {"G": "GW_A", "B": "GW_A"})
-        if mode == "native":
-            cmd = "require 'config.inc'; require '/usr/local/pkg/sdwan_steering.inc';"
-            cmd += " exit(sdwan_steering_bindings() ? 1 : 0);"
-            ce.command(qemu, f'php -r "{cmd}"')
-        ce.assert_rules(ce.loaded(qemu), {"G": "GW_A", "B": "GW_A"})
-        self.mode = mode
+        window = None
+        if self.mode != mode:
+            window = {"pair": self.pair, "from_mode": self.mode, "mode": mode,
+                      "start_ns": time.monotonic_ns()}
+            self.activation_file.write(json.dumps({"event": "start", **window}) + "\n")
+        verified = False
+        try:
+            if self.mode == "sdwan" and mode == "native":
+                # Await the first native reload before asking to restore the next binding.
+                ce.command(qemu, f"php {ce.LAB}/ce291-guest.php unbind G")
+                ce.wait_paths(qemu, "benchmark unbind ERP", {"B": "GW_A"}, native_choices={"G": "GW_A"})
+                ce.command(qemu, f"php {ce.LAB}/ce291-guest.php unbind B")
+                ce.command(qemu, "/etc/rc.filter_configure_sync")
+            if mode == "sdwan" and self.mode != mode:
+                ce.command(qemu, f"php {ce.LAB}/ce291-guest.php bind")
+                ce.wait_paths(qemu, "benchmark bind", {"G": "GW_A", "B": "GW_A"})
+            if mode == "native":
+                cmd = "require 'config.inc'; require '/usr/local/pkg/sdwan_steering.inc';"
+                cmd += " exit(sdwan_steering_bindings() ? 1 : 0);"
+                ce.command(qemu, f'php -r "{cmd}"')
+            ce.assert_rules(ce.loaded(qemu), {"G": "GW_A", "B": "GW_A"})
+            self.mode = mode
+            verified = True
+        finally:
+            if window is not None:
+                window.update(end_ns=time.monotonic_ns(), verified=verified)
+                self.activation_file.write(json.dumps({"event": "end", **window}) + "\n")
+                self.activations.append(window)
 
     def resource_sample(self):
         worker = self.ce.worker_pid(self.qemu)
@@ -395,14 +428,28 @@ class Experiment:
             self.ce.stop(child)
         latencies = defaultdict(list)
         observations = {}
+        activation_observations = {}
+        timeline = [phase | {"phase_index": index} for index, phase in enumerate(self.phases)]
+        timeline.extend(window | {"activation_index": index} for index, window in enumerate(self.activations))
+        timeline.sort(key=lambda window: window["start_ns"])
         for flow in TARGETS:
             with (self.output / f"{flow}.ndjson").open(encoding="utf-8") as stream:
                 rows = (json.loads(line) for line in stream if line.endswith("\n"))
-                for index, samples in by_phase(rows, self.phases):
-                    phase = self.phases[index]
-                    key = phase["mode"], phase["phase"], flow
-                    observations[index, flow] = phase_stats(samples, phase["start_ns"], phase["end_ns"],
-                                                           phase["expected"][flow], latencies[key])
+                for index, samples in by_phase(rows, timeline):
+                    window = timeline[index]
+                    if "activation_index" in window:
+                        activation = window["activation_index"], flow
+                        activation_observations[activation] = activation_stats(samples, window["end_ns"])
+                        continue
+                    key = window["mode"], window["phase"], flow
+                    observations[window["phase_index"], flow] = phase_stats(
+                        samples, window["start_ns"], window["end_ns"], window["expected"][flow], latencies[key])
+        no_attempts = activation_stats((), 0)
+        activations = [
+            window | {"duration_ms": (window["end_ns"] - window["start_ns"]) / 1e6,
+                      "flows": {flow: activation_observations.get((index, flow), no_attempts) for flow in TARGETS}}
+            for index, window in enumerate(self.activations)
+        ]
         headings = ("pair", "mode", "phase", "flow", "expected", "duration_seconds")
         all_metrics = []
         for index, phase in enumerate(self.phases):
@@ -456,7 +503,7 @@ class Experiment:
                                                if p["phase"] == "soak_healthy"),
                    "unexpected_steady_source_replies": unexpected, "tail_mismatches": mismatches,
                    "unexpected_steady_source_runs": sum(row["unexpected_source_runs"] for row in steady),
-                   "resources": resources, "aggregates": aggregates}
+                   "activations": activations, "resources": resources, "aggregates": aggregates}
         (self.output / "summary.json").write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
         if unexpected or mismatches:
             raise RuntimeError(f"Application paths did not match the expected steady results: {mismatches!r}")

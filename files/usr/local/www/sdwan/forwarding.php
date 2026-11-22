@@ -109,6 +109,7 @@ $pf_labels = [
 	'applied' => gettext('Matching route rule loaded in PF'),
 	'blocked' => gettext('Matching block rule loaded in PF'),
 	'binding_changed' => gettext('Native rules or policy no longer match the approved binding'),
+	'observing' => gettext('Waiting for an observation of this binding. New connections can be blocked until PF confirms a path.'),
 	'pending' => gettext('Active filter differs from the current decision'),
 	'requested' => gettext('Reload requested. Waiting for PF confirmation'),
 	'divergent' => gettext('Persistent divergence. Automatic retries exhausted'),
@@ -124,6 +125,7 @@ $filter_status = match (true) {
 	!$supported => 'unavailable',
 	!$binding_current => 'binding_changed',
 	$sample === null => 'expired',
+	($steering['revision'] ?? null) !== sdwan_config_revision($binding) => 'observing',
 	default => sdwan_steering_pf_status($binding, $steering, $inventory, $rules, $binding_preview['rule_pairs']),
 };
 if ($filter_status === 'pending' && isset($sample['steering'])) {

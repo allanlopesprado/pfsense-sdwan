@@ -4,14 +4,28 @@ define('SDWAN_GUI', true);
 require_once(__DIR__ . '/ui.inc.php');
 
 $inventory = sdwan_gateways();
-$snapshot = sdwan_ui_snapshot($sdwan, $inventory);
 $policies = array_column($sdwan['policies'], null, 'name');
 $requested = sdwan_ui_choice_value(sdwan_ui_scalar($_GET, 'policy'));
 $current = $requested !== '' ? $requested : ($sdwan['policies'][0]['name'] ?? '');
 $policy = $policies[$current] ?? null;
+$members = array_column($sdwan['members'], null, 'name');
+if (sdwan_ui_scalar($_GET, 'traffic') === 'sample') {
+	header('Content-Type: application/json; charset=utf-8');
+	header('Cache-Control: no-store');
+	if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'GET') {
+		header('Allow: GET');
+		http_response_code(405);
+	} elseif ($policy === null) {
+		http_response_code(404);
+	} else {
+		echo json_encode(sdwan_ui_traffic_sample($policy, $members, $inventory, sdwan_config_revision($sdwan)),
+		    JSON_THROW_ON_ERROR);
+	}
+	exit;
+}
+$snapshot = sdwan_ui_snapshot($sdwan, $inventory);
 $result = $snapshot['policies'][$current] ?? null;
 $slas = array_column($sdwan['slas'], null, 'name');
-$members = array_column($sdwan['members'], null, 'name');
 $pgtitle = [gettext('Services'), gettext('SD-WAN'), gettext('Diagnostics')];
 include('head.inc');
 sdwan_ui_tabs('diagnostics');
@@ -161,6 +175,94 @@ if ($policy !== null):
 	</div>
 	<?php endif; ?>
 </div>
+<?php if (function_exists('pfSense_get_interface_stats')):
+	$traffic_url = '/sdwan/diagnostics.php?' . http_build_query([
+		'policy' => sdwan_ui_choice($current), 'traffic' => 'sample',
+	], '', '&', PHP_QUERY_RFC3986);
+?>
+<div class="panel panel-default">
+	<div class="panel-heading"><h2 class="panel-title"><?=gettext('Interface traffic')?></h2></div>
+	<div class="panel-body">
+		<p><?=gettext('Measure the total traffic on this policy’s interfaces. This is independent of SLA and path selection.')?></p>
+		<button type="button" class="btn btn-default" id="sdwan-traffic-measure"
+		    data-url="<?=sdwan_ui_escape($traffic_url)?>"
+		    data-wait="<?=sdwan_ui_escape(gettext('Measuring interface traffic…'))?>"
+		    data-unavailable="<?=sdwan_ui_escape(gettext('No comparable interface counters. Try again.'))?>">
+			<?=gettext('Measure')?></button>
+		<p class="help-block" role="status" id="sdwan-traffic-report"></p>
+		<div class="table-responsive" id="sdwan-traffic-results" hidden>
+			<table class="table table-striped table-condensed">
+				<thead><tr><th scope="col"><?=gettext('Interface')?></th>
+				<th scope="col" class="text-right"><?=gettext('Receive')?></th>
+				<th scope="col" class="text-right"><?=gettext('Transmit')?></th></tr></thead>
+				<tbody></tbody>
+			</table>
+		</div>
+	</div>
+</div>
+<script>
+events.push(function () {
+	const button = document.getElementById('sdwan-traffic-measure');
+	const report = document.getElementById('sdwan-traffic-report');
+	const results = document.getElementById('sdwan-traffic-results');
+	const body = results.querySelector('tbody');
+	const format = new Intl.NumberFormat(document.documentElement.lang || undefined, {maximumFractionDigits: 2});
+	const units = [[1e9, 'Gbit/s'], [1e6, 'Mbit/s'], [1e3, 'kbit/s'], [1, 'bit/s']];
+	const decimal = value => typeof value === 'string' && /^(0|[1-9][0-9]{0,19})$/.test(value);
+	function rate(delta, elapsed) {
+		const bps = Number(delta) * 8e9 / Number(elapsed);
+		const [scale, unit] = units.find(([value]) => bps >= value) || units[3];
+		return format.format(bps / scale) + ' ' + unit;
+	}
+	button.addEventListener('click', async function () {
+		button.disabled = true;
+		results.hidden = true;
+		body.replaceChildren();
+		report.textContent = button.dataset.wait;
+		const controller = new AbortController();
+		const timeout = setTimeout(() => controller.abort(), 8000);
+		try {
+			async function sample() {
+				const response = await fetch(button.dataset.url, {cache: 'no-store', signal: controller.signal});
+				if (!response.ok) throw new Error('Interface sample unavailable');
+				return response.json();
+			}
+			const first = await sample();
+			await new Promise(resolve => setTimeout(resolve, 1500));
+			const second = await sample();
+			if (first.revision === second.revision) {
+				for (const [device, current] of Object.entries(second.interfaces)) {
+					const previous = first.interfaces[device];
+					const keys = ['at_ns', 'inbytes', 'outbytes'];
+					if (!previous || !keys.every(key => decimal(previous[key]) && decimal(current[key]))) continue;
+					const elapsed = BigInt(current.at_ns) - BigInt(previous.at_ns);
+					const received = BigInt(current.inbytes) - BigInt(previous.inbytes);
+					const sent = BigInt(current.outbytes) - BigInt(previous.outbytes);
+					if (elapsed < 1000000000n || elapsed > 30000000000n || received < 0n || sent < 0n) continue;
+					const row = body.insertRow();
+					const label = document.createElement('th');
+					label.scope = 'row';
+					label.textContent = device;
+					row.append(label);
+					for (const delta of [received, sent]) {
+						const cell = row.insertCell();
+						cell.className = 'text-right text-nowrap';
+						cell.textContent = rate(delta, elapsed);
+					}
+				}
+			}
+			results.hidden = body.rows.length === 0;
+		} catch {
+			results.hidden = true;
+		} finally {
+			clearTimeout(timeout);
+			report.textContent = results.hidden ? button.dataset.unavailable : '';
+			button.disabled = false;
+		}
+	});
+});
+</script>
+<?php endif; ?>
 <?php endif;
 sdwan_ui_actions([
 	'/status_logs.php?logfile=gateways' => [gettext('Gateway Logs'), 'fa-list'],

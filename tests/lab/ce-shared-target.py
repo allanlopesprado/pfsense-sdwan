@@ -109,6 +109,87 @@ def renew_wan2(ce, qemu, cleanup, provider):
     print("SHARED_TARGET_DNS_HTTPS_DHCP_OK", flush=True)
 
 
+def verify_activation_guard(ce, qemu):
+    native = ce.loaded(qemu)
+    ce.assert_rules(native, NATIVE_PATHS)
+    certificate = ce.management("before activating ERP binding")
+    routing = ce.route_and_nat(qemu)
+    worker = ce.worker_pid(qemu)
+    deadline = time.monotonic() + 45
+    while True:
+        snapshot = ce.observations(qemu)["snapshot"] or {}
+        if (snapshot.get("observer", {}).get("pid") == int(worker)
+                and snapshot.get("policies", {}).get("ERP", {}).get("selected") == "a"):
+            break
+        assert time.monotonic() < deadline, snapshot
+        time.sleep(1)
+    assert not snapshot.get("steering"), snapshot
+    ce.tcp_pair("ERP and backup before activation", (ce.A, ce.A))
+
+    ce.command(qemu, f"kill -STOP {worker}")
+    try:
+        ce.command(qemu, f"php {ce.LAB}/ce291-guest.php bind G")
+        deadline = time.monotonic() + 25
+        while True:
+            loaded = ce.loaded(qemu)
+            if loaded.get("41001", "").startswith("block "):
+                break
+            assert time.monotonic() < deadline, loaded
+            time.sleep(1)
+        ce.assert_rules(loaded, {"G": None, "B": "GW_A"})
+        assert loaded["41003"] == native["41003"], (loaded, native)
+        print(f"ERP awaiting its first observation PF {loaded['41001']}", flush=True)
+        ce.tcp_pair("only the new ERP binding is guarded", (None, ce.A))
+        ce.management("waiting for first bound observation", certificate)
+        assert_native_routing(ce, qemu, routing)
+    finally:
+        ce.command(qemu, f"kill -CONT {worker}")
+
+    resumed = ce.wait_paths(qemu, "ERP applied after first bound observation", {"G": "GW_A"},
+                            native_choices={"B": "GW_A"})
+    assert resumed["snapshot"]["observer"]["pid"] == int(worker), resumed
+    ce.tcp_pair("ERP and backup after verified activation", (ce.A, ce.A))
+    ce.management("after ERP binding is applied", certificate)
+    assert_native_routing(ce, qemu, routing)
+    print("CE_ERP_ACTIVATION_GUARD_OK", flush=True)
+
+
+def verify_interface_traffic(ce, qemu, active):
+    def read_counters():
+        response = ce.command(qemu, """php <<'PHP'
+<?php
+require_once('config.inc');
+define('SDWAN_GUI', true);
+require '/usr/local/www/sdwan/ui.inc.php';
+$settings = sdwan_get_config();
+$policy = array_column($settings['policies'], null, 'name')['ERP'];
+$members = array_column($settings['members'], null, 'name');
+echo json_encode(sdwan_ui_traffic_sample($policy, $members, sdwan_gateways(),
+    sdwan_config_revision($settings)), JSON_THROW_ON_ERROR), PHP_EOL;
+PHP""")
+        sample = json.loads(response.splitlines()[-1])
+        assert sample["revision"] == active["snapshot"]["config_revision"], sample
+        assert set(sample["interfaces"]) == {path[0] for path in ce.GATEWAYS.values()}, sample
+        for row in sample["interfaces"].values():
+            assert set(row) == {"at_ns", "inbytes", "outbytes"}, row
+            assert all(isinstance(value, str) and value.isascii() and value.isdecimal()
+                       for value in row.values()), row
+        return sample["interfaces"]
+
+    before = read_counters()
+    for (_, hop), source in zip(ce.GATEWAYS.values(), (ce.A, ce.B)):
+        ce.command(qemu, f"ping -n -c 2 -s 1000 -S {source} {hop}", timeout=12)
+    after = read_counters()
+    for interface in before:
+        changes = {field: int(after[interface][field]) - int(before[interface][field])
+                   for field in before[interface]}
+        assert changes["at_ns"] > 0 and changes["inbytes"] >= 2000 and changes["outbytes"] >= 2000, changes
+        print(f"Read-only native counters {interface}: {changes}", flush=True)
+    assert ce.observations(qemu)["receipt"] == active["receipt"]
+    ce.assert_rules(ce.loaded(qemu), NATIVE_PATHS)
+    print("CE_NATIVE_INTERFACE_COUNTERS_OK", flush=True)
+
+
 def verify_readiness_policy(ce, qemu, unready_source, hostname):
     script = f"{ce.LAB}/shared-readiness.php"
     ce.command(qemu, f"""umask 077
@@ -167,8 +248,11 @@ php {script}""")
 
 
 def exercise(ce, benchmark, qemu, cleanup, provider):
-    version, _ = ce.install_bound_candidate(qemu)
-    ce.wait_paths(qemu, "before installed package verification", NATIVE_PATHS)
+    version, _ = ce.install_candidate(qemu)
+    verify_activation_guard(ce, qemu)
+    ce.command(qemu, f"php {ce.LAB}/ce291-guest.php bind B")
+    active = ce.wait_paths(qemu, "before installed package verification", NATIVE_PATHS)
+    verify_interface_traffic(ce, qemu, active)
     verification = ce.command(qemu, f"sh {ce.LAB}/verify-appliance.sh {version} --forwarding", timeout=90)
     for group, policy in (("G", "ERP"), ("B", "Backup")):
         assert any(line.startswith(f"Group {group}, policy {policy}, trackers ") and line.endswith(": applied.")
