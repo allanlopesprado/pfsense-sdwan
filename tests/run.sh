@@ -4,8 +4,10 @@ set -eu
 cd "$(dirname "$0")/.."
 PHP_BIN=${PHP_BIN:-php}
 "$PHP_BIN" -v
-python3 tests/check_port.py
-python3 tools/update-release-index.py --check
+python3 tests/check_port.py "$@"
+if [ "${1:-}" != "--source-only" ]; then
+    python3 tools/update-release-index.py --check
+fi
 python3 -B tests/release_notes.py
 python3 -B tests/audit_report.py
 python3 -B tests/package_lifecycle.py "$PHP_BIN"

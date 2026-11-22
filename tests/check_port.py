@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Check installed files, package registration, and dashboard menu references."""
+import argparse
 import hashlib
 import json
 from pathlib import Path
@@ -66,7 +67,7 @@ def check_distributed_package(installed):
     print("ok - pinned README command, checksum, package, hooks and source agree")
 
 
-def check_packaging():
+def check_packaging(source_only=False):
     plist = read_plist()
     installed = {
         path.relative_to(FILES)
@@ -80,7 +81,8 @@ def check_packaging():
     if plist != installed:
         fail(f"Missing from plist: {sorted(installed - plist)}\n"
              f"Missing source files: {sorted(plist - installed)}")
-    check_distributed_package(installed)
+    if not source_only:
+        check_distributed_package(installed)
     manifest = ET.parse(FILES / DATA / "info.xml")
     filename = manifest.findtext(".//configurationfile") or manifest.findtext(".//config_file")
     if not filename:
@@ -105,4 +107,7 @@ def check_packaging():
 
 
 if __name__ == "__main__":
-    check_packaging()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--source-only", action="store_true",
+                        help="validate a source branch before rebuilding the distribution")
+    check_packaging(source_only=parser.parse_args().source_only)
