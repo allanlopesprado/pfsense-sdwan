@@ -46,14 +46,16 @@ cat > "$work/repos/pfsense.conf" <<REPO
 ce-core: { url: "$mirror-core", enabled: yes, signature_type: "fingerprints", fingerprints: "/root/netgate-keys" }
 ce-system: { url: "$mirror-pfSense_v$series", enabled: yes, signature_type: "fingerprints", fingerprints: "/root/netgate-keys" }
 REPO
-truncate -s 4G "$image"
-device=$(mdconfig -a -t vnode -f "$image")
-gpart create -s GPT "$device"
-gpart add -a 4k -s 512k -t freebsd-boot "$device"
-gpart add -a 1m -l "$lab" -t freebsd-ufs "$device"
-newfs -U "/dev/${device}p2"
-mount "/dev/${device}p2" "$root"
-mounted=yes
+if [ "$scenario" != security ]; then
+    truncate -s 4G "$image"
+    device=$(mdconfig -a -t vnode -f "$image")
+    gpart create -s GPT "$device"
+    gpart add -a 4k -s 512k -t freebsd-boot "$device"
+    gpart add -a 1m -l "$lab" -t freebsd-ufs "$device"
+    newfs -U "/dev/${device}p2"
+    mount "/dev/${device}p2" "$root"
+    mounted=yes
+fi
 mkdir -p "$root/var/cache/pkg" "$root/root"
 cp -R "$work/keys" "$root/root/netgate-keys"
 ce_pkg() {
@@ -62,6 +64,27 @@ ce_pkg() {
 }
 ce_pkg update
 ce_pkg install -Iy -U pfSense-base pfSense-kernel-pfSense pkg
+if [ "$scenario" = security ]; then
+    reports="$out/$lab-security"
+    mkdir "$reports"
+    ce_pkg install -Iy -U pfSense pfSense-default-config-serial
+    ce_pkg add -I "$candidate"
+    test "$(ce_pkg query '%n' pfSense-pkg-SDWAN)" = pfSense-pkg-SDWAN
+    ce_pkg query -a '%n|%v|%o' > "$work/inventory"
+    LC_ALL=C sort "$work/inventory" > "$reports/packages.txt"
+    vuln_site=https://vuxml.freebsd.org/freebsd/vuln.xml.xz
+    fetch -T 45 -o "$work/vuln.xml.xz" "$vuln_site"
+    xz -dc "$work/vuln.xml.xz" > "$work/vuln.xml"
+    test -s "$work/vuln.xml"
+    printf 'TARGET_CE=%s\nCANDIDATE_SHA256=%s\nVUXML_URL=%s\nVUXML_SHA256=%s\n' \
+        "$version" "$(sha256 -q "$candidate")" "$vuln_site" "$(sha256 -q "$work/vuln.xml")" > "$reports/metadata.txt"
+    audit_status=0
+    ce_pkg audit -f "$work/vuln.xml" -Rjson > "$reports/vuxml.json" || audit_status=$?
+    printf 'PKG_AUDIT_EXIT=%s\n' "$audit_status" >> "$reports/metadata.txt"
+    # A match and a scan failure both return nonzero. The workflow requires a valid result.
+    test -s "$reports/vuxml.json"
+    exit 0
+fi
 # The official base package ships the native FreeBSD userland as a release set.
 tar -xpf "$root/usr/local/share/pfSense/base.txz" -C "$root"
 ce_pkg fetch -dy -U pfSense pfSense-default-config-serial
