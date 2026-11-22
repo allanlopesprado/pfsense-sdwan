@@ -206,7 +206,7 @@ events.push(function () {
 	const report = document.getElementById('sdwan-traffic-report');
 	const results = document.getElementById('sdwan-traffic-results');
 	const body = results.querySelector('tbody');
-	const format = new Intl.NumberFormat(document.documentElement.lang || undefined, {maximumFractionDigits: 2});
+	const format = new Intl.NumberFormat(undefined, {maximumFractionDigits: 2});
 	const units = [[1e9, 'Gbit/s'], [1e6, 'Mbit/s'], [1e3, 'kbit/s'], [1, 'bit/s']];
 	const decimal = value => typeof value === 'string' && /^(0|[1-9][0-9]{0,19})$/.test(value);
 	function rate(delta, elapsed) {
