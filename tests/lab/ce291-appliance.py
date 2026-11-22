@@ -216,7 +216,8 @@ def console_shell(qemu, timeout=300):
 
 
 def first_boot(qemu, ce_version):
-    qemu.expect("Enter full pathname of shell", timeout=180)
+    # Kernel messages can interrupt the opening words of the serial prompt.
+    expect_console(qemu, r"Enter full pathname of shell|RETURN for /bin/sh:", 180)
     qemu.sendline("")
     qemu.expect(r"# ")
     command(qemu, "mount -uw /; mkdir -p /tmp /var/tmp /var/run /var/log; chmod 1777 /tmp /var/tmp")
