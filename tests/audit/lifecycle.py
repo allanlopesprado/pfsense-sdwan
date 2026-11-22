@@ -40,7 +40,8 @@ def observer(binary, *, two_bindings=False):
         stage(work)
         daemon = work / "sdwand.php"
         steering = work / "sdwan_steering.inc"
-        daemon.write_text(daemon.read_text().replace("/usr/local/pkg/sdwan_steering.inc", steering.as_posix()))
+        daemon_source = daemon.read_text().replace("/usr/local/pkg/sdwan_steering.inc", steering.as_posix())
+        daemon.write_text(daemon_source.replace("$now = time();", "$now = config_get_path('fixture_now', time());"))
         shutil.copy(PKG / "sdwan_preflight.inc", work)
         source = (PKG / steering.name).read_text()
         source = replace_native_boundary(source, "function sdwan_steering_pf_rules(): ?array {",
@@ -98,25 +99,53 @@ def observer(binary, *, two_bindings=False):
         snapshot = work / "snapshot.json"
         receipt = work / "snapshot.json.forwarded"
         events = work / "snapshot.json.events"
-        signature = php(binary, *params, "-r", include +
-                        "echo sdwan_steering_runtime_signature(sdwan_read_snapshot(), sdwan_gateways());")
         config["booting"] = False
-        receipt.write_text(json.dumps({"signature": signature, "requested_at": int(time.time()) - 3600,
-                                       "attempts": 3, "accepted": True, "confirmed": False}))
         if two_bindings:
+            signature = php(binary, *params, "-r", include +
+                            "echo sdwan_steering_runtime_signature(sdwan_read_snapshot(), sdwan_gateways());")
+            receipt.write_text(json.dumps({"signature": signature, "requested_at": int(time.time()) - 3600,
+                                           "attempts": 3, "accepted": True, "confirmed": False}))
             return unbind_one_of_two(observe, config, receipt, rows[1])
 
-        # Leave PF unreadable after an old, accepted request for five observations.
-        for _ in range(5):
+        def event_times():
+            return json.loads(events.read_bytes()).get("filter_event_at", {})
+
+        config["fixture_reload_accepted"] = True
+        observe()
+        del config["fixture_reload_accepted"]
+        acknowledged = receipt.read_bytes()
+        pending = json.loads(acknowledged)
+        requests = work / "snapshot.json.attempts"
+        if requests.read_bytes() != b"x" or not pending["accepted"] or pending["confirmed"]:
+            raise RuntimeError("The fixture did not get a pending queue acknowledgement")
+        config["fixture_now"] = pending["requested_at"] + 29
+        observe()
+        results = [case("accepted_unreadable_before_deadline", "quiet",
+                        "reported" if "filter_unavailable" in event_times() else "quiet")]
+
+        # PF remains unreadable at the retry deadline and on subsequent observations.
+        config["fixture_now"] += 1
+        observe()
+        unavailable = event_times().get("filter_unavailable")
+        results.append(case("accepted_with_unreadable_pf", "reported",
+                            "reported" if unavailable is not None else "silent", "silent"))
+        for _ in range(4):
             observe()
-        log = json.loads(events.read_bytes())
-        reported = "filter_unavailable" in log.get("filter_event_at", {}) or log.get("failure_reported", False)
-        results = [case("accepted_with_unreadable_pf", "reported", "reported" if reported else "silent", "silent")]
+        unchanged = receipt.read_bytes() == acknowledged and requests.read_bytes() == b"x"
+        results.append(case("accepted_unreadable_budget_preserved", "unchanged", "unchanged" if unchanged else "retried"))
+
+        # An exhausted budget alone cannot establish divergence while PF is unreadable.
+        pending["attempts"] = 3
+        receipt.write_text(json.dumps(pending))
+        observe()
+        observed = event_times()
+        marked = "filter_divergent" in observed or "filter_applied" in observed
+        results.append(case("accepted_unreadable_not_verified", "unverified", "verified" if marked else "unverified"))
 
         # The same receipt is reconciled as soon as PF becomes readable.
         config["fixture_pf_rules"] = ["pass in quick on igb0 inet all ridentifier 301"]
         observe()
-        logged = "filter_divergent" in json.loads(events.read_bytes()).get("filter_event_at", {})
+        logged = "filter_divergent" in event_times()
         results.append(case("accepted_with_divergent_pf", "reported", "reported" if logged else "silent"))
         config["fixture_pf_rules"] = ["block drop in quick on igb0 inet all ridentifier 301",
                                       "block drop in quick on igb0 inet all ridentifier 302"]
@@ -124,6 +153,9 @@ def observer(binary, *, two_bindings=False):
         current = json.loads(receipt.read_bytes())
         state = "confirmed_with_fresh_budget" if current["confirmed"] and current["attempts"] == 0 else "unconfirmed"
         results.append(case("pf_recovery", "confirmed_with_fresh_budget", state))
+        logged = "filter_applied" in event_times() and requests.read_bytes() == b"x"
+        results.append(case("pf_recovery_reported_without_reload", "reported", "reported" if logged else "missing"))
+        del config["fixture_now"]
 
         old = json.loads(snapshot.read_bytes())
         old["generated_at"] = int(time.time()) - 31

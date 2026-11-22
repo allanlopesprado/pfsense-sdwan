@@ -50,18 +50,19 @@ function sdwan_log_plan(array $state, string $kind, array $snapshot, string $cau
 		}
 		return [$state, $entries];
 	}
-	if (in_array($kind, ['filter_requested', 'filter_applied', 'filter_divergent', 'filter_retirement_unconfirmed'], true)) {
+	$filter_event = match ($kind) {
+		'filter_requested' => [LOG_NOTICE, 'Native filter reload requested. Waiting for PF confirmation.'],
+		'filter_applied' => [LOG_NOTICE, 'Active PF rules confirmed the current forwarding decision.'],
+		'filter_divergent' => [LOG_ERR, 'Persistent PF divergence. Automatic reload attempts for this decision have stopped.'],
+		'filter_unavailable' => [LOG_WARNING, 'Active PF rules are unavailable after the native filter reload was accepted. Confirmation and retries are paused. See Status > Filter Reload.'],
+		'filter_retirement_unconfirmed' => [LOG_ERR, 'Observer stopped without confirming withdrawal of the previous forwarding rules. Check Status > Filter Reload.'],
+		default => null,
+	};
+	if ($filter_event !== null) {
 		$last = $state['filter_event_at'][$kind] ?? null;
-		$error = in_array($kind, ['filter_divergent', 'filter_retirement_unconfirmed'], true);
-		$interval = $error ? 300 : 30;
+		$interval = $filter_event[0] === LOG_NOTICE ? 30 : 300;
 		if ($last === null || $now < $last || $now - $last >= $interval) {
-			$message = match ($kind) {
-				'filter_requested' => 'Native filter reload requested. Waiting for PF confirmation.',
-				'filter_applied' => 'Active PF rules confirmed the current forwarding decision.',
-				'filter_divergent' => 'Persistent PF divergence. Automatic reload attempts for this decision have stopped.',
-				'filter_retirement_unconfirmed' => 'Observer stopped without confirming withdrawal of the previous forwarding rules. Check Status > Filter Reload.',
-			};
-			$entries[] = [$error ? LOG_ERR : LOG_NOTICE, $message];
+			$entries[] = $filter_event;
 			$state['filter_event_at'][$kind] = $now;
 		}
 		return [$state, $entries];

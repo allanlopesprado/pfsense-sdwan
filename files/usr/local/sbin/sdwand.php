@@ -150,6 +150,9 @@ function sdwan_observe_once(): void {
 						$receipt['attempts'] = 0;
 						$receipt['confirmed'] = true;
 						$action = 'filter_applied';
+					} elseif ($rules === null && $bindings && $receipt['accepted'] && !$receipt['confirmed'] &&
+					    $now - $receipt['requested_at'] >= SDWAN_RELOAD_RETRY_INTERVAL) {
+						$action = 'filter_unavailable';
 					} elseif (!$matches && ($rules !== null || !$receipt['accepted'])) {
 						$cooldown = !$receipt['confirmed'] && $now - $receipt['requested_at'] < SDWAN_RELOAD_RETRY_INTERVAL;
 						if (!$cooldown && $receipt['attempts'] >= SDWAN_RELOAD_MAX_ATTEMPTS) {

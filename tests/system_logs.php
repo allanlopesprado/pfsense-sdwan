@@ -68,3 +68,13 @@ verify(count($ledger['reported']) === 30 && count($logs) === 6, 'unreported fina
 $malicious = ['policies' => ["bad\ncredential" => ['selected' => "PSK\nsecret", 'path_status' => 'single']]];
 [, $logs] = sdwan_log_plan([], 'observation', $malicious, '', 400);
 verify(!str_contains($logs[0][1], 'credential') && !str_contains($logs[0][1], 'secret'), 'malformed names cannot inject new messages or disclose additional text');
+
+[$ledger, $logs] = sdwan_log_plan([], 'filter_unavailable', [], '', 600);
+verify(count($logs) === 1 && $logs[0][0] === LOG_WARNING && str_contains($logs[0][1], 'Status > Filter Reload'),
+    'an acknowledged reload with unreadable PF gets a distinct operational warning');
+[$same, $logs] = sdwan_log_plan($ledger, 'filter_unavailable', [], '', 899);
+verify($same === $ledger && $logs === [], 'PF read failures are rate-limited for five minutes');
+[$ledger, $logs] = sdwan_log_plan($ledger, 'filter_unavailable', [], '', 900);
+verify(count($logs) === 1, 'a prolonged PF read failure can be reported again');
+[, $logs] = sdwan_log_plan($ledger, 'filter_applied', [], '', 901);
+verify(count($logs) === 1 && $logs[0][0] === LOG_NOTICE, 'PF confirmation can be reported immediately when rules become readable');
