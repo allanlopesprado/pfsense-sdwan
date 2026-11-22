@@ -29,6 +29,9 @@ function sdwan_encode_config(array $config): array {
 		foreach ($config[$section] as $row) {
 			if ($section === 'policies') {
 				$row['members'] = ['item' => $row['members']];
+				if (isset($row['probe_requirements'])) {
+					$row['probe_requirements'] = ['item' => $row['probe_requirements']];
+				}
 			}
 			$stored[$section]['item'][] = $row;
 		}
@@ -59,6 +62,9 @@ function sdwan_decode_config($stored): array {
 			}
 			if ($section === 'policies') {
 				$row['members'] = $row['members']['item'] ?? null;
+				if (array_key_exists('probe_requirements', $row)) {
+					$row['probe_requirements'] = $row['probe_requirements']['item'] ?? null;
+				}
 			}
 			$config[$section][] = $row;
 		}
@@ -307,7 +313,10 @@ function sdwan_validate_config(array $config, ?array $gateways, array $previous 
 		'slas' => ['name', 'latency_ms', 'loss_pct'],
 		'policies' => ['name', 'sla', 'members', 'strategy'],
 	];
-	$optional = ['slas' => ['rttsd_ms'], 'members' => ['probe_primary', 'probe_secondary']];
+	$probe_fields = ['primary_check' => 'probe_primary', 'secondary_check' => 'probe_secondary'];
+	$probe_modes = ['ignored', 'optional', 'required'];
+	$optional = ['slas' => ['rttsd_ms'], 'members' => ['probe_primary', 'probe_secondary'],
+	    'policies' => [...array_keys($probe_fields), 'probe_requirements']];
 	if (($config['version'] ?? null) !== SDWAN_CONFIG_VERSION ||
 	    array_diff_key($config, sdwan_empty_config())) {
 		return ['Unsupported SD-WAN configuration format.'];
@@ -316,6 +325,7 @@ function sdwan_validate_config(array $config, ?array $gateways, array $previous 
 	$names = [];
 	$used_gateways = [];
 	$used_probes = [];
+	$member_probes = [];
 	$old_members_by_name = array_column($previous['members'] ?? [], null, 'name');
 	$member_families = [];
 	$changed_gateways = [];
@@ -373,6 +383,7 @@ function sdwan_validate_config(array $config, ?array $gateways, array $previous 
 						return ['Each service check needs a distinct destination address and a matching native host route.'];
 					}
 					$used_probes[$probe['address']] = true;
+					$member_probes[$name][$probe_field] = true;
 				}
 				$cost = $row['cost'];
 				if ((!is_string($cost) && !is_int($cost)) ||
@@ -395,6 +406,31 @@ function sdwan_validate_config(array $config, ?array $gateways, array $previous 
 				if (!is_array($row['members']) || !array_is_list($row['members']) || !$row['members']) {
 					return ["Select at least one member for {$name}."];
 				}
+				foreach ($probe_fields as $field => $slot) {
+					if (array_key_exists($field, $row) && !in_array($row[$field], $probe_modes, true)) {
+						return ["Invalid service check requirement for policy {$name}."];
+					}
+				}
+				$requirements = array_key_exists('probe_requirements', $row) ? $row['probe_requirements'] : [];
+				if (!is_array($requirements) || !array_is_list($requirements) ||
+				    (array_key_exists('probe_requirements', $row) && !$requirements)) {
+					return ["Invalid member service check requirements for policy {$name}."];
+				}
+				$overrides = [];
+				foreach ($requirements as $override) {
+					$member = is_array($override) ? ($override['member'] ?? null) : null;
+					if (!sdwan_valid_name($member) || !in_array($member, $row['members'], true) ||
+					    isset($overrides[$member]) || count($override) < 2 ||
+					    array_diff(array_keys($override), ['member', ...array_keys($probe_fields)])) {
+						return ["Invalid member service check requirements for policy {$name}."];
+					}
+					foreach ($probe_fields as $field => $slot) {
+						if (array_key_exists($field, $override) && !in_array($override[$field], $probe_modes, true)) {
+							return ["Invalid service check requirement for {$member} in policy {$name}."];
+						}
+					}
+					$overrides[$member] = $override;
+				}
 				$selected = [];
 				$families = [];
 				$old_members = $old_policies[$name]['members'] ?? [];
@@ -405,6 +441,12 @@ function sdwan_validate_config(array $config, ?array $gateways, array $previous 
 						return ["Invalid or repeated member in policy {$name}."];
 					}
 					$selected[$member] = true;
+					foreach ($probe_fields as $field => $slot) {
+						if (($overrides[$member][$field] ?? $row[$field] ?? null) === 'required' &&
+						    !isset($member_probes[$member][$slot])) {
+							return ["Configure the required service check on {$member} for policy {$name}."];
+						}
+					}
 					if (isset($unavailable[$member]) && !in_array($member, $old_members, true)) {
 						return ["Select members with available monitored gateways for {$name}."];
 					}

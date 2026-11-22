@@ -133,7 +133,21 @@ function sdwan_member_sample(array $gateway): array {
 	return ['status' => $status, 'rtt_ms' => $rtt, 'rttsd_ms' => $variation, 'loss_pct' => $loss];
 }
 
-function sdwan_candidate_reason(?array $member, ?array $sample, ?array $sla): string {
+/* Configured member slots can be reused with different requirements per policy. */
+function sdwan_policy_probe_requirements(array $policy, array $member, array $override = []): array {
+	$requirements = [];
+	$legacy = !isset($policy['primary_check']) && !isset($policy['secondary_check']);
+	foreach (['probe_primary' => 'primary_check', 'probe_secondary' => 'secondary_check'] as $slot => $field) {
+		$default = $legacy && isset($member[$slot]) ? 'optional' : 'ignored';
+		$mode = $override[$field] ?? $policy[$field] ?? $default;
+		if ($mode !== 'ignored') {
+			$requirements[$slot] = $mode;
+		}
+	}
+	return $requirements;
+}
+
+function sdwan_candidate_reason(?array $member, ?array $sample, ?array $sla, ?array $requirements = null): string {
 	if ($member === null || $sample === null) {
 		return 'Member is not configured';
 	}
@@ -156,9 +170,20 @@ function sdwan_candidate_reason(?array $member, ?array $sample, ?array $sla): st
 	if ($sample['loss_pct'] > (float)$sla['loss_pct']) {
 		return 'Loss exceeds the SLA';
 	}
-	if (($sample['checks'] ?? []) && !in_array('Passed', $sample['checks'], true)) {
+	$checks = $sample['checks'] ?? [];
+	$required = array_keys($requirements ?? [], 'required', true);
+	if ($requirements !== null) {
+		$checks = array_intersect_key($checks, $required ? array_fill_keys($required, true) : $requirements);
+	}
+	$passed = count(array_keys($checks, 'Passed', true));
+	$minimum = $required ? count($required) : (int)(bool)($requirements ?? $checks);
+	if ($passed < $minimum) {
 		$measured = ['Timed out', 'TCP check failed', 'DNS check failed', 'HTTPS check failed'];
-		return array_intersect($sample['checks'], $measured) ?
+		if ($required) {
+			return array_intersect($checks, $measured) ?
+			    'Required service check failed' : 'No verified required service measurement';
+		}
+		return array_intersect($checks, $measured) ?
 		    'No configured service check passed' : 'No verified service measurement';
 	}
 	return 'Eligible';
@@ -193,6 +218,7 @@ function sdwan_evaluate(array $config, array $gateways, int $now, array $invento
 		$selected = null;
 		$best = INF;
 		$candidates = [];
+		$overrides = array_column($policy['probe_requirements'] ?? [], null, 'member');
 		// Gateways can change family outside this package after a restore.
 		$families = [];
 		$interfaces = [];
@@ -215,7 +241,8 @@ function sdwan_evaluate(array $config, array $gateways, int $now, array $invento
 			$member = $members[$name] ?? null;
 			$sample = $samples[$name] ?? null;
 			$reason = $mixed ? 'Members now use different IP address families' :
-			    sdwan_candidate_reason($member, $sample, $sla);
+			    sdwan_candidate_reason($member, $sample, $sla,
+			        sdwan_policy_probe_requirements($policy, $member ?? [], $overrides[$name] ?? []));
 			$candidates[$name] = $reason;
 			if ($reason !== 'Eligible') {
 				continue;

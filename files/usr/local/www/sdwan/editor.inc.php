@@ -17,6 +17,9 @@ $columns = [
 ];
 $strategies = ['cost' => gettext('Lowest cost'), 'latency' => gettext('Lowest RTT'),
     'balance' => gettext('Weighted balancing within SLA')];
+$service_fields = ['primary_check' => gettext('Primary service check'), 'secondary_check' => gettext('Secondary service check')];
+$service_modes = ['' => gettext('Member default'), 'ignored' => gettext('Ignore'),
+    'optional' => gettext('Optional'), 'required' => gettext('Required')];
 $url = '/sdwan/' . $collection . '.php';
 $revision = sdwan_config_revision($sdwan);
 $rows = $sdwan[$collection];
@@ -66,8 +69,54 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 				$sdwan_record[$key] = sdwan_ui_scalar($_POST, $key);
 			}
 		}
-		$optional = ['members' => ['probe_primary', 'probe_secondary'], 'slas' => ['rttsd_ms']];
 		$cleared = [];
+		if ($collection === 'policies') {
+			$previous = $position !== false ? ($rows[$position]['probe_requirements'] ?? []) : [];
+			$overrides = array_column($previous, null, 'member');
+			$requirements = [];
+			foreach (array_keys($service_fields) as $field) {
+				if (!array_key_exists($field, $_POST)) {
+					continue;
+				}
+				$mode = $_POST[$field];
+				if (!is_string($mode) || !array_key_exists($mode, $service_modes)) {
+					$errors[] = gettext('Select a valid service check requirement.');
+				} elseif ($mode === '') {
+					$cleared[$field] = true;
+				} else {
+					$sdwan_record[$field] = $mode;
+				}
+			}
+			foreach ($sdwan_record['members'] as $member) {
+				if (!sdwan_valid_name($member)) {
+					continue;
+				}
+				$override = $overrides[$member] ?? ['member' => $member];
+				foreach (array_keys($service_fields) as $field) {
+					$key = $field . '_' . $member;
+					if (!array_key_exists($key, $_POST)) {
+						continue;
+					}
+					$mode = $_POST[$key];
+					if (!is_string($mode) || !array_key_exists($mode, $service_modes)) {
+						$errors[] = gettext('Select a valid member service check requirement.');
+					} elseif ($mode === '') {
+						unset($override[$field]);
+					} else {
+						$override[$field] = $mode;
+					}
+				}
+				if (count($override) > 1) {
+					$requirements[] = $override;
+				}
+			}
+			if ($requirements) {
+				$sdwan_record['probe_requirements'] = $requirements;
+			} else {
+				$cleared['probe_requirements'] = true;
+			}
+		}
+		$optional = ['members' => ['probe_primary', 'probe_secondary'], 'slas' => ['rttsd_ms']];
 		foreach ($optional[$collection] ?? [] as $field) {
 			if ($sdwan_record[$field] === '') {
 				unset($sdwan_record[$field]);
@@ -220,7 +269,7 @@ elseif (!$display_form): ?>
 		    ->setHelp(gettext('Optional. Enter a TCP service address such as tcp://192.0.2.20:587, or an HTTPS URL or DNS name followed by a space and the target IP. Add a host route through this gateway under System > Routing. HTTPS requires a valid certificate.'));
 		$section->addInput(new Form_Input('probe_secondary', gettext('Secondary service check'), 'text',
 		    $sdwan_record['probe_secondary'] ?? '', ['maxlength' => 512]))
-		    ->setHelp(gettext('Use a different target IP and its own host route. A member with service checks needs at least one passing check.'));
+		    ->setHelp(gettext('Use a different target IP and its own host route. Use Policies to select which service checks determine eligibility.'));
 	} elseif ($collection === 'slas') {
 		$section->addInput(new Form_Input('latency_ms', gettext('Maximum RTT (ms)'), 'number', $sdwan_record['latency_ms'] ?? '',
 			['min' => '0.000001', 'max' => '600000', 'step' => 'any', 'required' => true]));
@@ -249,6 +298,29 @@ elseif (!$display_form): ?>
 		$section->addInput(new Form_Select('strategy', gettext('Selection strategy'), $sdwan_record['strategy'] ?? 'cost', $strategies));
 	}
 	$form->add($section);
+	if ($collection === 'policies' && (array_column($sdwan['members'], 'probe_primary') ||
+	    array_intersect_key($sdwan_record, $service_fields))) {
+		$section = new Form_Section(gettext('Service check requirements'));
+		foreach ($service_fields as $field => $label) {
+			$section->addInput(new Form_Select($field, $label, $sdwan_record[$field] ?? '', $service_modes))
+			    ->setHelp(gettext('With both slots at their defaults, any configured check can pass. Setting either policy slot explicitly makes a slot left at its default ignored. Every required check must pass.'));
+		}
+		$overrides = array_column($sdwan_record['probe_requirements'] ?? [], null, 'member');
+		$override_modes = array_replace($service_modes, ['' => gettext('Policy default')]);
+		$slots = ['primary_check' => 'probe_primary', 'secondary_check' => 'probe_secondary'];
+		foreach ($sdwan['members'] as $member) {
+			$name = $member['name'];
+			foreach ($service_fields as $field => $label) {
+				if (!isset($member[$slots[$field]]) && !isset($overrides[$name][$field])) {
+					continue;
+				}
+				$section->addInput(new Form_Select($field . '_' . $name,
+				    sprintf(gettext('%1$s %2$s'), $name, $label), $overrides[$name][$field] ?? '', $override_modes))
+				    ->setHelp(gettext('This override applies when the member is selected for this policy.'));
+			}
+		}
+		$form->add($section);
+	}
 	foreach (['revision' => $revision, 'action' => 'save', 'original' => $original] as $field => $value) {
 		$form->addGlobal(new Form_Input($field, '', 'hidden', $value));
 	}

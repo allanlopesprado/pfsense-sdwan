@@ -34,6 +34,7 @@ if ($policy !== null):
 	$selected = $use_pool ? null : ($result['selected'] ?? null);
 	$use_cost = $policy['strategy'] === 'cost';
 	$show_checks = (bool)array_column(array_intersect_key($members, array_fill_keys($policy['members'], true)), 'probe_primary');
+	$overrides = array_column($policy['probe_requirements'] ?? [], null, 'member');
 	$metrics = [
 		'rtt_ms' => [' ms', (float)$sla['latency_ms']],
 		'rttsd_ms' => [' ms', isset($sla['rttsd_ms']) ? (float)$sla['rttsd_ms'] : null],
@@ -129,9 +130,11 @@ if ($policy !== null):
 					</td>
 					<?php endforeach; ?>
 					<?php if ($show_checks): ?>
+					<?php $requirements = sdwan_policy_probe_requirements($policy, $members[$member], $overrides[$member] ?? []); ?>
 					<td><?php foreach (['probe_primary' => gettext('Primary'), 'probe_secondary' => gettext('Secondary')] as $field => $label): ?>
 						<?php if (isset($members[$member][$field])): ?>
-						<div><?=sdwan_ui_escape($label)?> · <?=sdwan_ui_escape(gettext($reading['checks'][$field] ?? 'Unavailable'))?></div>
+						<?php $requirement = $requirements[$field] ?? 'ignored'; ?>
+						<div><?=sdwan_ui_escape($label)?> · <?=sdwan_ui_escape(gettext($reading['checks'][$field] ?? 'Unavailable'))?><?php if ($requirement !== 'optional'): ?> · <?=sdwan_ui_escape($requirement === 'required' ? gettext('Required') : gettext('Ignored'))?><?php endif; ?></div>
 						<?php endif; ?>
 					<?php endforeach; ?></td>
 					<?php endif; ?>

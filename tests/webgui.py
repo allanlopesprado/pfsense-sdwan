@@ -191,7 +191,8 @@ def run(php, classes, screenshot_dir=None):
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
         shutil.copytree(SOURCE / "www/sdwan", root / "sdwan")
-        for module in ("sdwan.inc", "sdwan_engine.inc", "sdwan_preflight.inc", "sdwan_steering.inc", "sdwan_release.inc", "sdwan_log.inc"):
+        for module in ("sdwan.inc", "sdwan_engine.inc", "sdwan_preflight.inc", "sdwan_steering.inc",
+                       "sdwan_release.inc", "sdwan_log.inc", "sdwan_probe.inc"):
             shutil.copyfile(SOURCE / "pkg" / module, root / module)
         for ui in (root / "sdwan/ui.inc.php", root / "sdwan/forwarding.php", root / "sdwan/updates.php"):
             ui.write_text(ui.read_text().replace("'/usr/local/pkg/", "__DIR__ . '/../"))
@@ -271,6 +272,41 @@ def run(php, classes, screenshot_dir=None):
         assert "Configuration changed" in stale and json.loads(stale.split("SAVED=")[1]) == [0, config]
         print("ok - native policy form round-trip preserves restored tie order and distinct numeric names")
 
+        probe_config = {**config, "members": [dict(member) for member in config["members"]]}
+        for index, member in enumerate(probe_config["members"], 20):
+            member["probe_primary"] = f"tcp://192.0.2.{index}:443"
+            member["probe_secondary"] = f"dns://example.com 198.51.100.{index}"
+        probe_form = Choices(request("policies", config=probe_config, get={"edit": "VOICE"}))
+        assert probe_form.fields["primary_check"] == [
+            ("", True), ("ignored", False), ("optional", False), ("required", False),
+        ]
+        assert "primary_check_1" in probe_form.fields and "primary_check_01" in probe_form.fields
+        probe_post = {**posted, "__csrf_magic": probe_form.tokens[0], "revision": probe_form.revisions[0],
+                      "primary_check": "required", "secondary_check": "optional",
+                      "primary_check_01": "ignored", "secondary_check_01": "required"}
+        changed = request("policies", config=probe_config, post=probe_post)
+        writes, stored = json.loads(changed.split("SAVED=")[1])
+        requirements = [{"member": "01", "primary_check": "ignored", "secondary_check": "required"}]
+        assert writes == 1 and stored["policies"] == [
+            {**probe_config["policies"][0], "primary_check": "required", "secondary_check": "optional",
+             "probe_requirements": requirements},
+        ], changed
+        selected_checks = Choices(request("policies", config=stored, get={"edit": "VOICE"})).fields
+        assert ("required", True) in selected_checks["primary_check"]
+        assert ("ignored", True) in selected_checks["primary_check_01"]
+        assert ("required", True) in selected_checks["secondary_check_01"]
+        assert ("", True) in selected_checks["primary_check_1"]
+        malformed = request("policies", config=probe_config, post={**probe_post, "secondary_check_01": ["required"]})
+        assert "Select a valid member service check requirement." in malformed
+        assert json.loads(malformed.split("SAVED=")[1]) == [0, probe_config]
+        saved_probe_form = Choices(request("policies", config=stored, get={"edit": "VOICE"}))
+        cleared = request("policies", config=stored, post={
+            **probe_post, "__csrf_magic": saved_probe_form.tokens[0], "revision": saved_probe_form.revisions[0],
+            "primary_check": "", "secondary_check": "", "primary_check_01": "", "secondary_check_01": "",
+        })
+        assert json.loads(cleared.split("SAVED=")[1]) == [1, probe_config], cleared
+        print("ok - native policy form saves and clears policy and member requirements")
+
         form = Choices(request("members", get={"add": "1"}))
         assert form.fields["gateway"] == [("", True), (":FREE", False)], form.fields
         restored = request("members", get={"edit": "backup"})
@@ -344,6 +380,13 @@ def run(php, classes, screenshot_dir=None):
         assert len(decisions) == 2 and "backup" in decisions[0] and "GONE" in decisions[0]
         assert "Recommended</strong>" in decisions[0] and "Eligible" in decisions[1], decisions
         assert "RTTsd" in diagnostics and ">Cost</th>" in diagnostics
+        check_report = request("diagnostics", config=stored, snapshot={**snapshot, "members": {
+            "backup": {**sample, "checks": {"probe_primary": "Passed"}},
+            "01": {**sample, "checks": {"probe_primary": "Path not verified", "probe_secondary": "Passed"}},
+        }})
+        assert "Primary · Passed · Required" in check_report
+        assert "Primary · Path not verified · Ignored" in check_report
+        assert "Secondary · Passed · Required" in check_report
 
         latency = {**config, "policies": [{**config["policies"][0], "strategy": "latency"}]}
         failed = {**policy, "selected": None, "reason": "No eligible member",
@@ -545,6 +588,18 @@ def run(php, classes, screenshot_dir=None):
         new_binding = json.loads(tuned.split("BINDINGS=")[1].split("\nSAVED=")[0])["item"][0]
         assert new_binding["policy_revision"] != data["item"][0]["policy_revision"]
         assert new_binding["rules_revision"] == data["item"][0]["rules_revision"]
+        active_controls = Choices(request("policies", native=active, steering_abi=True, get={"edit": "VOICE"}))
+        active_probe_edit = {"name": "VOICE", "original": "VOICE", "action": "save", "sla": ":01",
+                             "strategy": "cost", "members": [":1", ":01"], "primary_check": "ignored",
+                             "__csrf_magic": active_controls.tokens[0], "revision": active_controls.revisions[0]}
+        denied = request("policies", native=active, steering_abi=True, post=active_probe_edit,
+                         privileges={"/firewall_rules_edit.php": False})
+        assert "Editing an active forwarding policy requires access" in denied and "SAVED=[0," in denied
+        revised = request("policies", native=active, steering_abi=True, post=active_probe_edit, capture_bindings=True)
+        assert json.loads(revised.split("SAVED=")[1])[0] == 1
+        probe_binding = json.loads(revised.split("BINDINGS=")[1].split("\nSAVED=")[0])["item"][0]
+        assert probe_binding["policy_revision"] != data["item"][0]["policy_revision"]
+        assert probe_binding["rules_revision"] == data["item"][0]["rules_revision"]
         orphan = {**fixture, "gateways/sdwan_bindings": data, "gateways/gateway_group": []}
         rollback = request("forwarding", native=orphan)
         assert 'value="unbind"' in rollback and 'value="bind"' not in rollback, rollback

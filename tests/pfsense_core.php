@@ -73,7 +73,12 @@ $single = [
 	'slas' => [['name' => 'voice', 'latency_ms' => '25', 'loss_pct' => '1']],
 	'policies' => [['name' => 'calls', 'sla' => 'voice', 'strategy' => 'cost', 'members' => ['wan']]],
 ];
-foreach ([sdwan_empty_config(), $single] as $fixture) {
+$with_probes = $single;
+$with_probes['members'][0] += ['probe_primary' => 'tcp://192.0.2.20:443', 'probe_secondary' => 'dns://example.com 192.0.2.53'];
+$with_probes['policies'][0] += ['primary_check' => 'required', 'probe_requirements' => [
+	['member' => 'wan', 'primary_check' => 'ignored', 'secondary_check' => 'required'],
+]];
+foreach ([sdwan_empty_config(), $single, $with_probes] as $fixture) {
 	$system = ['ipsec' => ['phase2' => [['mode' => 'vti']]], 'nat' => ['outbound' => ['mode' => 'hybrid']]];
 	$system['installedpackages']['sdwan'] = sdwan_encode_config($fixture);
 	file_put_contents($temp . '/config.xml', dump_xml_config($system, 'pfsense'));
@@ -81,7 +86,7 @@ foreach ([sdwan_empty_config(), $single] as $fixture) {
 	verify($restored['nat'] === $system['nat'] && $restored['ipsec'] === $system['ipsec'], 'Unrelated config round-trip');
 	verify(sdwan_decode_config($restored['installedpackages']['sdwan']) === $fixture, 'Observer config round-trip');
 }
-echo "ok - upstream backup/restore parser preserves single-item policy lists alongside IPsec and NAT\n";
+echo "ok - upstream backup/restore parser preserves single-item policy and probe lists alongside IPsec and NAT\n";
 
 require_once $local . '/pkg/sdwan_steering.inc';
 $binding = [

@@ -149,6 +149,59 @@ $result = sdwan_evaluate($checks, $gateways, 1700000000, $inventory, [
     'a' => ['probe_primary' => 'Timed out', 'probe_secondary' => 'Passed'],
 ]);
 check('a healthy secondary service check keeps a link eligible', $result['policies']['calls']['selected'] === 'a');
+
+$requirements = $checks;
+$requirements['members'][1] += [
+    'probe_primary' => 'https://monitor.example.com/health 198.51.100.55',
+    'probe_secondary' => 'dns://example.com 198.51.100.53',
+];
+$requirements['policies'][0] += ['primary_check' => 'required', 'secondary_check' => 'optional'];
+$requirements['policies'][] = array_replace($requirements['policies'][0], [
+    'name' => 'backups', 'primary_check' => 'ignored', 'secondary_check' => 'required',
+]);
+$requirements['policies'][] = array_replace($requirements['policies'][0], [
+    'name' => 'heterogeneous', 'probe_requirements' => [
+        ['member' => 'a', 'primary_check' => 'ignored', 'secondary_check' => 'required'],
+    ],
+]);
+$probe_samples = [
+    'a' => ['probe_primary' => 'Timed out', 'probe_secondary' => 'Passed'],
+    'b' => ['probe_primary' => 'Passed', 'probe_secondary' => 'Passed'],
+];
+$result = sdwan_evaluate($requirements, $gateways, 1700000000, $inventory, $probe_samples)['policies'];
+check('policy and member service check requirements survive the XML list shape',
+    sdwan_validate_config($requirements, $inventory) === [] &&
+    sdwan_decode_config(sdwan_encode_config($requirements)) === $requirements);
+check('a passing optional probe does not override a failed required probe',
+    $result['calls']['selected'] === 'b' && $result['calls']['candidates']['a'] === 'Required service check failed');
+check('two policies sharing the same WAN can require different services',
+    $result['backups']['selected'] === 'a' && $result['calls']['selected'] === 'b');
+check('a member can use different mandatory probe slots from other paths in the same policy',
+    $result['heterogeneous']['selected'] === 'a' && $result['heterogeneous']['eligible_count'] === 2);
+$back_to_defaults = $requirements;
+$back_to_defaults['policies'][0]['secondary_check'] = 'required';
+$probe_samples['a']['probe_primary'] = 'Path not verified';
+unset($probe_samples['b']['probe_secondary']);
+$result = sdwan_evaluate($back_to_defaults, $gateways, 1700000000, $inventory, $probe_samples)['policies']['calls'];
+check('both required checks must pass and missing measurements cannot authorize forwarding',
+    $result['selected'] === null && array_unique(array_values($result['candidates'])) === ['No verified required service measurement']);
+$result = sdwan_evaluate($back_to_defaults, $disabled, 1700000000, $inventory, $probe_samples)['policies']['calls'];
+check('gateway state is evaluated before required service checks',
+    $result['candidates']['a'] === 'Gateway is down' || $result['candidates']['a'] === 'No valid gateway measurement');
+$invalid = $requirements;
+unset($invalid['members'][0]['probe_secondary']);
+check('a service probe required by a policy cannot be removed directly',
+    str_contains(sdwan_validate_config($invalid, $inventory, $requirements)[0], 'required service check'));
+$invalid = $requirements;
+$invalid['policies'][2]['probe_requirements'][] = ['member' => 'a', 'secondary_check' => 'ignored'];
+check('repeated per-member check overrides are rejected', sdwan_validate_config($invalid, $inventory) !== []);
+$invalid = $requirements;
+$invalid['policies'][2]['probe_requirements'][0]['secondary_check'] = 'unrecognized';
+check('unknown service check modes are rejected', sdwan_validate_config($invalid, $inventory) !== []);
+$invalid = $requirements;
+$invalid['policies'][2]['members'] = ['b'];
+check('service check overrides may only reference a candidate member', sdwan_validate_config($invalid, $inventory) !== []);
+
 $checks['members'][1]['probe_primary'] = 'dns://example.com 192.0.2.53';
 check('a service IP cannot take host routes on different members', sdwan_validate_config($checks, $inventory) !== []);
 check('service targets require a supported protocol and a concrete destination IP',
