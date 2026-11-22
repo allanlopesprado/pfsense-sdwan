@@ -109,6 +109,63 @@ def renew_wan2(ce, qemu, cleanup, provider):
     print("SHARED_TARGET_DNS_HTTPS_DHCP_OK", flush=True)
 
 
+def verify_readiness_policy(ce, qemu, unready_source, hostname):
+    script = f"{ce.LAB}/shared-readiness.php"
+    ce.command(qemu, f"""umask 077
+cat >{script} <<'PHP'
+<?php
+require_once 'config.inc';
+require_once '/usr/local/pkg/sdwan.inc';
+$current = sdwan_get_config();
+$backup = __DIR__ . '/shared-readiness-original.json';
+if (($argv[1] ?? '') === 'restore') {{
+    $candidate = json_decode(file_get_contents($backup), true, 32, JSON_THROW_ON_ERROR);
+}} else {{
+    if (file_put_contents($backup, json_encode($current, JSON_THROW_ON_ERROR)) === false) {{
+        throw new RuntimeException('Could not save the lab settings');
+    }}
+    $candidate = $current;
+    $tables = ['GW_A' => 1, 'GW_B' => 2];
+    foreach ($candidate['members'] as &$member) {{
+        $member['probe_primary'] = 'fib=' . $tables[$member['gateway']] . ' https://{hostname}/healthz {TARGET} expect=ok';
+        unset($member['probe_secondary']);
+    }}
+    unset($member);
+    foreach ($candidate['policies'] as &$policy) {{
+        $policy['primary_check'] = $policy['name'] === 'ERP' ? 'required' : 'ignored';
+        $policy['secondary_check'] = 'ignored';
+    }}
+    unset($policy);
+}}
+$errors = sdwan_save_config($candidate, sdwan_config_revision($current), true);
+if ($errors) {{
+    throw new RuntimeException(implode('; ', $errors));
+}}
+PHP
+php {script}""")
+
+    def check(label, routes, sources, checks):
+        snapshot = ce.wait_paths(qemu, label, routes)["snapshot"]
+        result = [(snapshot["members"][name]["status"], snapshot["members"][name]["checks"]["probe_primary"])
+                  for name in ("a", "b")]
+        assert result == [("online", status) for status in checks], (label, result)
+        print(f"{label}: {result!r}", flush=True)
+        ce.tcp_pair(label, sources)
+
+    try:
+        check("both readiness markers match", NATIVE_PATHS, (ce.A, ce.A), ("Passed", "Passed"))
+        unready_source.write_text(ce.A, encoding="ascii")
+        check("HTTP 200 with wrong marker on WAN1", {"G": "GW_B", "B": "GW_A"}, (ce.B, ce.A),
+              ("HTTPS response marker mismatch", "Passed"))
+        unready_source.unlink()
+        check("WAN1 readiness restored", NATIVE_PATHS, (ce.A, ce.A), ("Passed", "Passed"))
+    finally:
+        unready_source.unlink(missing_ok=True)
+        ce.command(qemu, f"php {script} restore")
+    ce.wait_paths(qemu, "original policies restored", NATIVE_PATHS)
+    ce.tcp_pair("original policies restored", (ce.A, ce.A))
+
+
 def exercise(ce, benchmark, qemu, cleanup, provider):
     version, _ = ce.install_bound_candidate(qemu)
     ce.wait_paths(qemu, "before installed package verification", NATIVE_PATHS)
@@ -117,7 +174,7 @@ def exercise(ce, benchmark, qemu, cleanup, provider):
         assert any(line.startswith(f"Group {group}, policy {policy}, trackers ") and line.endswith(": applied.")
                    for line in verification.splitlines()), verification
     print(verification, flush=True)
-    benchmark.setup_probes(ce, qemu, cleanup, shared_host=TARGET)
+    unready_source = benchmark.setup_probes(ce, qemu, cleanup, shared_host=TARGET)
     install_counters(ce)
     reference = ce.route_and_nat(qemu)
     certificate = ce.management("before shared target tests")
@@ -162,9 +219,11 @@ def exercise(ce, benchmark, qemu, cleanup, provider):
         for protocol in PATH_CHECKS:
             measure(ce, qemu, protocol, ("Passed", "Passed"), (True, True))
         assert_native_routing(ce, qemu, reference)
+        print("SHARED_TARGET_DNS_HTTPS_REBOOT_OK", flush=True)
+        verify_readiness_policy(ce, qemu, unready_source, benchmark.TLS_NAME)
+        assert_native_routing(ce, qemu, reference)
     finally:
         remove_routes(ce, qemu)
-    print("SHARED_TARGET_DNS_HTTPS_REBOOT_OK", flush=True)
 
 
 def main():
@@ -179,6 +238,7 @@ def main():
         exercise(ce, benchmark, qemu, cleanup, provider)
 
     ce.appliance(args.image.resolve(), args.ce_version, scenario=scenario)
+    print(f"CE_{args.ce_version.replace('.', '')}_READINESS_OK", flush=True)
 
 
 if __name__ == "__main__":
