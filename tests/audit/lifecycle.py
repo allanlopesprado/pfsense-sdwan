@@ -359,6 +359,22 @@ require $work . '/sdwan.inc';
 require $work . '/sdwan_engine.inc';
 require $work . '/sdwan_release.inc';
 
+function g_get($key, $default) {
+    return $key === 'varrun_path' ? $GLOBALS['work'] : $default;
+}
+
+function get_package_id($name) {
+    return $name === 'SDWAN' ? 0 : -1;
+}
+
+function recovery_archive(): string {
+    return sdwan_release_recovery_dir() . '/pfSense-pkg-SDWAN-0.4.28.pkg';
+}
+
+function finish_recovery_fixture(): void {
+    sdwan_release_clear_recovery(sdwan_release_recovery_dir(), recovery_archive());
+}
+
 function publish_sample(int $when, bool $valid = true, ?string $version = null, int $pid = 502): void {
     $config = sdwan_get_config();
     $inventory = sdwan_gateways();
@@ -384,15 +400,19 @@ function pkg_exec($command, &$stdout, &$stderr): int {
             return 1;
         }
         file_put_contents($arguments[2] . '/pfSense-pkg-SDWAN-' . $GLOBALS['version'] . '.pkg', 'rollback fixture');
-    } elseif (str_starts_with($command, 'query -F ')) {
+    } elseif (str_starts_with($command, 'info --raw --raw-format json -F ')) {
         $version = str_contains($command, 'pfSense-pkg-SDWAN-0.4.29.pkg') ? '0.4.29' : $GLOBALS['version'];
-        $stdout = "pfSense-pkg-SDWAN {$version} net/pfSense-pkg-SDWAN";
+        $stdout = json_encode(['name' => 'pfSense-pkg-SDWAN', 'version' => $version,
+            'origin' => 'net/pfSense-pkg-SDWAN', 'prefix' => '/usr/local', 'abi' => 'FreeBSD:16:*'], JSON_THROW_ON_ERROR);
     } elseif (str_starts_with($command, '-o DEVELOPER_MODE=yes add -f ')) {
         $GLOBALS['rollbacks']++;
         if ($GLOBALS['rollbackFails']) {
             return 1;
         }
         $GLOBALS['version'] = '0.4.28';
+        if ($GLOBALS['publishAfterRollback']) {
+            publish_sample(time());
+        }
     } elseif (str_starts_with($command, '-o DEVELOPER_MODE=yes add ')) {
         $GLOBALS['adds']++;
         $GLOBALS['version'] = '0.4.29';
@@ -451,6 +471,7 @@ $supervisorRunning = true;
 $workerRunning = false;
 $filesValid = true;
 $publishAfterInstall = false;
+$publishAfterRollback = $registrationFails = false;
 $held = sdwan_lock('sdwan-package-upgrade', 0);
 if (!is_resource($held)) { throw new RuntimeException('Could not hold fixture lock'); }
 $locked = sdwan_release_upgrade($target);
@@ -458,6 +479,7 @@ if ($adds !== 0 || $release_requests) { throw new RuntimeException('Concurrent r
 sdwan_unlock($held);
 $afterInstall = sdwan_release_upgrade($target);
 if ($adds !== 1 || $version !== '0.4.29') { throw new RuntimeException('The install fixture did not commit'); }
+if (!is_file(recovery_archive())) { throw new RuntimeException('Unready installation discarded the recovery archive'); }
 $release_requests = [];
 $retry = sdwan_release_upgrade($target);
 $supervisorRunning = true;
@@ -470,6 +492,7 @@ publish_sample(time(), false);
 $changedSample = sdwan_release_upgrade($target, true);
 publish_sample(time());
 $verified = sdwan_release_upgrade($target, true);
+if (is_file(recovery_archive())) { throw new RuntimeException('A verified installation kept the recovery archive'); }
 $filesValid = false;
 $corrupt = sdwan_release_upgrade($target, true);
 $filesValid = true;
@@ -483,10 +506,12 @@ $verifyAfterRollback = sdwan_release_upgrade($target, true);
 if ($adds !== 1 || $release_requests) { throw new RuntimeException('A local verification requested a download or install'); }
 $workerRunning = false;
 $supervisorOnly = sdwan_release_upgrade($target);
+finish_recovery_fixture();
 $workerRunning = true;
 $version = '0.4.28';
 publish_sample(time() - 5, true, '0.4.29');
 $previousSample = sdwan_release_upgrade($target);
+finish_recovery_fixture();
 $version = '0.4.28';
 $fixture_install_time = time();
 publish_sample($fixture_install_time);
@@ -500,6 +525,7 @@ unset($legacy['observer']);
 file_put_contents(SDWAN_SNAPSHOT_PATH, json_encode($legacy, JSON_THROW_ON_ERROR));
 $unmarked = sdwan_release_upgrade($target, true);
 if (sdwan_read_snapshot() === null) { throw new RuntimeException('A legacy sample should still show observation results'); }
+finish_recovery_fixture();
 $version = '0.4.28';
 $publishAfterInstall = true;
 $fixture_install_time = time();
@@ -513,6 +539,11 @@ $backupFails = false;
 $installFails = true;
 $rollbackAfterError = sdwan_release_upgrade($target);
 if ($version !== '0.4.28' || $rollbacks !== 1) { throw new RuntimeException('Previous package not restored'); }
+if (!is_file(recovery_archive()) || sdwan_release_upgrade($target) !== 'recovery_pending') {
+    throw new RuntimeException('Unverified restoration lost its independently usable archive');
+}
+finish_recovery_fixture();
+$publishAfterRollback = true;
 $installFails = false;
 $newFilesInvalid = true;
 $rollbackAfterIntegrity = sdwan_release_upgrade($target);
@@ -526,11 +557,13 @@ if ($priority !== LOG_ERR || !preg_match('~Local recovery archive: (.+)$~', $mes
     (DIRECTORY_SEPARATOR === '/' && (fileperms(dirname($location[1])) & 0777) !== 0700)) {
     throw new RuntimeException('Usable recovery archive was not retained privately');
 }
+finish_recovery_fixture();
 $newFilesInvalid = $rollbackFails = false;
 $nativeUpgradeWon = true;
 $version = '0.4.28';
 $changedExternally = sdwan_release_upgrade($target);
 if ($rollbacks !== 3 || $version !== '0.4.30') { throw new RuntimeException('Rollback overwrote a concurrent update'); }
+finish_recovery_fixture();
 $nativeUpgradeWon = false;
 $version = '0.4.28';
 $installHookFails = true;
@@ -540,10 +573,15 @@ $installHookFails = false;
 $supervisorRunning = false;
 $statusChecks = 0;
 $rollbackAfterInactive = sdwan_release_upgrade($target);
-if ($rollbacks !== 5 || $version !== '0.4.28' || $statusChecks !== 3) {
+if ($rollbacks !== 5 || $version !== '0.4.28' || $statusChecks !== 4 || !is_file(recovery_archive())) {
     throw new RuntimeException('Inactive service did not trigger a bounded rollback');
 }
+finish_recovery_fixture();
 $supervisorRunning = true;
+$registrationFails = true;
+$rollbackAfterRegistration = sdwan_release_upgrade($target);
+if ($rollbacks !== 6 || $version !== '0.4.28') { throw new RuntimeException('Missing native registration did not trigger rollback'); }
+$registrationFails = false;
 $version = '0.4.28';
 $unsigned = $release_http;
 $release_http = fixture_attach_release_signature($release_http, $target['version'], 'signature fixture');
@@ -564,7 +602,7 @@ if ($version !== '0.4.29' || $signatureChecks !== 2) { throw new RuntimeExceptio
 echo json_encode([$locked, $afterInstall, $retry, $supervisorOnly, $workerAbsentRetry, $expired,
     $changedSample, $verified, $corrupt, $invalidPid, $downgrade, $verifyAfterRollback, $previousSample,
     $sameSecond, $sameVersionRetry, $previousWorker, $unmarked, $success, $noBackup, $rollbackAfterError,
-    $rollbackAfterIntegrity, $failedRollback, $changedExternally, $rollbackAfterHook, $rollbackAfterInactive,
+    $rollbackAfterIntegrity, $failedRollback, $changedExternally, $rollbackAfterHook, $rollbackAfterInactive, $rollbackAfterRegistration,
     $signatureWithoutKey, $rejectedSignature,
     $validSignature, $unsignedWithKey], JSON_THROW_ON_ERROR);
 """
@@ -582,6 +620,17 @@ def upgrade(binary):
     with tempfile.TemporaryDirectory(prefix="sdwan-audit-upgrade-") as temporary:
         work = Path(temporary)
         stage(work)
+        config = work / "config.inc"
+        native_config = config.read_text().replace("return !$backup && $cache;", "return !$backup;")
+        native_config = native_config.replace("return $config[$path] ?? $default;", """return match ($path) {
+            'installedpackages/package/0/version' => $GLOBALS['version'],
+            'installedpackages/package/0/configurationfile' => 'sdwan.xml',
+            'installedpackages/menu' => [['configfile' => 'sdwan.xml', 'url' => '/sdwan/status.php', 'section' => 'Services']],
+            'installedpackages/service' => $GLOBALS['registrationFails'] && $GLOBALS['version'] === '0.4.29' ?
+                [] : [['name' => 'sdwan', 'rcfile' => 'sdwand.sh']],
+            default => $config[$path] ?? $default,
+        };""")
+        config.write_text(native_config)
         (work / "pfsense-version").write_text("2.9.2-RELEASE\n")
         (work / "supervisor.pid").write_text("501\n")
         release = (PKG / "sdwan_release.inc").read_text()
@@ -593,6 +642,9 @@ def upgrade(binary):
         release = release.replace("!is_executable(SDWAN_RELEASE_MINISIGN)", "!is_file(SDWAN_RELEASE_MINISIGN)")
         release = release.replace("sys_get_temp_dir() . '/sdwan-upgrade-'", "__DIR__ . '/sdwan-upgrade-'")
         release = release.replace("$installed_since = time();", "$installed_since = $GLOBALS['fixture_install_time'] ?? time();")
+        if os.name == "nt":
+            # Windows lacks POSIX mode bits. Treat the tempfile's inherited private ACL as the fixture boundary.
+            release = release.replace("(fileperms($directory) & 0777) !== 0700", "false")
         (work / "sdwan_release.inc").write_text(release)
         observed = run_php_fixture(binary, UPGRADE_FIXTURE.replace("{{FIXTURE_DIR}}", json.dumps(work.as_posix())))
     expected = [
@@ -615,12 +667,13 @@ def upgrade(binary):
         ("upgrade_reverification_rejects_unmarked_sample", "verify", None),
         ("upgrade_verifies_fresh_post_install_sample", "success", None),
         ("upgrade_requires_usable_rollback_archive", "backup", None),
-        ("upgrade_restores_previous_package_on_install_error", "rolled_back", None),
+        ("upgrade_preserves_archive_until_restored_service_is_ready", "rollback_verify", None),
         ("upgrade_restores_previous_package_on_integrity_error", "rolled_back", None),
         ("upgrade_reports_a_failed_restore", "rollback_failed", None),
         ("upgrade_preserves_a_concurrent_native_upgrade", "rollback_changed", None),
         ("upgrade_restores_previous_package_on_post_install_script_error", "rolled_back", None),
-        ("upgrade_restores_previous_package_after_inactive_service", "rolled_back_inactive", None),
+        ("upgrade_retains_archive_after_inactive_service", "rollback_verify", None),
+        ("upgrade_restores_previous_package_after_missing_native_registration", "rolled_back", None),
         ("upgrade_without_pinned_key_preserves_checksum_path", "success", None),
         ("upgrade_rejects_invalid_published_signature_with_pinned_key", "signature", None),
         ("upgrade_accepts_valid_published_signature_with_pinned_key", "success", None),

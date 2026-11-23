@@ -69,7 +69,8 @@ file_put_contents(SDWAN_SNAPSHOT_PATH, json_encode($snapshot, JSON_THROW_ON_ERRO
 
 $action = $blocked ? 'block drop in quick on igb2' : 'pass in quick on igb2 route-to (igb0 192.0.2.1)';
 $clause = ' inet from 10.23.0.0/24 to any';
-$state = $blocked ? '' : ' keep state (if-bound) label "gw=1:G"';
+// PF applies its default TCP mask to stateful passes even without an explicit protocol.
+$state = $blocked ? '' : ' flags S/SA keep state (if-bound) label "gw=1:G"';
 $fixture_loaded_pf = [$action . $clause . $state . ' ridentifier 301'];
 if ($case !== 'missing_guard') {
     $fixture_loaded_pf[] = 'block drop in quick on igb2' . $clause . ' ridentifier 302';
