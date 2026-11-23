@@ -115,6 +115,20 @@ def renew_wan2(ce, qemu, cleanup, provider):
 def activation_mismatch_evidence(ce, qemu, worker):
     details = ce.command(qemu, f"""printf '%s\\n' 'Active PF trackers and native generation'
 pfctl -P -sr 2>/dev/null | grep -E 'ridentifier (41001|41003)$|descr=Default deny rule IPv[46]' | head -12
+printf '%s\\n' 'Native config directory identities and rules file fingerprints'
+for path in /conf /cf/conf /conf/config.xml /cf/conf/config.xml /etc/inc/filter.inc \\
+    /etc/inc/filter-sdwan.inc /tmp/rules.debug /cf/conf/rules.debug.old /cf/conf/rules.debug.bad; do
+    if [ ! -e "$path" ]; then printf '%s absent\\n' "$path"; continue; fi
+    stat -L -f '%N device=%d inode=%i bytes=%z modified=%m' "$path"
+    if [ -f "$path" ]; then printf '%s SHA256=%s\\n' "$path" "$(sha256 -q "$path")"; fi
+    case "$path" in
+        */rules.debug*) grep -E 'ridentifier (41001|41003)([[:space:]]|$)|descr=Default deny rule IPv[46]' "$path" | head -8 | cut -c 1-280 ;;
+    esac
+done
+if [ -r /var/run/filter_reload_status ]; then
+    printf '%s\\n' 'Native filter reload status'
+    tail -n 10 /var/run/filter_reload_status | cut -c 1-360
+fi
 printf '%s\\n' 'Observer and reload processes'
 ps -ax -o pid= -o ppid= -o stat= -o command= | awk '$1 == {int(worker)} || $0 ~ /sdwand\\.php|check_reload_status/' | head -12
 for entry in sdwan-observer.json sdwan-observer.json.forwarded sdwan-filter-commit.json sdwan-expiry.heartbeat; do
@@ -140,7 +154,7 @@ pfctl -P -vvsr 2>/dev/null | grep -A2 -E 'on vtnet1|ridentifier 41001$' | head -
 pfctl -vvss 2>/dev/null | grep -A3 -F '192.0.2.162:7' | head -35
 if [ -r /var/log/system.log ]; then
     printf '%s\\n' 'Recent SD-WAN and native reload messages'
-    tail -n 100 /var/log/system.log | grep -Ei 'SD-WAN|filter reload|check_reload_status' | tail -15
+    tail -n 120 /var/log/system.log | grep -Ei 'SD-WAN|filter reload|check_reload_status|rules\\.debug|PF.*(busy|load)|PHP.*(error|warning|fatal)' | tail -20 | cut -c 1-360
 fi""", timeout=15)
     print(details, flush=True)
 

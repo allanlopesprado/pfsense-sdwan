@@ -52,7 +52,7 @@ function config_get_path(string $path, mixed $default = null): mixed {
 }
 
 function g_get(string $key): string {
-	return ['conf_path' => '/fixture', 'xml_rootobj' => 'pfsense'][$key];
+	return ['conf_path' => '/other', 'cf_conf_path' => '/fixture', 'xml_rootobj' => 'pfsense'][$key];
 }
 
 function parse_xml_config(string $path, array $root): mixed {
@@ -97,3 +97,26 @@ foreach ([-1, ['gateways' => ['sdwan_bindings' => ['item' => [[$row('41001')]]]]
 	}
 }
 echo "ok - native rule generation uses saved approval authority while preserving unrelated rules\n";
+
+$GLOBALS['disk_config'] = ['system' => []];
+if (filter_sdwan_native_fallback_allowed()) {
+	throw new RuntimeException('Native fallback discarded the filter generation authority');
+}
+unset($GLOBALS['sdwan_filter_cycle']);
+if (filter_sdwan_native_fallback_allowed()) {
+	throw new RuntimeException('Native fallback ignored the in-memory approvals');
+}
+$GLOBALS['memory_rows'] = [];
+$GLOBALS['disk_config'] = ['gateways' => ['sdwan_bindings' => ['item' => $saved]]];
+if (filter_sdwan_native_fallback_allowed()) {
+	throw new RuntimeException('Native fallback ignored persisted approvals acquired during generation');
+}
+$GLOBALS['disk_config'] = -1;
+if (filter_sdwan_native_fallback_allowed()) {
+	throw new RuntimeException('Native fallback could not verify approval status');
+}
+$GLOBALS['disk_config'] = ['system' => []];
+if (!filter_sdwan_native_fallback_allowed()) {
+	throw new RuntimeException('Native fallback was changed for an unbound configuration');
+}
+echo "ok - native fallback remains available only when no forwarding approvals apply\n";

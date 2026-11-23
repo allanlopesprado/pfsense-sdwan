@@ -96,7 +96,7 @@ function filter_sdwan_read_persisted_bindings(): ?array {
 		}
 	}
 	try {
-		$config = parse_xml_config(g_get('conf_path') . '/config.xml', [g_get('xml_rootobj')]);
+		$config = parse_xml_config(g_get('cf_conf_path') . '/config.xml', [g_get('xml_rootobj')]);
 	} catch (Throwable) {
 		return null;
 	} finally {
@@ -164,6 +164,13 @@ function filter_sdwan_begin_reload(?array $persisted_rows = null): void {
 	$GLOBALS['sdwan_filter_cycle'] = [
 	    'bindings' => $bindings, 'choices' => [], 'started_ns' => $started, 'trackers' => $trackers,
 	];
+}
+
+/* A failed PF transaction can preserve its active rules. An older rules file
+ * has no current approval proof for a bound tracker. */
+function filter_sdwan_native_fallback_allowed(): bool {
+	return empty($GLOBALS['sdwan_filter_cycle']['trackers']) && filter_sdwan_tracker_index() === [] &&
+	    filter_sdwan_read_persisted_bindings() === [];
 }
 
 /* The native generator labels its default deny rules with the ruleset hash. */

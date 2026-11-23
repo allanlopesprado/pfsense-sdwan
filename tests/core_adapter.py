@@ -277,7 +277,7 @@ def run(php, core, output, replay, family, links, vti=False):
         assert all(next_hop("GW_A") in line for line in (first, same_cycle))
         assert next_hop("GW_B") in next_cycle
         old = json.loads(snapshot.read_text())
-        old["generated_at"] -= 300
+        old["observed_at_ns"] -= 31_000_000_000
         snapshot.write_text(json.dumps(old))
         denied("stale telemetry")
         shutil.copy(work / "sample-a.json", snapshot)
