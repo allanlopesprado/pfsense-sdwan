@@ -68,12 +68,38 @@ if [ "$scenario" != security ]; then
 fi
 mkdir -p "$root/var/cache/pkg" "$root/root"
 cp -R "$work/keys" "$root/root/netgate-keys"
+run_ce_pkg() (
+    executable=$1
+    destination=$2
+    repositories=$3
+    shift 3
+    env ABI=FreeBSD:16:amd64 OSVERSION=1600018 REPOS_DIR="$repositories" \
+        PKG_CACHEDIR="$destination/var/cache/pkg" "$executable" --rootdir "$destination" "$@"
+)
+
+builder_pkg=/usr/local/sbin/pkg-static
+package_tool=$builder_pkg
+if [ "$scenario" != security ]; then
+    # The runner and CE can use different libpkg schemas. Keep the runner's
+    # catalogs in a temporary root and let the signed CE binary prepare the disk.
+    bootstrap="$work/pkg-bootstrap"
+    mkdir -p "$bootstrap/var/cache/pkg" "$bootstrap/root"
+    cp -R "$work/keys" "$bootstrap/root/netgate-keys"
+    run_ce_pkg "$builder_pkg" "$bootstrap" "$work/repos" update
+    run_ce_pkg "$builder_pkg" "$bootstrap" "$work/repos" install -Iy -U pkg
+    package_tool="$bootstrap/usr/local/sbin/pkg-static"
+    test -x "$package_tool"
+    printf 'CE_PACKAGE_DB_TOOL=%s SHA256=%s\n' "$("$package_tool" -v)" "$(sha256 -q "$package_tool")"
+fi
+
 ce_pkg() {
-    env ABI=FreeBSD:16:amd64 OSVERSION=1600018 REPOS_DIR="$work/repos" PKG_CACHEDIR="$root/var/cache/pkg" \
-        /usr/local/sbin/pkg-static --rootdir "$root" "$@"
+    run_ce_pkg "$package_tool" "$root" "$work/repos" "$@"
 }
 ce_pkg update
 ce_pkg install -Iy -U pfSense-base pfSense-kernel-pfSense pkg
+if [ "$scenario" != security ]; then
+    cmp "$package_tool" "$root/usr/local/sbin/pkg-static"
+fi
 if [ "$scenario" = security ]; then
     reports="$out/$lab-security"
     mkdir "$reports"
@@ -126,8 +152,7 @@ next-core: { url: "$next_mirror-core", enabled: yes, signature_type: "fingerprin
 next-system: { url: "$next_mirror-pfSense_v2_9_2", enabled: yes, signature_type: "fingerprints", fingerprints: "/root/netgate-keys" }
 REPO
     ce_pkg_next() {
-        env ABI=FreeBSD:16:amd64 OSVERSION=1600018 REPOS_DIR="$next" PKG_CACHEDIR="$root/var/cache/pkg" \
-            /usr/local/sbin/pkg-static --rootdir "$root" "$@"
+        run_ce_pkg "$package_tool" "$root" "$next" "$@"
     }
     ce_pkg_next update
     ce_pkg_next fetch -dy -U pfSense pfSense-base pfSense-kernel-pfSense pfSense-system pfSense-default-config-serial
