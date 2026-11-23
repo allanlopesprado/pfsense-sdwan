@@ -10,14 +10,16 @@ Run `sh tests/run.sh` from a full Git checkout with PHP CLI, Python 3, ShellChec
 
 The [two-WAN appliance workflow](../.github/workflows/ce291-appliance.yml) builds and installs the candidate on a disposable appliance from signed Netgate packages. Select `2.9.1` or `2.9.2` in the manual workflow, and record the candidate revision and package SHA-256 from the result.
 
-The run summary and the `sdwan-divergence-audit` artifact record the revision, seed, expected values, and observed values. An unexpected mismatch fails the audit. A previously reproduced discrepancy remains visible as a warning while it matches its recorded outcome. When its expected behavior starts passing, the audit reports it as resolved. GitHub can disable scheduled runs in public repositories after 60 days of inactivity. [GitHub schedule behavior](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#schedule)
+Set `extended=true` in **Package checks** to run acceptance, shared-target probes, activation guards, and inline Suricata inspection on both CE versions. The same run also exercises the CE 2.9.1 to 2.9.2 upgrade and disk rollback. The nine scenarios use one candidate artifact and preserve their results separately. The release job compares the SHA-256-checked archive in `dist/` byte for byte with both appliance qualification artifacts.
 
-An unexpected result also starts a second pass with a different seed. The artifact retains both reports and the job retains the original failure. When an audit exposes a discrepancy, preserve a minimal reproduction and the nearest controls that delimit the failure. The follow-up checks cover a refused or accepted reload during binding removal, fresh and expired snapshots, rendering when the observer is unavailable, and resolved addresses and next hops during DHCP changes. The fixtures run with synthetic observations and rule text. The FreeBSD and appliance logs provide the separate evidence for real PF and packet delivery. [Appliance and FreeBSD measurements](benchmarks/README.md)
+The offline audit runs 16 seeds on pushes and pull requests and 32 on manual and scheduled runs. The reports in the `sdwan-divergence-audit-*` artifacts record the exact seeds, revision, expected values, and observed values. Each seed varies the transition inputs and repeats the fixed regression checks. Any unexpected mismatch fails the audit. Each failed seed gets one follow-up with its adjacent seed while the original failure stays recorded. A known discrepancy remains a warning while its observed behavior matches the record. The workflow reports it as resolved when it starts passing. GitHub can disable scheduled runs in public repositories after 60 days of inactivity. [GitHub schedule behavior](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#schedule)
 
-Reproduce an offline run with PHP CLI and Python 3. Use its run ID as the seed.
+The fixtures use synthetic observations and rule text to check policy transitions, three-WAN pools, sample expiry, reloads, and address and next-hop changes. Use the FreeBSD and appliance logs for the evidence of loaded PF rules and traffic delivery. [Appliance and FreeBSD measurements](benchmarks/README.md)
+
+Reproduce an offline campaign with PHP CLI and Python 3. Copy the starting seed and round count from its artifact.
 
 ```sh
-python3 tests/audit/run.py --seed 44955564168 --output ./audit-results
+python3 tests/audit/campaign.py --start-seed 2877156106752 --rounds 8 --output ./audit-results
 ```
 
 ## Configuration lifecycle

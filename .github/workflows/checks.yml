@@ -11,25 +11,40 @@ on:
         description: Also run the two CE appliance acceptance jobs
         type: boolean
         default: false
+      extended:
+        description: Run the deeper two-version CE scenario matrix
+        type: boolean
+        default: false
 permissions:
   contents: read
 jobs:
   divergence-audit:
+    name: divergence-audit (${{ matrix.shard }})
     runs-on: ubuntu-24.04
     timeout-minutes: 8
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Run divergence checks with a recorded seed
-        run: python3 tests/audit/run.py --seed "$GITHUB_RUN_ID" --output "$RUNNER_TEMP/sdwan-audit"
+      - name: Run divergence checks with recorded seeds
+        env:
+          AUDIT_SHARD: ${{ matrix.shard }}
+          AUDIT_ROUNDS: ${{ (github.event_name == 'workflow_dispatch' || github.event_name == 'schedule') && '8' || '4' }}
+        run: |
+          start_seed=$((GITHUB_RUN_ID * 64 + AUDIT_SHARD * 16))
+          python3 -B tests/audit/campaign.py --start-seed "$start_seed" --rounds "$AUDIT_ROUNDS" \
+            --output "$RUNNER_TEMP/sdwan-audit"
       - name: Add results to the workflow summary
         if: always()
         run: |
           report="$RUNNER_TEMP/sdwan-audit"
-          if [ -f "$report/audit.md" ]; then
-            cat "$report/audit.md" >> "$GITHUB_STEP_SUMMARY"
-            known=$(jq -r .counts.known "$report/audit.json")
+          if [ -f "$report/campaign.md" ]; then
+            cat "$report/campaign.md" >> "$GITHUB_STEP_SUMMARY"
+            known=$(jq -r .counts.known "$report/campaign.json")
             if [ "$known" -gt 0 ]; then
               echo "::warning title=Known SD-WAN discrepancies::$known still reproduced. See the run summary."
             fi
@@ -37,7 +52,7 @@ jobs:
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
-          name: sdwan-divergence-audit
+          name: sdwan-divergence-audit-${{ matrix.shard }}-attempt-${{ github.run_attempt }}
           path: ${{ runner.temp }}/sdwan-audit/
           if-no-files-found: error
           retention-days: 30
@@ -198,7 +213,7 @@ jobs:
             SDWAN_REAL_DPINGER=1 SDWAN_RENDERED_RULES="$PWD/lab-rendered" sh tests/lab/freebsd-dataplane.sh
             SDWAN_ERP_ONLY=1 SDWAN_NATIVE_CORE="$PWD/lab-core" sh tests/lab/freebsd-dataplane.sh
   release-appliance:
-    if: (github.event_name == 'push' && github.ref == 'refs/heads/main' && startsWith(github.event.head_commit.message, 'Release ')) || (github.event_name == 'workflow_dispatch' && inputs.appliance)
+    if: (github.event_name == 'push' && github.ref == 'refs/heads/main' && startsWith(github.event.head_commit.message, 'Release ')) || (github.event_name == 'workflow_dispatch' && inputs.appliance && !inputs.extended)
     permissions:
       contents: read
       actions: read
@@ -210,6 +225,31 @@ jobs:
     with:
       ce_version: ${{ matrix.version }}
       artifact_suffix: -${{ matrix.version }}
+  extended-package:
+    if: github.event_name == 'workflow_dispatch' && inputs.extended
+    uses: ./.github/workflows/build-package.yml
+    with:
+      artifact_suffix: -extended
+  extended-appliance:
+    needs: extended-package
+    permissions:
+      contents: read
+      actions: read
+    strategy:
+      fail-fast: false
+      max-parallel: 5
+      matrix:
+        version: ['2.9.1', '2.9.2']
+        scenario: [acceptance, shared-target, activation-guard, inspection]
+        include:
+          - version: '2.9.1'
+            scenario: recovery
+    uses: ./.github/workflows/ce291-appliance.yml
+    with:
+      ce_version: ${{ matrix.version }}
+      scenario: ${{ matrix.scenario }}
+      artifact_suffix: -extended
+      reuse_package: true
   publish:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main' && startsWith(github.event.head_commit.message, 'Release ')
     needs: [divergence-audit, offline, freebsd, ikev2, homologation, release-appliance]
@@ -224,12 +264,14 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Retrieve preview assets from this verified run
+      - name: Retrieve previews and both qualified packages from this run
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh run download "$GITHUB_RUN_ID" -n sdwan-dashboard -D release-previews
           gh run download "$GITHUB_RUN_ID" -n sdwan-pages -D release-pages
+          gh run download "$GITHUB_RUN_ID" -n sdwan-package-2.9.1 -D release-ce291
+          gh run download "$GITHUB_RUN_ID" -n sdwan-package-2.9.2 -D release-ce292
       - name: Publish verified laboratory distribution
         env:
           GH_TOKEN: ${{ github.token }}
@@ -243,6 +285,8 @@ jobs:
             *) echo "The release commit must identify version $version." >&2; exit 1 ;;
           esac
           (cd dist && sha256sum --check "$package.sha256")
+          cmp "dist/$package" "release-ce291/$package"
+          cmp "dist/$package" "release-ce292/$package"
           published_index=$(gh api "repos/$GITHUB_REPOSITORY/contents/dist/release.json?ref=main" --jq .content)
           current_index=$(printf '%s' "$published_index" | base64 --decode | jq -cS .)
           if [ "$current_index" != "$(jq -cS . dist/release.json)" ]; then

@@ -13,7 +13,9 @@ import time
 
 
 ROOT = Path(__file__).resolve().parents[2]
-DRIVERS = ("forwarding.php", "decision.php", "dynamic-route.php", "transitions.php", "lifecycle.py", "webui.py")
+DRIVERS = ("forwarding.php", "decision.php", "dynamic-route.php", "transitions.php", "pool-transitions.php",
+           "lifecycle.py", "webui.py")
+SEEDED_DRIVERS = {"transitions.php", "pool-transitions.php"}
 ID = re.compile(r"[a-z0-9_]+(?:\.[a-z0-9_]+)+")
 
 
@@ -38,10 +40,10 @@ def read_cases(driver, environment, php, processes):
         detail = (stderr.strip() or stdout.strip()).decode("utf-8", errors="replace")
         raise ValueError(f"exit {process.returncode}\n{detail[-1600:]}")
     cases = json.loads(stdout)
-    if driver == "transitions.php":
+    if driver in SEEDED_DRIVERS:
         digest = cases.get("input_sha256") if isinstance(cases, dict) else None
         if not isinstance(digest, str) or not re.fullmatch(r"[a-f0-9]{64}", digest):
-            raise ValueError("The transitions driver did not report a valid input fingerprint.")
+            raise ValueError(f"{driver} did not report a valid input fingerprint.")
         evidence["input_sha256"] = digest
         cases = cases.get("cases")
     if not isinstance(cases, list) or not cases:

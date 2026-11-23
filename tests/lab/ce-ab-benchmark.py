@@ -91,6 +91,12 @@ def phase_stats(rows, start_ns, end_ns, expected, aggregate_latencies=None):
     }
 
 
+def backup_continuity_violations(metrics):
+    return [row for row in metrics
+            if row["flow"] == "backup" and row["phase"] in ("erp_only_loss", "erp_only_return")
+            and (not row["attempts"] or row["lost_or_invalid"] or row["unexpected_source_replies"])]
+
+
 def by_phase(rows, phases):
     """Yield groups from a monotonic client stream without retaining raw attempts."""
     cursor = 0
@@ -487,6 +493,7 @@ class Experiment:
         steady = [row for row in all_metrics if row["phase"] in ("baseline", "soak_healthy")]
         unexpected = sum(row["unexpected_source_replies"] for row in steady)
         mismatches = [row for row in all_metrics if not row["tail_attempts"] or row["tail_mismatches"]]
+        backup_violations = backup_continuity_violations(all_metrics)
         with (self.output / "resources.ndjson").open(encoding="utf-8") as stream:
             samples = [json.loads(line) for line in stream]
         kinds = sorted({sample["mode"] for sample in samples})
@@ -508,9 +515,12 @@ class Experiment:
                    "soak_healthy_seconds": sum((p["end_ns"] - p["start_ns"]) / NS for p in self.phases
                                                if p["phase"] == "soak_healthy"),
                    "unexpected_steady_source_replies": unexpected, "tail_mismatches": mismatches,
+                   "backup_continuity_violations": backup_violations,
                    "unexpected_steady_source_runs": sum(row["unexpected_source_runs"] for row in steady),
                    "activations": activations, "resources": resources, "aggregates": aggregates}
         (self.output / "summary.json").write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
+        if backup_violations:
+            raise RuntimeError(f"Backup path continuity failed in {len(backup_violations)} ERP-only phases.")
         if unexpected or mismatches:
             raise RuntimeError(f"Application paths did not match the expected steady results: {mismatches!r}")
         print(f"CE_APPLICATION_BENCHMARK_OK phases={len(self.phases)} output={self.output}", flush=True)

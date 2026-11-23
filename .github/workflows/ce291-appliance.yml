@@ -25,6 +25,13 @@ on:
       artifact_suffix:
         type: string
         default: ''
+      scenario:
+        type: string
+        default: acceptance
+      reuse_package:
+        description: Use the package artifact already built by this workflow run
+        type: boolean
+        default: false
   workflow_dispatch:
     inputs:
       ce_version:
@@ -70,11 +77,13 @@ concurrency:
   cancel-in-progress: true
 jobs:
   package:
+    if: "!inputs.reuse_package"
     uses: ./.github/workflows/build-package.yml
     with:
       artifact_suffix: ${{ inputs.artifact_suffix || '' }}
   appliance:
     needs: package
+    if: "!cancelled() && (needs.package.result == 'success' || (inputs.reuse_package && needs.package.result == 'skipped'))"
     permissions:
       contents: read
       actions: read
@@ -100,24 +109,26 @@ jobs:
         run: |
           set -eu
           case "$CE_VERSION" in 2.9.1|2.9.2) ;; *) exit 1 ;; esac
+          case "$CE_SCENARIO" in acceptance|paths|benchmark|recovery|shared-target|inspection|activation-guard|security) ;; *) exit 1 ;; esac
           if [ "$CE_SCENARIO" = recovery ]; then
             test "$CE_VERSION" = 2.9.1
           elif [ "$CE_SCENARIO" = benchmark ]; then
             python3 -c 'import os; pairs = int(os.environ["CE_PAIRS"]); soak = float(os.environ["CE_SOAK_HOURS"]); assert 0 <= pairs <= 5 and 0 <= soak <= 3 and (pairs or soak >= 6/3600); assert 6 <= int(os.environ["CE_FAULT_INTERVAL"]) <= 86400; assert 0 <= int(os.environ["CE_RECOVERY_HOLD"]) <= 300'
           fi
-      - name: Recover the disposable disk for this pinned input
+      - name: Retrieve the candidate from this run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SDWAN_ARTIFACT: sdwan-package${{ inputs.artifact_suffix }}
+        run: |
+          gh run download "$GITHUB_RUN_ID" -n "$SDWAN_ARTIFACT" -D ce-candidate-package
+          (cd ce-candidate-package && sha256sum --check ./*.pkg.sha256)
+      - name: Recover the disposable disk for these exact package bytes
         if: env.CE_SCENARIO != 'security'
         id: disk
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ env.CE_LAB }}.raw.gz
-          key: ${{ env.CE_LAB }}-candidate-disk-v6-${{ (env.CE_SCENARIO == 'recovery' || env.CE_SCENARIO == 'inspection') && env.CE_SCENARIO || 'base' }}-${{ hashFiles('.github/workflows/ce291-appliance.yml', '.github/workflows/build-package.yml', 'tests/lab/ce291-disk.sh', 'tests/lab/ce291-guest.php', 'tests/lab/ce291-source.py', 'core/**', 'tools/prepare-core.py', 'tools/build-lab-pkg.py', 'tools/previous-dist-package.sh', 'tools/verify-appliance.sh', 'files/**', 'Makefile', 'pkg-descr', 'pkg-plist', 'dist/pfSense-pkg-SDWAN-*.pkg*') }}
-      - name: Retrieve the candidate from this run
-        if: steps.disk.outputs.cache-hit != 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          SDWAN_ARTIFACT: sdwan-package${{ inputs.artifact_suffix }}
-        run: gh run download "$GITHUB_RUN_ID" -n "$SDWAN_ARTIFACT" -D ce-candidate-package
+          key: ${{ env.CE_LAB }}-candidate-disk-v7-${{ (env.CE_SCENARIO == 'recovery' || env.CE_SCENARIO == 'inspection') && env.CE_SCENARIO || 'base' }}-${{ hashFiles('ce-candidate-package/*.pkg', '.github/workflows/ce291-appliance.yml', '.github/workflows/build-package.yml', 'tests/lab/ce291-disk.sh', 'tests/lab/ce291-guest.php', 'tests/lab/ce291-source.py', 'core/**', 'tools/prepare-core.py', 'tools/build-lab-pkg.py', 'tools/previous-dist-package.sh', 'tools/verify-appliance.sh', 'files/**', 'Makefile', 'pkg-descr', 'pkg-plist', 'dist/pfSense-pkg-SDWAN-*.pkg*') }}
       - name: Prepare the audited CE adapter
         if: env.CE_SCENARIO != 'security' && steps.disk.outputs.cache-hit != 'true'
         run: |
@@ -137,11 +148,12 @@ jobs:
         with:
           release: "15.1"
           usesh: true
+          envs: CE_VERSION CE_SCENARIO CE_SECURITY_PROFILE
           prepare: |
             env ASSUME_ALWAYS_YES=yes pkg bootstrap
           run: |
             set -eu
-            sh tests/lab/ce291-disk.sh "$PWD" '${{ env.CE_VERSION }}' '${{ env.CE_SCENARIO }}' '${{ env.CE_SECURITY_PROFILE }}'
+            sh tests/lab/ce291-disk.sh "$PWD" "$CE_VERSION" "$CE_SCENARIO" "$CE_SECURITY_PROFILE"
       - name: Cache the unbooted disk
         if: env.CE_SCENARIO != 'security' && steps.disk.outputs.cache-hit != 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -156,28 +168,34 @@ jobs:
         run: |
           set -euo pipefail
           gunzip "$CE_LAB.raw.gz"
+          set -- ce-candidate-package/*.pkg
+          test "$#" -eq 1
+          digest=$(sha256sum "$1")
+          SDWAN_EXPECTED_PACKAGE_SHA256=${digest%% *}
+          export SDWAN_EXPECTED_PACKAGE_SHA256
+          ce_python() { sudo --preserve-env=SDWAN_EXPECTED_PACKAGE_SHA256 /usr/bin/python3 "$@"; }
           printf 'CANDIDATE_GIT_SHA=%s\nTARGET_CE=%s\n' "$GITHUB_SHA" "$CE_VERSION" | tee "$CE_LAB-result.log"
           case "$CE_SCENARIO" in
             acceptance)
-              sudo /usr/bin/python3 tests/lab/ce291-appliance.py "$CE_LAB.raw" "$CE_VERSION" | tee -a "$CE_LAB-result.log"
+              ce_python tests/lab/ce291-appliance.py "$CE_LAB.raw" "$CE_VERSION" | tee -a "$CE_LAB-result.log"
               ;;
             benchmark)
-              sudo /usr/bin/python3 tests/lab/ce-ab-benchmark.py "$CE_LAB.raw" "$CE_VERSION" \
+              ce_python tests/lab/ce-ab-benchmark.py "$CE_LAB.raw" "$CE_VERSION" \
                 --pairs "$CE_PAIRS" --soak-hours "$CE_SOAK_HOURS" --fault-interval-seconds "$CE_FAULT_INTERVAL" \
                 --recovery-hold-seconds "$CE_RECOVERY_HOLD" --soak-mode "$CE_SOAK_MODE" --capture-erp \
                 --output ce-ab-results | tee -a "$CE_LAB-result.log"
               ;;
             shared-target)
-              sudo /usr/bin/python3 tests/lab/ce-shared-target.py "$CE_LAB.raw" "$CE_VERSION" | tee -a "$CE_LAB-result.log"
+              ce_python tests/lab/ce-shared-target.py "$CE_LAB.raw" "$CE_VERSION" | tee -a "$CE_LAB-result.log"
               ;;
             activation-guard)
-              sudo /usr/bin/python3 tests/lab/ce-shared-target.py "$CE_LAB.raw" "$CE_VERSION" --activation-guard | tee -a "$CE_LAB-result.log"
+              ce_python tests/lab/ce-shared-target.py "$CE_LAB.raw" "$CE_VERSION" --activation-guard | tee -a "$CE_LAB-result.log"
               ;;
             inspection)
-              sudo /usr/bin/python3 tests/lab/ce-sdwan-inspection.py "$CE_LAB.raw" "$CE_VERSION" | tee -a "$CE_LAB-result.log"
+              ce_python tests/lab/ce-sdwan-inspection.py "$CE_LAB.raw" "$CE_VERSION" | tee -a "$CE_LAB-result.log"
               ;;
             paths|recovery)
-              sudo /usr/bin/python3 tests/lab/ce291-appliance.py "$CE_LAB.raw" "$CE_VERSION" "$CE_SCENARIO" | tee -a "$CE_LAB-result.log"
+              ce_python tests/lab/ce291-appliance.py "$CE_LAB.raw" "$CE_VERSION" "$CE_SCENARIO" | tee -a "$CE_LAB-result.log"
               ;;
           esac
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

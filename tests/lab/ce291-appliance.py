@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Exercise an installed pfSense system on a disconnected QEMU topology."""
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import ExitStack
+from contextlib import ExitStack, suppress
 import hashlib
 import http.client
 import json
@@ -248,6 +248,12 @@ def first_boot(qemu, ce_version):
     qemu.sendline("")
     qemu.expect(r"# ")
     command(qemu, "mount -uw /; mkdir -p /tmp /var/tmp /var/run /var/log; chmod 1777 /tmp /var/tmp")
+    expected_digest = os.environ.get("SDWAN_EXPECTED_PACKAGE_SHA256")
+    if expected_digest is not None:
+        actual_digest = command(qemu, f"sha256 -q {LAB}/candidate.pkg")
+        if actual_digest != expected_digest:
+            raise RuntimeError("The appliance disk candidate differs from the workflow artifact.")
+        print(f"CE_CANDIDATE_ARTIFACT_SHA256={actual_digest}", flush=True)
     command(qemu, """mkdir -p /cf/conf;
         if [ ! -f /etc/master.passwd ]; then
             install -m 600 /dev/null /etc/master.passwd
@@ -404,6 +410,27 @@ def established(child, label, receive=3):
     child.stdin.write(label + "\n")
     child.stdin.flush()
     return child.stdout.readline().strip() if select.select([child.stdout], [], [], receive)[0] else ""
+
+
+def ingress_tcp_states(qemu, targets):
+    states = {target: {} for target in targets}
+    header = re.compile(r"^(?:vtnet1|all) tcp (\S+):7 <- 192\.0\.2\.11:\d+\s+(\S+)\s*$")
+    state_id = re.compile(r"\bid: ([a-f0-9]+) creatorid: ([a-f0-9]+)\b", re.I)
+    next_hop = re.compile(r"\b(?:route-to|rt): (\S+@\S+)")
+    current = None
+    for line in command(qemu, "pfctl -vvss 2>/dev/null", timeout=20).splitlines():
+        if line and not line[0].isspace():
+            current = header.fullmatch(line)
+            continue
+        if current is None or current[1] not in states:
+            continue
+        identifier = state_id.search(line)
+        if identifier:
+            hop = next_hop.search(line)
+            states[current[1]]["/".join(identifier.groups())] = {
+                "status": current[2], "next_hop": hop[1] if hop else None,
+            }
+    return states
 
 
 def evidence_count(name):
@@ -636,10 +663,24 @@ def verify_native_dhcp(qemu, cleanup, provider, certificate):
     active = {"G": "GW_B", "B": "GW_A"}
     reference = route_and_nat(qemu)
     address, gateway = WAN2_RENEWED
-    fault(f'iifname "sw-wire0" ip saddr {A} ip daddr 192.0.2.164 tcp dport 7 drop')
-    try:
+    targets = {"erp": ERP, "backup": BACKUP, "native_control": "192.0.2.166"}
+    with ExitStack() as sessions:
+        sessions.callback(fault)
+        fault(f'iifname "sw-wire0" ip saddr {A} ip daddr 192.0.2.164 tcp dport 7 drop')
         initial = wait_paths(qemu, "before WAN2 lease change", active)
         tcp_pair("before WAN2 lease change", (B, A))
+        sockets = {name: held_connection(target, sessions) for name, target in targets.items()}
+        for name, child in sockets.items():
+            assert established(child, "before-lease-change") == f"{B if name == 'erp' else A} before-lease-change"
+        before = ingress_tcp_states(qemu, targets.values())
+        state_ids = {}
+        for name, target in targets.items():
+            matches = [key for key, entry in before[target].items() if entry["status"] == "ESTABLISHED:ESTABLISHED"]
+            assert len(matches) == 1, (name, before[target])
+            state_ids[name] = matches[0]
+        assert before[ERP][state_ids["erp"]]["next_hop"] == "203.0.113.2@vtnet2", before[ERP]
+        assert before[BACKUP][state_ids["backup"]]["next_hop"] == "198.51.100.2@vtnet0", before[BACKUP]
+
         stop(provider)
         renewed_provider = serve_lease(cleanup, address, gateway)
         command(qemu, f"php {LAB}/ce291-guest.php renew_wan2", timeout=90)
@@ -655,13 +696,34 @@ def verify_native_dhcp(qemu, cleanup, provider, certificate):
         assert expected != nat, "The NAT baseline lacks a WAN2 IPv4 translation"
         assert route_and_nat(qemu) == (default, expected)
         management("after WAN2 lease change", certificate)
+        changed = ingress_tcp_states(qemu, targets.values())
+        try:
+            erp_reply = established(sockets["erp"], "after-lease-change", receive=2)
+        except BrokenPipeError:
+            with suppress(BrokenPipeError):
+                sockets["erp"].stdin.close()
+            erp_reply = ""
+        assert erp_reply in ("", f"{B} after-lease-change"), erp_reply
+        evidence = {name: {
+            "id": state_ids[name], "before": before[target][state_ids[name]],
+            "after": changed[target].get(state_ids[name]),
+        } for name, target in targets.items()}
+        print("NATIVE_DHCP_ESTABLISHED_STATE_EVIDENCE " + json.dumps({
+            "sessions": evidence, "old_erp_peer_reply": erp_reply,
+        }, sort_keys=True), flush=True)
+        for name in ("backup", "native_control"):
+            assert changed[targets[name]].get(state_ids[name]) == before[targets[name]][state_ids[name]], name
+            assert established(sockets[name], "after-lease-change") == f"{A} after-lease-change", name
         print("NATIVE_DHCP_LEASE_NEW_ADDRESS_AND_HOP_APPLIED_IN_PF", flush=True)
         stop(renewed_provider)
         serve_lease(cleanup, B, GATEWAYS["GW_B"][1])
         command(qemu, f"php {LAB}/ce291-guest.php renew_wan2", timeout=90)
         wait_lease(qemu, B, GATEWAYS["GW_B"][1])
-    finally:
-        fault()
+        restored = ingress_tcp_states(qemu, targets.values())
+        for name in ("backup", "native_control"):
+            assert restored[targets[name]].get(state_ids[name]) == before[targets[name]][state_ids[name]], name
+            assert established(sockets[name], "after-original-lease") == f"{A} after-original-lease", name
+        print("NATIVE_DHCP_BACKUP_AND_UNBOUND_SESSIONS_PRESERVED", flush=True)
     wait_paths(qemu, "original WAN2 lease restored", {"G": "GW_A", "B": "GW_A"})
     assert route_and_nat(qemu) == reference
 

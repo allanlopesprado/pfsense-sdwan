@@ -63,6 +63,16 @@ class ApplicationBenchmarkTest(unittest.TestCase):
         self.assertEqual(result[2]["attempts"], 1)
         self.assertEqual(latencies, [11, 35])
 
+    def test_backup_requires_replies_throughout_erp_only_phases(self):
+        healthy = {"flow": "backup", "phase": "erp_only_loss", "attempts": 20,
+                   "lost_or_invalid": 0, "unexpected_source_replies": 0, "tail_mismatches": 0}
+        early_loss = healthy | {"lost_or_invalid": 1}
+        wrong_source = healthy | {"phase": "erp_only_return", "unexpected_source_replies": 1}
+        missing = healthy | {"attempts": 0}
+        unaffected = [healthy, early_loss | {"flow": "erp"}, early_loss | {"phase": "wan1_loss"}]
+        self.assertEqual(benchmark.backup_continuity_violations(unaffected + [early_loss, wrong_source, missing]),
+                         [early_loss, wrong_source, missing])
+
     def test_timeout_is_recorded(self):
         with patch.object(benchmark.socket, "create_connection", side_effect=TimeoutError):
             self.assertEqual(benchmark.transaction("192.0.2.162", b"marker", .1),
