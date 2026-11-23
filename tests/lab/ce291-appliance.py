@@ -786,14 +786,14 @@ def acceptance(qemu, cleanup, provider, *, cold_restart):
     timestamps = re.findall(r"^WITHDRAWAL_START_NS=([0-9]+)$", request, re.M)
     assert len(timestamps) == 1, request
     started = int(timestamps[0])
-    last = wait_receipt(qemu, lambda state: state["snapshot"] and not state["snapshot"].get("steering")
-                        and not state["receipt"] and withdrawal_proven(state, started, ()), 45)
+    wait_receipt(qemu, lambda state: state["snapshot"] and not state["snapshot"].get("steering")
+                 and not state["receipt"] and withdrawal_proven(state, started, ()), 45)
     assert loaded(qemu) == native_rules
     assert route_and_nat(qemu) == reference
     tcp_pair("after final withdrawal", (A, A))
     for stream in rollback_sessions:
         assert established(stream, "after final withdrawal") == f"{A} after final withdrawal"
-    print(f"FINAL_BINDING_RESTORED_NATIVE_RULES_OK native_proof={last['withdrawal_proof']}", flush=True)
+    print("FINAL_BINDING_RESTORED_NATIVE_RULES_OK", flush=True)
     command(qemu, f"cp -p {LAB}/filter.stock /etc/inc/filter.inc; rm /etc/inc/filter-sdwan.inc")
     command(qemu, "/usr/local/etc/rc.d/sdwand.sh restart; /etc/rc.filter_configure_sync")
     assert "ABI=0" in command(qemu, f"php {LAB}/ce291-guest.php mode")
