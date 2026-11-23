@@ -560,21 +560,32 @@ def verify_unapplied_reload(qemu, primary, certificate):
 
 
 def verify_expired_sample(qemu, primary, certificate):
+    log_event = "Active PF rules confirmed reconciliation of stale forwarding."
+
+    def confirmations():
+        return int(command(qemu, f"grep -Fc '{log_event}' /var/log/system.log || :"))
+
     worker = command(qemu, 'pgrep -f -P "$(cat /var/run/sdwand.pid)" /usr/local/sbin/sdwand.php')
     queue = command(qemu, "pgrep -u 0 -x check_reload_status").splitlines()
     pids = [worker, *queue]
     assert queue and all(re.fullmatch(r"[1-9][0-9]*", pid) for pid in pids), pids
     processes = " ".join(pids)
     command(qemu, "/usr/local/etc/rc.d/sdwand.sh watchdog_status")
+    previous_confirmations = confirmations()
     try:
         command(qemu, f"kill -STOP {processes}")
         wait_receipt(qemu, lambda s: not s["snapshot"], 48)
-        command(qemu, """i=0
-            until grep -Fq 'Active PF rules confirmed reconciliation of stale forwarding.' /var/log/system.log; do
-                i=$((i+1)); test "$i" -le 45; sleep 1
-            done
-            test -s /var/run/sdwan-observer.json""", timeout=52)
-        assert_rules(loaded(qemu), {"G": None, "B": None})
+        deadline = time.monotonic() + 45
+        while time.monotonic() < deadline:
+            rules = loaded(qemu)
+            if (set(rules) == {"41001", "41003"} and all(line.startswith("block ") for line in rules.values())
+                    and confirmations() > previous_confirmations):
+                break
+            time.sleep(1)
+        else:
+            diagnostics(qemu)
+            raise RuntimeError("The watchdog did not confirm and load the expected PF blocks after expiry")
+        command(qemu, "test -s /var/run/sdwan-observer.json")
         tcp_pair("stale observation", (None, None))
         management("stale observation", certificate)
     finally:
