@@ -895,7 +895,8 @@ def run(php, classes, screenshot_dir=None):
         controls = Choices(lab)
         post = {**names, "action": "bind", "revision": controls.revisions[0], "__csrf_magic": controls.tokens[0]}
         for options, message in [({}, "previews only"), ({"steering_abi": True,
-                                "privileges": {"/system_gateway_groups_edit.php": False}}, "additional privileges")]:
+                                "privileges": {"/system_gateway_groups_edit.php": False}}, "additional privileges"),
+                                 ({"steering_abi": True, "boot_ready": False}, "Reboot pfSense with the installed SD-WAN adapter")]:
             forbidden = request("forwarding", native=fixture, post=post, **options)
             assert message in forbidden and json.loads(forbidden.split("SAVED=")[1])[0] == 0
         bound = request("forwarding", native=fixture, post=post, steering_abi=True, capture_bindings=True)

@@ -184,6 +184,7 @@ if (isset($request['interface_counters'])) {
 if ($request['steering_abi'] ?? false) {
 	// Emulate the optional hook in the WebGUI test. A separate test exercises the actual core patch.
 	function filter_sdwan_binding_api() { return 1; }
+	function filter_sdwan_boot_ready(): bool { return $GLOBALS['request']['boot_ready'] ?? true; }
 	function filter_configure() { return 0; }
 }
 function csrf_startup() {
