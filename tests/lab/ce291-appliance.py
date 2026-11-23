@@ -265,8 +265,8 @@ def reboot_with_overlay(qemu):
 
 
 def first_boot(qemu, ce_version):
-    # Kernel messages can interrupt the opening words of the serial prompt.
-    expect_console(qemu, r"Enter full pathname of shell|RETURN for /bin/sh:", 180)
+    # Asynchronous kernel messages can split even the path at the end of this prompt.
+    expect_console(qemu, r"Enter full pathname of shell|RETURN for /bin/sh:|\r+\nsh: ", 180)
     qemu.sendline("")
     qemu.expect(r"# ")
     command(qemu, "mount -uw /; mkdir -p /tmp /var/tmp /var/run /var/log; chmod 1777 /tmp /var/tmp")
