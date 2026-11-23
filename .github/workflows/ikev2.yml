@@ -31,4 +31,12 @@ jobs:
           uname -r
           dpkg-query -W strongswan-charon strongswan-swanctl nftables
       - name: Exercise negotiated SAs and verify tunnel paths
-        run: sudo python3 -B -u tests/lab/ikev2/run.py --paths ${{ matrix.paths }} ${{ matrix.options }}
+        env:
+          TUNNEL_PATHS: ${{ matrix.paths }}
+          SCENARIO_OPTION: ${{ matrix.options }}
+        run: |
+          set -- --paths "$TUNNEL_PATHS"
+          if [ -n "$SCENARIO_OPTION" ]; then
+            set -- "$@" "$SCENARIO_OPTION"
+          fi
+          sudo python3 -B -u tests/lab/ikev2/run.py "$@"

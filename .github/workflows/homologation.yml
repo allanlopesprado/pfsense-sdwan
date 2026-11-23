@@ -23,7 +23,9 @@ jobs:
           sudo apt-get install -y --no-install-recommends iproute2 openvpn wireguard-tools tcpdump dnsmasq-base bind9-dnsutils
           dpkg-query -W openvpn wireguard-tools dnsmasq-base bind9-dnsutils
       - name: Transfer data before outage, on backup link, and after return
-        run: sudo python3 -B -u tests/lab/vpn-recovery.py "${{ matrix.protocol }}"
+        env:
+          PROTOCOL: ${{ matrix.protocol }}
+        run: sudo python3 -B -u tests/lab/vpn-recovery.py "$PROTOCOL"
   access:
     name: ${{ matrix.protocol }} address and gateway recovery
     runs-on: ubuntu-24.04
@@ -47,7 +49,9 @@ jobs:
           sudo modprobe pppoe
           test -c /dev/ppp || sudo mknod /dev/ppp c 108 0
       - name: Renegotiate the link and compare old and current monitor metadata
-        run: sudo python3 -B -u tests/lab/renew-dynamic-wan.py "${{ matrix.protocol }}"
+        env:
+          PROTOCOL: ${{ matrix.protocol }}
+        run: sudo python3 -B -u tests/lab/renew-dynamic-wan.py "$PROTOCOL"
   ipv6_pd:
     name: DHCPv6 Prefix Delegation and LAN renumbering
     runs-on: ubuntu-24.04
