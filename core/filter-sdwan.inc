@@ -163,7 +163,28 @@ function filter_sdwan_begin_reload(?array $persisted_rows = null): void {
 	sort($trackers, SORT_STRING);
 	$GLOBALS['sdwan_filter_cycle'] = [
 	    'bindings' => $bindings, 'choices' => [], 'started_ns' => $started, 'trackers' => $trackers,
+	    'persisted_rows' => $persisted_rows,
 	];
+}
+
+/* Recheck the saved approvals immediately before each PF load, including
+ * a retry after the kernel reported a busy transaction. */
+function filter_sdwan_precommit(?string $generated_hash): bool {
+	$cycle = $GLOBALS['sdwan_filter_cycle'] ?? [];
+	$captured = $cycle['persisted_rows'] ?? null;
+	$current = filter_sdwan_read_persisted_bindings();
+	$trackers = $cycle['trackers'] ?? [];
+	$valid = $current !== null && ($current === $captured ||
+	    ($current === [] && $captured === null && !$trackers && !filter_sdwan_tracker_index()));
+	$label = is_string($generated_hash) && preg_match('/\A[a-f0-9]{16}\z/', $generated_hash) ? $generated_hash : 'unknown';
+	$metadata = sprintf('SD-WAN PF load %s pid=%d generation=%d ruleset=%s trackers=%d captured=%d saved=%d.',
+	    $valid ? 'approved' : 'rejected', getmypid(), $cycle['started_ns'] ?? 0, $label, count($trackers),
+	    $captured === null ? -1 : count($captured), $current === null ? -1 : count($current));
+	update_filter_reload_status($metadata);
+	if (!$valid || $trackers || $current) {
+		logger($valid ? LOG_INFO : LOG_ERR, $metadata, LOG_PREFIX_FILTER);
+	}
+	return $valid;
 }
 
 /* A failed PF transaction can preserve its active rules. An older rules file

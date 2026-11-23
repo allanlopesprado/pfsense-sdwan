@@ -50,7 +50,8 @@ def main():
         if (b"filter_sdwan_begin_reload($sdwan_persisted);" not in patched or
                 b"filter_generate_gateways($sdwan_persisted);" not in patched or
                 b"filter_sdwan_read_persisted_bindings()" not in patched or
-                b"if (!filter_sdwan_native_fallback_allowed())" not in patched):
+                b"if (!filter_sdwan_native_fallback_allowed())" not in patched or
+                b"if (!filter_sdwan_precommit($PFConfig->sdwan_withdrawal_ruleset_hash()))" not in patched):
             raise RuntimeError("git did not produce the expected native approval and gateway hooks")
         shutil.copyfile(HERE / "filter-sdwan.inc", dest.with_name("filter-sdwan.inc"))
         overlay.rename(out)

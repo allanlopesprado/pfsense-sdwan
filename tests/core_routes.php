@@ -120,3 +120,42 @@ if (!filter_sdwan_native_fallback_allowed()) {
 	throw new RuntimeException('Native fallback was changed for an unbound configuration');
 }
 echo "ok - native fallback remains available only when no forwarding approvals apply\n";
+
+const LOG_PREFIX_FILTER = 'filter';
+
+function update_filter_reload_status(string $message): void {
+	$GLOBALS['filter_status'][] = $message;
+}
+
+function logger(int $level, string $message, string $prefix): void {
+	$GLOBALS['filter_log'][] = [$level, $message, $prefix];
+}
+
+$GLOBALS['filter_status'] = $GLOBALS['filter_log'] = [];
+filter_sdwan_begin_reload([]);
+if (!filter_sdwan_precommit('0123456789abcdef') || $GLOBALS['filter_log']) {
+	throw new RuntimeException('An unbound native generation was not accepted without a System Logs event');
+}
+$GLOBALS['disk_config'] = ['gateways' => ['sdwan_bindings' => ['item' => $saved]]];
+if (filter_sdwan_precommit('0123456789abcdef')) {
+	throw new RuntimeException('A stale generation was accepted after approvals changed');
+}
+filter_sdwan_begin_reload(filter_sdwan_read_persisted_bindings());
+if (!filter_sdwan_precommit('0123456789abcdef') || !filter_sdwan_precommit('0123456789abcdef')) {
+	throw new RuntimeException('The initial and retried transactions must accept identical saved approvals');
+}
+$GLOBALS['disk_config']['gateways']['sdwan_bindings']['item'][0]['policy'] = 'changed';
+if (filter_sdwan_precommit('0123456789abcdef')) {
+	throw new RuntimeException('A policy edit with the same tracker identities went undetected');
+}
+$GLOBALS['disk_config'] = -1;
+if (filter_sdwan_precommit(null)) {
+	throw new RuntimeException('A transaction without readable saved approvals was accepted');
+}
+$status = implode("\n", $GLOBALS['filter_status']);
+if (!str_contains($status, 'approved pid=') || !str_contains($status, 'rejected pid=') ||
+    !str_contains($status, 'ruleset=0123456789abcdef') || !str_contains($status, 'saved=-1') ||
+    str_contains($status, 'ERP') || str_contains($status, $saved[0]['rules_revision'])) {
+	throw new RuntimeException('Native filter metadata must identify the generation and omit approval contents');
+}
+echo "ok - native PF commit rechecks saved approvals and records process metadata\n";

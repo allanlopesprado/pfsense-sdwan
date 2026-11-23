@@ -51,7 +51,19 @@
  	reload_filterdns();
  	filter_run_commands_late();
  
-@@ -1186,4 +1201,14 @@
+@@ -1159,6 +1174,11 @@
+ 
+ 	for ($pfctl_try = 1; $pfctl_try <= 10; $pfctl_try++) {
++		if (!filter_sdwan_precommit($PFConfig->sdwan_withdrawal_ruleset_hash())) {
++			$result[1] = gettext("SD-WAN skipped the PF load because the saved forwarding approvals changed or could not be read.");
++			update_filter_reload_status($result[1]);
++			return $result;
++		}
+ 		unset($rules_loading, $rules_error);
+ 		$rules_result = exec("/sbin/pfctl -o basic -f {$g['tmp_path']}/rules.debug 2>&1", $rules_error, $rules_loading);
+ 		if (g_get('debug')) {
+ 			$mt = microtime();
+@@ -1186,4 +1206,14 @@
  	 */
  	if ($rules_loading <> 0) {
 +		if (!filter_sdwan_native_fallback_allowed()) {
@@ -66,7 +78,7 @@
 +
  		$result[1] = $rules_loading;
  		foreach ($rules_error as $errorline) {
-@@ -1718,7 +1743,9 @@
+@@ -1718,7 +1748,9 @@
  }
  
 -function filter_generate_gateways() {
@@ -78,7 +90,7 @@
  
  	$rules = '';
  
-@@ -1758,2 +1785,8 @@
+@@ -1758,2 +1790,8 @@
 +		if ($route !== '') {
 +			$path = filter_sdwan_gateway_route($gateway, $gwip);
 +			if ($path !== null) {
@@ -87,7 +99,7 @@
 +		}
  		$rules .= "GW{$gwname} = \" {$route} \"\n";
  	}
-@@ -4273,6 +4306,7 @@
+@@ -4273,6 +4311,7 @@
  }
  
  function filter_generate_user_rule($rule) {
@@ -95,7 +107,7 @@
  	global $g, $FilterIflist, $GatewaysList, $vpns_list, $use_floating_states_for_ipsec;
  	global $dummynet_name_list, $vlanprio_values, $time_based_rules;
  
-@@ -4408,6 +4442,22 @@
+@@ -4408,6 +4447,22 @@
  		$type = "pass";
  	}
  
@@ -118,7 +130,7 @@
  	if (array_path_enabled($rule, 'nat')) {
  		$nat_type = match ($rule['ipprotocol']) {
  			'inet6' => '64',
-@@ -4467,7 +4517,10 @@
+@@ -4467,7 +4522,10 @@
  	}
  	/* if user has selected a custom gateway, lets work with it */
  	else if ($rule['gateway'] <> "" && $type == "pass") {
