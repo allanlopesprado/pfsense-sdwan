@@ -377,4 +377,24 @@ if ($action === 'mode') {
     echo 'ABI=', sdwan_steering_abi(), PHP_EOL;
     exit;
 }
+if ($action === 'overlay_boot' || $action === 'refuse_warm_bind') {
+    if (sdwan_steering_abi() !== 2 || !function_exists('filter_sdwan_boot_ready')) {
+        throw new RuntimeException('The staged adapter does not provide the boot readiness check');
+    }
+    $ready = filter_sdwan_boot_ready();
+    if ($action === 'overlay_boot') {
+        echo $ready ? "OVERLAY_BOOT=ready\n" : "OVERLAY_BOOT=required\n";
+        exit;
+    }
+    if ($ready || sdwan_steering_bindings()) {
+        throw new RuntimeException('The warm bind trial requires a newly installed adapter and no active bindings');
+    }
+    $errors = sdwan_steering_bind('ERP', 'G', sdwan_steering_revision());
+    if ($errors !== ['Reboot pfSense with the installed SD-WAN adapter before approving forwarding changes.'] ||
+        !config_read_file(false, false) || sdwan_steering_bindings()) {
+        throw new RuntimeException('Warm approval did not preserve the unbound configuration: ' . implode('; ', $errors));
+    }
+    echo 'NATIVE_WARM_BIND_REFUSED_BEFORE_OVERLAY_BOOT', PHP_EOL;
+    exit;
+}
 throw new InvalidArgumentException('Unknown acceptance action');

@@ -90,6 +90,19 @@ verify(str_contains(sdwan_steering_preview($config, 'p', 'G')['errors'][0] ?? ''
 $current = $disk;
 verify(sdwan_steering_bind('p', 'G', $preview['revision']) !== [] && !$writes && !$pending, 'stock CE cannot activate forwarding');
 $abi = 1;
+$preview = sdwan_steering_preview($config, 'p', 'G');
+verify(!$preview['errors'] && $preview['binding']['trackers'] === ['301'] &&
+    sdwan_steering_bind('p', 'G', $preview['revision']) ===
+    ['Install the current SD-WAN adapter and reboot pfSense before approving forwarding changes.'] && !$writes && !$pending,
+    'an adapter without boot verification retains read-only preview and refuses new approvals');
+if (!function_exists('filter_sdwan_boot_ready')) {
+	function filter_sdwan_boot_ready(): bool { return $GLOBALS['adapter_boot_ready']; }
+}
+$adapter_boot_ready = false;
+$boot_error = 'Reboot pfSense with the installed SD-WAN adapter before approving forwarding changes.';
+verify(sdwan_steering_bind('p', 'G', $preview['revision']) === [$boot_error] && !$writes && !$pending &&
+    !isset($disk[SDWAN_BINDINGS_PATH]), 'warm adapter install cannot save a new approval or request a reload');
+$adapter_boot_ready = true;
 $before_probe_test = $disk;
 $probe_config = $config;
 $probe_config['members'][0]['probe_primary'] = 'tcp://192.0.2.42:443';
@@ -122,6 +135,11 @@ $disk[SDWAN_CONFIG_PATH] = sdwan_encode_config($legacy);
 $disk[SDWAN_BINDINGS_PATH]['item'][0]['policy_revision'] = sdwan_steering_policy_revision($legacy, 'p');
 $disk[SDWAN_BINDINGS_PATH . '/item'] = $disk[SDWAN_BINDINGS_PATH]['item'];
 $current = $disk;
+$adapter_boot_ready = false;
+$errors = sdwan_save_config($config, sdwan_config_revision($legacy), true);
+verify($errors === [$boot_error] && $writes === 1 && $pending === 1 && sdwan_get_config() === $legacy,
+    'policy edits cannot replace an active approval before the installed adapter boots');
+$adapter_boot_ready = true;
 $errors = sdwan_save_config($config, sdwan_config_revision($legacy), true);
 verify(str_contains($errors[0] ?? '', 'removing the last service check') && sdwan_get_config() === $legacy &&
     $writes === 1 && $pending === 1 && $current === $disk,
@@ -582,8 +600,9 @@ verify(sdwan_steering_unbind('G', sdwan_steering_revision()) !== [] && $current 
     !is_file($receipt_path) && $pending === $before_requests,
     'a failed binding save rolls back the withdrawal receipt without requesting native reload');
 $fail = false;
+$adapter_boot_ready = false;
 verify(sdwan_steering_unbind('G', sdwan_steering_revision()) === [] && !sdwan_steering_bindings() &&
-    $pending === $before_requests + 1, 'the binding editor requests native reload when removing a binding');
+    $pending === $before_requests + 1, 'withdrawal requests native reload even without boot approval for new bindings');
 $withdrawal = sdwan_steering_read_receipt($receipt_path);
 verify($withdrawal['trackers'] === ['301'] && $withdrawal['withdrawal']['trackers'] === ['301'] &&
     !$withdrawal['withdrawal']['unknown'] && !$withdrawal['confirmed'],

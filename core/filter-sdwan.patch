@@ -47,7 +47,7 @@
  	} else {
  		update_filter_reload_status(gettext("Skipping filter configuration reload"));
  	}
-+	filter_sdwan_publish_withdrawal_proof($reload_filter_result, $PFConfig->sdwan_withdrawal_ruleset_hash());
++	filter_sdwan_publish_withdrawal_proof($reload_filter_result, $PFConfig->sdwan_withdrawal_ruleset_hash(), true);
  	reload_filterdns();
  	filter_run_commands_late();
  

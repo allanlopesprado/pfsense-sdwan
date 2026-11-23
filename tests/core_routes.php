@@ -51,9 +51,31 @@ function config_get_path(string $path, mixed $default = null): mixed {
 	return $path === 'gateways/sdwan_bindings/item' ? $GLOBALS['memory_rows'] : $default;
 }
 
-function g_get(string $key): string {
-	return ['conf_path' => '/other', 'cf_conf_path' => '/fixture', 'xml_rootobj' => 'pfsense'][$key];
+function g_get(string $key, mixed $default = null): mixed {
+	return ['conf_path' => '/other', 'cf_conf_path' => '/fixture', 'xml_rootobj' => 'pfsense',
+	    'booting' => $GLOBALS['native_booting'] ?? false][$key] ?? $default;
 }
+
+if (filter_sdwan_boot_load([true, ''], true)) {
+	throw new RuntimeException('A normal native reload minted a boot marker');
+}
+$GLOBALS['native_booting'] = true;
+if (filter_sdwan_boot_load(null, true) || filter_sdwan_boot_load([false, 'failed'], true) ||
+    filter_sdwan_boot_load([true, ''], false) || !filter_sdwan_boot_load([true, ''], true)) {
+	throw new RuntimeException('Boot marker eligibility did not require the current native boot hook and a successful transaction');
+}
+unset($GLOBALS['native_booting']);
+$boot_stat = ['uid' => 0, 'mode' => 0100644, 'size' => 157];
+foreach ([false, array_replace($boot_stat, ['uid' => 80]), array_replace($boot_stat, ['mode' => 0120777]),
+    array_replace($boot_stat, ['mode' => 0100664]), array_replace($boot_stat, ['size' => 193])] as $unsafe_marker) {
+	if (filter_sdwan_boot_marker_trusted($unsafe_marker)) {
+		throw new RuntimeException('An unsafe native boot marker was trusted');
+	}
+}
+if (!filter_sdwan_boot_marker_trusted($boot_stat)) {
+	throw new RuntimeException('A trusted native boot marker was rejected');
+}
+echo "ok - forwarding approvals require a boot-time PF transaction and a root-owned marker\n";
 
 function parse_xml_config(string $path, array $root): mixed {
 	if ($path !== '/fixture/config.xml' || $root !== ['pfsense']) {

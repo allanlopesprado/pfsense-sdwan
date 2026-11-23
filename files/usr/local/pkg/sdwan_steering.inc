@@ -19,6 +19,14 @@ function sdwan_steering_supported(): bool {
 	return in_array(sdwan_steering_abi(), [1, 2], true);
 }
 
+function sdwan_steering_approval_error(): ?string {
+	if (!function_exists('filter_sdwan_boot_ready')) {
+		return 'Install the current SD-WAN adapter and reboot pfSense before approving forwarding changes.';
+	}
+	return filter_sdwan_boot_ready() ? null :
+	    'Reboot pfSense with the installed SD-WAN adapter before approving forwarding changes.';
+}
+
 /* Native send_event() logs a rejected request but does not report it to its
  * caller. The observer needs the queue's acknowledgement to decide when to retry. */
 function sdwan_steering_request_reload(): bool {
@@ -232,6 +240,9 @@ function sdwan_steering_policy_edit(array $current, array $candidate, bool $allo
 		if (!sdwan_steering_supported()) {
 			return ['errors' => ['The native forwarding integration is unavailable. Review the binding under Forwarding.'], 'rows' => null];
 		}
+		if (($error = sdwan_steering_approval_error()) !== null) {
+			return ['errors' => [$error], 'rows' => null];
+		}
 		$native ??= sdwan_steering_native();
 		$check = sdwan_steering_preflight($candidate, $binding['policy'], $group, $native);
 		$approved = $check['binding'];
@@ -373,6 +384,9 @@ function sdwan_steering_edit(string $group, ?string $policy, string $expected_re
 				}
 			}
 		} else {
+			if (($error = sdwan_steering_approval_error()) !== null) {
+				return [$error];
+			}
 			$preview = sdwan_steering_preflight($config, $policy, $group, $native);
 			if ($preview['errors']) {
 				return $preview['errors'];

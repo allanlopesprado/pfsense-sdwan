@@ -2,6 +2,7 @@
 // Core-side interface for a laboratory pfSense build. This file is not a package payload.
 
 const SDWAN_FILTER_PROVIDER = '/usr/local/pkg/sdwan_steering.inc';
+const SDWAN_FILTER_BOOT_MARKER = '/var/run/sdwan-filter-boot.json';
 
 function filter_sdwan_binding_api(): int {
 	return 2;
@@ -9,6 +10,37 @@ function filter_sdwan_binding_api(): int {
 
 function filter_sdwan_withdrawal_proof_api(): int {
 	return 1;
+}
+
+function filter_sdwan_boot_identity(): ?array {
+	$generator = @hash_file('sha256', __DIR__ . '/filter.inc');
+	$adapter = @hash_file('sha256', __FILE__);
+	return $generator !== false && $adapter !== false ? ['generator' => $generator, 'adapter' => $adapter] : null;
+}
+
+function filter_sdwan_boot_marker_trusted(array|false $stat): bool {
+	return $stat !== false && $stat['uid'] === 0 && ($stat['mode'] & 0170022) === 0100000 &&
+	    $stat['size'] > 0 && $stat['size'] <= 192;
+}
+
+function filter_sdwan_boot_ready(): bool {
+	clearstatcache(true, SDWAN_FILTER_BOOT_MARKER);
+	$stat = @lstat(SDWAN_FILTER_BOOT_MARKER);
+	if (!filter_sdwan_boot_marker_trusted($stat) || ($marker = @fopen(SDWAN_FILTER_BOOT_MARKER, 'rb')) === false) {
+		return false;
+	}
+	try {
+		$opened = fstat($marker);
+		if (!filter_sdwan_boot_marker_trusted($opened) || $stat['dev'] !== $opened['dev'] ||
+		    $stat['ino'] !== $opened['ino']) {
+			return false;
+		}
+		$contents = stream_get_contents($marker, 193);
+		$identity = filter_sdwan_boot_identity();
+		return is_string($contents) && $identity !== null && json_decode($contents, true, 2) === $identity;
+	} finally {
+		fclose($marker);
+	}
 }
 
 /* Derive route-to solely from the gateway inventory used by this filter reload.
@@ -255,17 +287,30 @@ function filter_sdwan_write_withdrawal_proof(string $path, array $proof): void {
 	}
 }
 
+function filter_sdwan_boot_load(?array $reload_result, bool $boot_hook): bool {
+	// Only rc.bootup sets the local flag. The wider platform predicate also uses
+	// a notification file visible to queued reloads and independently started PHP.
+	return $boot_hook && $reload_result === [true, ''] && g_get('booting', false) === true;
+}
+
 /* Invoked while the native filter lock is held. Keep this readback independent
  * of the observer lock and leave the native reload outcome intact. */
-function filter_sdwan_publish_withdrawal_proof(?array $reload_result, ?string $generated_hash): void {
+function filter_sdwan_publish_withdrawal_proof(?array $reload_result, ?string $generated_hash, bool $boot_hook = false): void {
+	$provider = is_file(SDWAN_FILTER_PROVIDER);
+	$boot = filter_sdwan_boot_load($reload_result, $boot_hook);
 	if (($reload_result !== null && $reload_result !== [true, '']) || $generated_hash === null ||
-	    !is_file(SDWAN_FILTER_PROVIDER) || !function_exists('exec') ||
+	    (!$provider && !$boot) || !function_exists('exec') ||
 	    !is_executable('/bin/timeout') || !is_executable('/sbin/pfctl')) {
 		return;
 	}
 	exec("/bin/timeout 2 /bin/sh -c '/sbin/pfctl -si && /sbin/pfctl -sr' 2>/dev/null", $rules, $status);
 	if ($status === 0 && ($proof = filter_sdwan_withdrawal_proof($reload_result, $generated_hash, $rules)) !== null) {
-		filter_sdwan_write_withdrawal_proof('/var/run/sdwan-filter-commit.json', $proof);
+		if ($provider) {
+			filter_sdwan_write_withdrawal_proof('/var/run/sdwan-filter-commit.json', $proof);
+		}
+		if ($boot && ($identity = filter_sdwan_boot_identity()) !== null) {
+			filter_sdwan_write_withdrawal_proof(SDWAN_FILTER_BOOT_MARKER, $identity);
+		}
 	}
 }
 

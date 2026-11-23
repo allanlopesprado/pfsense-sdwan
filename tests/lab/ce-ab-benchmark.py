@@ -303,10 +303,8 @@ if (!is_array(write_config('Prevent native gateway bypass in the isolated compar
 }}
 BENCH_PHP
 cp -p /etc/inc/filter.inc {ce.LAB}/filter.stock
-cp {ce.LAB}/filter*.inc /etc/inc/
-/usr/local/etc/rc.d/sdwand.sh restart
-/etc/rc.filter_configure_sync""")
-    assert "ABI=2" in ce.command(qemu, f"php {ce.LAB}/ce291-guest.php mode")
+cp {ce.LAB}/filter*.inc /etc/inc/""")
+    ce.reboot_with_overlay(qemu)
     deadline = time.monotonic() + 60
     while time.monotonic() < deadline:
         observed = ce.observations(qemu)["snapshot"] or {}

@@ -206,6 +206,23 @@ def verify_activation_guard(ce, qemu):
     print("CE_ERP_ACTIVATION_GUARD_OK", flush=True)
 
 
+def verify_binding_after_overlay_install(ce, qemu):
+    installed_since = int(ce.command(qemu, "date +%s"))
+    version, _ = ce.install_candidate(qemu)
+    native = ce.loaded(qemu)
+    ce.assert_rules(native, NATIVE_PATHS)
+    routing = ce.route_and_nat(qemu)
+    refusal = ce.command(qemu, f"php {ce.LAB}/ce291-guest.php refuse_warm_bind")
+    assert refusal == "NATIVE_WARM_BIND_REFUSED_BEFORE_OVERLAY_BOOT", refusal
+    assert ce.loaded(qemu) == native
+    assert_native_routing(ce, qemu, routing)
+    ce.tcp_pair("native paths after warm bind refusal", (ce.A, ce.A))
+    print(refusal, flush=True)
+    ce.reboot_with_overlay(qemu)
+    ce.verify_updater_readiness(qemu, version, installed_since, forwarding=False)
+    verify_activation_guard(ce, qemu)
+
+
 def verify_interface_traffic(ce, qemu, active):
     def read_counters():
         response = ce.command(qemu, """php <<'PHP'
@@ -489,8 +506,7 @@ def main():
 
     def scenario(qemu, cleanup, provider):
         if args.activation_guard:
-            ce.install_candidate(qemu)
-            verify_activation_guard(ce, qemu)
+            verify_binding_after_overlay_install(ce, qemu)
         else:
             exercise(ce, benchmark, qemu, cleanup, provider)
 

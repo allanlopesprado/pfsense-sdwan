@@ -242,6 +242,28 @@ def console_shell(qemu, timeout=300):
     expect_console(qemu, r"\r+\n__SDWAN_SHELL__\r+\n", 15)
 
 
+def verify_overlay_boot(qemu):
+    evidence = command(qemu, f"""test -S /var/run/check_reload_status
+        cmp -s {LAB}/filter.inc /etc/inc/filter.inc
+        cmp -s {LAB}/filter-sdwan.inc /etc/inc/filter-sdwan.inc
+        sha256 -q /etc/inc/filter.inc /etc/inc/filter-sdwan.inc
+        php {LAB}/ce291-guest.php overlay_boot""").splitlines()
+    assert len(evidence) == 3 and evidence[-1] == "OVERLAY_BOOT=ready", evidence
+    assert all(re.fullmatch(r"[0-9a-f]{64}", digest) for digest in evidence[:2]), evidence
+    print(f"CE_OVERLAY_BOOT_READY sha256={evidence[:2]!r}", flush=True)
+
+
+def reboot_with_overlay(qemu):
+    boot = command(qemu, "sysctl -n kern.boottime")
+    qemu.sendline("shutdown -r now")
+    console_shell(qemu)
+    wait_lease(qemu, B, GATEWAYS["GW_B"][1])
+    boot_after = command(qemu, "sysctl -n kern.boottime")
+    assert boot_after != boot, (boot, boot_after)
+    verify_overlay_boot(qemu)
+    print(f"CE_OVERLAY_BOOT_CHANGED boot={boot_after!r}", flush=True)
+
+
 def first_boot(qemu, ce_version):
     # Kernel messages can interrupt the opening words of the serial prompt.
     expect_console(qemu, r"Enter full pathname of shell|RETURN for /bin/sh:", 180)
@@ -769,8 +791,7 @@ def acceptance(qemu, cleanup, provider, *, cold_restart):
     assert_rules(native_rules, primary)
     reference = route_and_nat(qemu)
     command(qemu, f"cp -p /etc/inc/filter.inc {LAB}/filter.stock; cp {LAB}/filter*.inc /etc/inc/")
-    assert "ABI=2" in command(qemu, f"php {LAB}/ce291-guest.php mode")
-    command(qemu, "/usr/local/etc/rc.d/sdwand.sh restart")
+    reboot_with_overlay(qemu)
     assert "INITIAL_BIND_REJECTED_INVALID_PROBE_ROUTE" in command(qemu, f"php {LAB}/ce291-guest.php probe_route_guard")
     tcp_pair("native paths after rejected bind", (A, A))
     command(qemu, f"php {LAB}/ce291-guest.php bind")
@@ -932,6 +953,7 @@ def install_candidate(qemu):
 
 def install_bound_candidate(qemu):
     version, stock_hash = install_candidate(qemu)
+    reboot_with_overlay(qemu)
     command(qemu, f"php {LAB}/ce291-guest.php bind")
     return version, stock_hash
 
@@ -976,9 +998,11 @@ def recovery(qemu, cleanup, _provider, *, restart, image):
         assert command(qemu, "sha256 -q /etc/inc/filter.inc") == stock_hash
         assert_rules(loaded(qemu), primary)
         tcp_pair("stock after OS transaction", (A, A))
-        command(qemu, f"cp {LAB}/filter*.inc /etc/inc/; /usr/local/etc/rc.d/sdwand.sh restart")
+        command(qemu, f"cp {LAB}/filter*.inc /etc/inc/")
+        reboot_with_overlay(qemu)
     else:
         assert mode == "ABI=2", mode
+        verify_overlay_boot(qemu)
     wait_paths(qemu, "recovered after OS transaction", primary)
     tcp_pair("recovered after OS transaction", (A, A))
     assert route_and_nat(qemu) == reference
@@ -986,6 +1010,7 @@ def recovery(qemu, cleanup, _provider, *, restart, image):
     command(qemu, f"php {LAB}/ce291-guest.php restore_remapped")
     qemu = restart(qemu, model="e1000")
     wait_lease(qemu, B, GATEWAYS["GW_B"][1], "em2")
+    verify_overlay_boot(qemu)
     assert command(qemu, f"php {LAB}/ce291-guest.php capture_config") == config_hash
     management("restored on em interfaces", certificate)
     blocked = loaded(qemu)
