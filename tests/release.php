@@ -9,9 +9,13 @@ function verify(bool $condition): void {
 
 // Simulate the native API, including pkg errors and custom FreeBSD revisions.
 function pkg_exec($command, &$stdout, &$stderr): int {
-	verify($command === 'query %v pfSense-pkg-SDWAN');
-	global $local_version, $pkg_rc;
-	$stdout = $local_version;
+	global $local_version, $pkg_rc, $manifest;
+	if ($command === 'query %v pfSense-pkg-SDWAN') {
+		$stdout = $local_version;
+	} else {
+		verify($command === 'info --raw --raw-format json -F ' . escapeshellarg('/tmp/package.pkg'));
+		$stdout = json_encode($manifest);
+	}
 	return $pkg_rc;
 }
 
@@ -24,6 +28,17 @@ foreach (['', "a\nb", "0.2.0'", "0.2.0; true"] as $local_version) {
 $pkg_rc = 1;
 $local_version = '0.2.0';
 verify(sdwan_release_installed() === null);
+
+$pkg_rc = 0;
+$manifest = ['name' => 'pfSense-pkg-SDWAN', 'version' => '0.4.28', 'origin' => 'net/pfSense-pkg-SDWAN',
+	'prefix' => '/usr/local', 'abi' => 'FreeBSD:16:*'];
+verify(sdwan_release_manifest_matches('/tmp/package.pkg', '0.4.28'));
+foreach (['prefix' => '/', 'abi' => 'FreeBSD:15:*', 'origin' => 'misc/pfSense-pkg-SDWAN'] as $key => $wrong) {
+	$valid = $manifest;
+	$manifest[$key] = $wrong;
+	verify(!sdwan_release_manifest_matches('/tmp/package.pkg', '0.4.28'));
+	$manifest = $valid;
+}
 
 $index = ['schema' => 1, 'channel' => 'main', 'maturity' => 'experimental', 'package' => 'pfSense-pkg-SDWAN', 'version' => '0.2.0', 'sha256' => str_repeat('a', 64)];
 verify(sdwan_release_parse(json_encode($index)) === ['version' => '0.2.0', 'sha256' => str_repeat('a', 64), 'maturity' => 'experimental']);

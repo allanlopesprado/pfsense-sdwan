@@ -44,6 +44,13 @@ verify($inventory['C']['transport'] === '' && $inventory['C']['family'] === 'ine
 verify($inventory['WAN']['transport'] === 'wan' && $before === $current, 'gateway discovery preserves native configuration');
 $transports = sdwan_vti_transports($current['interfaces'], $current['ipsec/phase1'], $current['ipsec/phase2']);
 verify(!isset($transports['ipsec21']), 'merged IKEv2 reuses first Phase 2 device');
+$legacy = ['ikeid' => '2', 'interface' => 'wan'];
+foreach ([[], ['iketype' => ''], ['iketype' => 'ikev1']] as $ike_type) {
+	verify(sdwan_vti_transports($current['interfaces'], [$legacy + $ike_type], $current['ipsec/phase2']) ===
+	    ['ipsec20' => 'wan', 'ipsec21' => 'wan'], 'legacy and explicit IKEv1 use each Phase 2 device');
+}
+verify(sdwan_vti_transports($current['interfaces'], [$legacy + ['iketype' => 'auto']], $current['ipsec/phase2']) ===
+    ['ipsec20' => 'wan'], 'native automatic mode without split connections keeps the merged device');
 
 $config = ['version' => '1', 'members' => [
 	['name' => 'one', 'gateway' => 'A', 'cost' => '0'],

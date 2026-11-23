@@ -225,6 +225,20 @@ def screenshots(directory, www, pages):
                 assert path == "/sdwan/updates.php" and fields.get("target_version") == ["0.4.8"], (path, fields)
                 assert fields.get("target_sha256") and "__csrf_magic" in fields and "upgrade_release" in fields
                 print("ok - the browser submits the selected release and CSRF token through Upgrade")
+                page = pages["large-policy"].replace("</body>",
+                    '<script>events.forEach(function (init) { init(); });'
+                    'document.getElementById("sdwan-policy-editor").requestSubmit();</script></body>')
+                (site / "large-policy.html").write_text(page, encoding="utf-8")
+                subprocess.run([chrome, "--headless", "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage",
+                                f"--user-data-dir={folder}/chrome", "--dump-dom",
+                                f"http://127.0.0.1:{server.server_port}/large-policy.html"],
+                               capture_output=True, check=True, timeout=35)
+                path, fields = requests.get(timeout=5)
+                selection = json.loads(fields["policy_selection"][0])
+                assert path == "/sdwan/policies.php" and "__csrf_magic" in fields and "revision" in fields
+                assert "members[]" not in fields and not any(key.startswith("primary_check_") for key in fields)
+                assert len(selection["members"]) == 350 and len(selection["overrides"]) == 700
+                print("ok - native browser sends a large policy and probe overrides as bounded form data")
             finally:
                 server.shutdown()
                 worker.join()
@@ -357,6 +371,36 @@ def run(php, classes, screenshot_dir=None):
         })
         assert json.loads(cleared.split("SAVED=")[1]) == [1, probe_config], cleared
         print("ok - native policy form saves and clears policy and member requirements")
+
+        large_members = [{"name": f"member_{n}", "gateway": f"GW_{n}", "cost": "3",
+                          "probe_primary": f"tcp://192.0.{2 + n // 250}.{1 + n % 250}:443",
+                          "probe_secondary": f"dns://example.com 198.51.{100 + n // 250}.{1 + n % 250}"}
+                         for n in range(350)]
+        member_names = [member["name"] for member in large_members]
+        large_policy = {**config["policies"][0], "members": member_names}
+        large_config = {**config, "members": large_members, "policies": [large_policy]}
+        large_native = {**native, "gateways/gateway_item": [
+            {"interface": "wan", "name": member["gateway"]} for member in large_members]}
+        large_html = request("policies", config=large_config, native=large_native, get={"edit": "VOICE"})
+        large_form = Choices(large_html)
+        assert len(large_form.fields["members[]"]) == 350 and "primary_check_member_349" in large_form.fields
+        overrides = {f"{slot}_check_{name}": value for name in member_names
+                     for slot, value in (("primary", "required"), ("secondary", "optional"))}
+        compact = {"members": [":" + name for name in member_names], "overrides": overrides}
+        large_post = {key: value for key, value in posted.items() if key != "members"}
+        large_post.update({"__csrf_magic": large_form.tokens[0], "revision": large_form.revisions[0],
+                           "policy_selection": json.dumps(compact)})
+        updated = request("policies", config=large_config, native=large_native, post=large_post)
+        writes, large_stored = json.loads(updated.split("SAVED=")[1])
+        expected = [{"member": name, "primary_check": "required", "secondary_check": "optional"}
+                    for name in member_names]
+        assert writes == 1 and large_stored["policies"] == [{**large_policy, "probe_requirements": expected}], updated[-1500:]
+        invalid_selection = {**compact, "overrides": {"primary_check_member_349": ["required"]}}
+        invalid = request("policies", config=large_config, native=large_native,
+                          post={**large_post, "policy_selection": json.dumps(invalid_selection)})
+        assert "Select a valid member service check requirement." in invalid
+        assert json.loads(invalid.split("SAVED=")[1]) == [0, large_config]
+        print("ok - policy saves 350 members and 700 overrides below the PHP form input limit")
 
         form = Choices(request("members", get={"add": "1"}))
         assert form.fields["gateway"] == [("", True), (":FREE", False)], form.fields
@@ -522,17 +566,17 @@ def run(php, classes, screenshot_dir=None):
         unavailable = request("status", snapshot={**snapshot, "policies": {"VOICE": excluded}})
         assert "No eligible path" in unavailable and 'class="bg-danger"' in unavailable
         stale = request("status", snapshot={**snapshot, "generated_at": 1})
-        assert "Waiting for current gateway measurements" in stale and "2 of 2" not in stale
+        assert "The last SD-WAN observation expired." in stale and "2 of 2" not in stale
         retargeted = {**snapshot, "gateway_inventory_revision": "0" * 64}
         fresh_snapshot_wrong_gateway = request("status", snapshot=retargeted)
-        assert "Waiting for current gateway measurements" in fresh_snapshot_wrong_gateway and "2 of 2" not in fresh_snapshot_wrong_gateway
+        assert "current configuration or gateway paths" in fresh_snapshot_wrong_gateway and "2 of 2" not in fresh_snapshot_wrong_gateway
         assert 'aria-label="Member evaluation"' not in request("diagnostics", snapshot=retargeted)
         print("ok - native CSRF verifies posts; Status and Diagnostics suppress outdated observations")
         assert "Multiple eligible paths" in fresh and 'class="bg-success"' in fresh
         assert 'id="restartservice-sdwan"' in fresh and 'id="stopservice-sdwan"' in fresh and 'id="startservice-sdwan"' not in fresh
         stopped = request("status", snapshot=snapshot, service_state="stopped")
         assert 'id="startservice-sdwan"' in stopped and 'id="stopservice-sdwan"' not in stopped
-        assert "Multiple eligible paths" not in stopped and "Waiting for current gateway measurements" not in stopped
+        assert "Multiple eligible paths" not in stopped and "The SD-WAN service is stopped." in stopped
         missing = request("status", snapshot=snapshot, service_state="unregistered")
         assert 'service-sdwan"' not in missing and "Multiple eligible paths" not in missing
         read_only = request("status", snapshot=snapshot, privileges={"/status_services.php": False})
@@ -586,7 +630,7 @@ def run(php, classes, screenshot_dir=None):
         assert decisions[0].count('text-nowrap bg-warning') == 2 and 'text-nowrap bg-warning' not in decisions[1]
         boundary = {**snapshot, "members": {"backup": {**sample, "rtt_ms": 25}, "01": sample}}
         assert 'text-nowrap bg-warning' not in request("diagnostics", snapshot=boundary), "SLA limits are inclusive"
-        for args, notice in [({"snapshot": {**snapshot, "generated_at": 1}}, "No current sample for this policy"),
+        for args, notice in [({"snapshot": {**snapshot, "generated_at": 1}}, "The last SD-WAN observation expired."),
                              ({"snapshot": snapshot, "service_state": "unregistered"}, "not registered")]:
             report = request("diagnostics", **args)
             assert notice in report and 'aria-label="Member evaluation"' not in report and "2 of 2" not in report
@@ -665,7 +709,7 @@ def run(php, classes, screenshot_dir=None):
         assert "failed SHA-256 verification" in failed and "UPGRADES=0" in failed
         failed = request("updates", post=action, install_failure=True)
         assert "the previous SD-WAN package was restored" in failed
-        assert "UPGRADES=1" in failed and "ROLLBACKS=1" in failed
+        assert "UPGRADES=1" in failed and "ROLLBACKS=1 RECOVERY=1" in failed
         failed = request("updates", post=action, install_hook_failure=True)
         assert "the previous SD-WAN package was restored" in failed and "ROLLBACKS=1" in failed
         failed = request("updates", post=action, broken_upgrade=True)
@@ -677,7 +721,9 @@ def run(php, classes, screenshot_dir=None):
         assert "could not be prepared for rollback" in blocked
         assert "UPGRADES=0" in blocked and "ROLLBACKS=0" in blocked
         failed = request("updates", post=action, service_failure=True)
-        assert "service did not start after the update" in failed and "ROLLBACKS=1" in failed
+        assert "Service readiness still requires verification" in failed and "ROLLBACKS=1 RECOVERY=1" in failed
+        failed = request("updates", post=action, registration_failure=True)
+        assert "the previous SD-WAN package was restored" in failed and "ROLLBACKS=1 RECOVERY=1" in failed
         failed = request("updates", post=action, worker_failure=True)
         assert "observer readiness could not be verified" in failed and "UPGRADES=1" in failed
         assert 'name="verify_installation"' in failed and 'name="upgrade_release"' not in failed
@@ -738,6 +784,7 @@ def run(php, classes, screenshot_dir=None):
                                    **({"interface_counters": {}} if page == "diagnostics" else {}))
                      for page in ("status", "diagnostics", "members", "updates")}
             pages["members-edit"] = request("members", get={"edit": "1"})
+            pages["large-policy"] = large_html
             pages["updates"] = offered.split("</html>", 1)[0] + "</html>"
             pages["status-stopped"] = request("status", config=demo, native=demo_native, snapshot=demo_snapshot,
                                               service_state="stopped")

@@ -183,7 +183,7 @@ def capture_erp(ce, cleanup, output):
 
 class Health(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
-        if self.path != "/healthz":
+        if self.path not in ("/healthz", "/healthz-large"):
             self.send_error(404)
             return
         source_file = self.server.unready_source
@@ -192,10 +192,16 @@ class Health(http.server.BaseHTTPRequestHandler):
         except FileNotFoundError:
             is_unready = False
         body = b"no" if is_unready else b"ok"
+        if self.path == "/healthz-large":
+            body = body.ljust(128 * 1024, b"x")
         self.send_response(200)
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
-        self.wfile.write(body)
+        try:
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError, ssl.SSLEOFError):
+            if self.path != "/healthz-large":
+                raise
 
     def log_message(self, *_args):
         pass

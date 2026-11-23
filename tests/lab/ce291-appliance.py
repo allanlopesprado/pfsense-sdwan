@@ -521,6 +521,24 @@ def wait_receipt(qemu, condition, timeout):
     raise RuntimeError(f"Reload verification did not converge: {state}")
 
 
+def verify_updater_readiness(qemu, version, installed_since, *, forwarding):
+    deadline = time.monotonic() + 45
+    invocation = f"php {LAB}/ce291-guest.php release_readiness {version} {installed_since}"
+    expected = {"verification": "verified", "registered": True, "guard_required": forwarding,
+                "guard_ready": forwarding}
+    state = {}
+    while time.monotonic() < deadline:
+        output = command(qemu, invocation)
+        state = json.loads(next(line for line in reversed(output.splitlines()) if line.startswith("{")))
+        if state == expected:
+            command(qemu, "/usr/local/etc/rc.d/sdwand.sh service_status")
+            mode = "forwarding" if forwarding else "observation"
+            print(f"UPDATER_READINESS_CONFIRMED mode={mode} version={version}", flush=True)
+            return
+        time.sleep(1)
+    raise RuntimeError(f"The updater did not confirm appliance readiness: {state}")
+
+
 def verify_unapplied_reload(qemu, primary, certificate):
     adapter = "/etc/inc/filter-sdwan.inc"
     backup = f"{LAB}/filter-sdwan.acceptance.inc"
@@ -660,11 +678,14 @@ def acceptance(qemu, cleanup, provider, *, cold_restart):
     assert re.fullmatch(r"\d+\.\d+\.\d+", previous_version), previous_version
     assert command(qemu, f"pkg version -t {version} {previous_version}") == ">"
     print(f"CANDIDATE_PACKAGE version={version} sha256={digest}", flush=True)
+    installed_since = int(command(qemu, "date +%s"))
     rv = command(qemu, f"pkg add {package}", timeout=180)
     print(rv.splitlines()[-6:], flush=True)
     assert command(qemu, "pkg query '%v' pfSense-pkg-SDWAN") == version
     command(qemu, "pkg check -s pfSense-pkg-SDWAN; /usr/local/etc/rc.d/sdwand.sh status")
     assert "ABI=0" in command(qemu, f"php {LAB}/ce291-guest.php mode")
+    print(command(qemu, f"php {LAB}/ce291-guest.php release_manifest {version}"), flush=True)
+    verify_updater_readiness(qemu, version, installed_since, forwarding=False)
     print("PACKAGE_INSTALLED_WITH_NATIVE_HOOKS; STOCK_MODE_OBSERVATION", flush=True)
 
     command(qemu, f"pkg add -f {rollback}", timeout=180)
@@ -672,11 +693,13 @@ def acceptance(qemu, cleanup, provider, *, cold_restart):
     command(qemu, f"php {LAB}/ce291-guest.php settings")
     config_hash = "php -r 'require \"config.inc\";echo hash(\"sha256\", serialize(config_get_path(\"installedpackages/sdwan\")));'"
     saved = command(qemu, config_hash)
+    installed_since = int(command(qemu, "date +%s"))
     command(qemu, f"pkg add -f {package}", timeout=180)
     assert command(qemu, "pkg query '%v' pfSense-pkg-SDWAN") == version
     assert command(qemu, config_hash) == saved
     assert "ABI=0" in command(qemu, f"php {LAB}/ce291-guest.php mode")
     command(qemu, "pkg check -s pfSense-pkg-SDWAN; /usr/local/etc/rc.d/sdwand.sh status")
+    verify_updater_readiness(qemu, version, installed_since, forwarding=False)
     print("NATIVE_UPGRADE_PRESERVES_POLICY_CONFIGURATION", flush=True)
     certificate = management("baseline")
     native_rules = loaded(qemu)
@@ -690,6 +713,7 @@ def acceptance(qemu, cleanup, provider, *, cold_restart):
     tcp_pair("native paths after rejected bind", (A, A))
     command(qemu, f"php {LAB}/ce291-guest.php bind")
     wait_paths(qemu, "baseline", primary)
+    verify_updater_readiness(qemu, version, installed_since, forwarding=True)
     tcp_pair("baseline", (A, A))
     assert "ACTIVE_POLICY_REJECTED_INVALID_PROBE_ROUTE" in command(qemu, f"php {LAB}/ce291-guest.php probe_route_guard")
     wait_paths(qemu, "rejected policy edit", primary)

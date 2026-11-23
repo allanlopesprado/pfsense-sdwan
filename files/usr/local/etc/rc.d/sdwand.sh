@@ -44,8 +44,9 @@ sdwan_watchdog_start()
 sdwan_watchdog_stop()
 {
 	if sdwan_watchdog_rc status >/dev/null 2>&1; then
-		sdwan_watchdog_rc stop
+		sdwan_watchdog_rc stop || return 1
 	fi
+	/bin/rm -f /var/run/sdwan-expiry.heartbeat
 }
 
 # Removal runs the same cleanup after stop even when the service was already down.
@@ -63,10 +64,21 @@ sdwan_invalidate()
 # The watchdog's service name is scoped to its subshell.
 # shellcheck disable=SC2031
 load_rc_config "${name}"
-if [ "$1" = "watchdog_status" ]; then
+case "$1" in
+watchdog_status)
 	sdwan_watchdog_rc status
 	exit $?
-fi
+	;;
+service_status)
+	run_rc_command status || exit 1
+	/usr/local/bin/php -r '
+		require_once("config.inc");
+		require_once("/usr/local/pkg/sdwan_release.inc");
+		exit(sdwan_release_watchdog_ready() ? 0 : 1);
+	'
+	exit $?
+	;;
+esac
 run_rc_command "$1"
 result=$?
 case "$1" in

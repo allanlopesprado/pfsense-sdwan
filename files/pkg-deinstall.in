@@ -63,7 +63,7 @@ POST-DEINSTALL)
 	rm -f "$removal_ready" || exit 1
 	register_removal "$2" || exit 1
 	# The observer is stopped, PF withdrawal was checked, and the package is gone.
-	rm -f /var/run/sdwand.pid /var/run/sdwan-expiry.pid /var/run/sdwan-filter-commit.json \
+rm -f /var/run/sdwand.pid /var/run/sdwan-expiry.pid /var/run/sdwan-expiry.heartbeat /var/run/sdwan-filter-commit.json \
 		/var/run/sdwan-observer.json /var/run/sdwan-observer.json.forwarded \
 		/var/run/sdwan-observer.json.events /var/run/sdwan-observer.json.lock || exit 1
 	for lock in /var/run/sdwan-settings.lock /var/run/sdwan-package-upgrade.lock; do

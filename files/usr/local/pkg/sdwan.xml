@@ -12,11 +12,24 @@
 	<service>
 		<name>sdwan</name>
 		<rcfile>sdwand.sh</rcfile>
-		<description>SD-WAN policy observer</description>
-		<custom_php_service_status_command>mwexec('/usr/local/etc/rc.d/sdwand.sh status', true) === 0</custom_php_service_status_command>
+	<description>SD-WAN policy observer</description>
+	<custom_php_service_status_command>mwexec('/usr/local/etc/rc.d/sdwand.sh service_status', true) === 0</custom_php_service_status_command>
 	</service>
 	<custom_php_install_command>
 		sdwan_remove_legacy_service();
+	$sdwan_service_path = 'installedpackages/service';
+	$sdwan_services = config_get_path($sdwan_service_path, []);
+	if (is_array($sdwan_services)) {
+		$sdwan_status = "mwexec('/usr/local/etc/rc.d/sdwand.sh service_status', true) === 0";
+		foreach ($sdwan_services as $sdwan_index => $sdwan_service) {
+			if (($sdwan_service['name'] ?? null) === 'sdwan' &amp;&amp; ($sdwan_service['rcfile'] ?? null) === 'sdwand.sh' &amp;&amp;
+			    ($sdwan_service['custom_php_service_status_command'] ?? null) !== $sdwan_status) {
+				$sdwan_services[$sdwan_index]['custom_php_service_status_command'] = $sdwan_status;
+				config_set_path($sdwan_service_path, $sdwan_services);
+				break;
+			}
+		}
+	}
 		$sdwan_rc = '/usr/local/etc/rc.d/sdwand.sh';
 		$sdwan_action = mwexec($sdwan_rc . ' status', true) === 0 ? 'restart' : 'start';
 		$sdwan_exit = mwexec($sdwan_rc . ' ' . $sdwan_action);

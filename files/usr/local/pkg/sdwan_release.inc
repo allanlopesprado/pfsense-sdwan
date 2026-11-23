@@ -169,8 +169,14 @@ function sdwan_release_signature_valid(string $archive, string $signature): bool
 
 function sdwan_release_manifest_matches(string $path, string $version): bool {
 	$file = escapeshellarg($path);
-	return pkg_exec("query -F {$file} '%n %v %o'", $manifest, $stderr) === 0 &&
-	    trim($manifest) === SDWAN_RELEASE_PACKAGE . ' ' . $version . ' net/' . SDWAN_RELEASE_PACKAGE;
+	// Unlike `pkg query`, raw `pkg info` opens the full manifest used by `pkg add`.
+	if (pkg_exec("info --raw --raw-format json -F {$file}", $manifest, $stderr) !== 0) {
+		return false;
+	}
+	$data = json_decode($manifest, true, 32);
+	return ($data['name'] ?? null) === SDWAN_RELEASE_PACKAGE && ($data['version'] ?? null) === $version &&
+	    ($data['origin'] ?? null) === 'net/' . SDWAN_RELEASE_PACKAGE && ($data['prefix'] ?? null) === '/usr/local' &&
+	    in_array($data['abi'] ?? null, ['FreeBSD:16:*', 'FreeBSD:16:amd64'], true);
 }
 
 function sdwan_release_files_intact(string $version): bool {
@@ -194,9 +200,68 @@ function sdwan_release_restore(string $backup, string $previous, string $attempt
 	if ($current !== null && $current !== $previous && $current !== $attempted) {
 		return 'rollback_changed';
 	}
-	// Force is reserved for recovery from this attempt, using the archive made beforehand.
-	return sdwan_release_add($backup, true) && sdwan_release_files_intact($previous) ?
-	    'rolled_back' : 'rollback_failed';
+	// Leave an intact previous installation alone if pkg rejected the upgrade before changing it.
+	$restored_at = null;
+	if (!sdwan_release_files_intact($previous)) {
+		$restored_at = time();
+		if (!sdwan_release_add($backup, true) || !sdwan_release_files_intact($previous)) {
+			return 'rollback_failed';
+		}
+	}
+	return sdwan_release_verify_safely($previous, $restored_at, true) === 'verified' ? 'rolled_back' : 'rollback_verify';
+}
+
+function sdwan_release_registered(string $version): bool {
+	if (!config_read_file(false, false)) {
+		return false;
+	}
+	$id = get_package_id('SDWAN');
+	if ($id === -1 || config_get_path("installedpackages/package/{$id}/version") !== $version ||
+	    config_get_path("installedpackages/package/{$id}/configurationfile") !== 'sdwan.xml') {
+		return false;
+	}
+	$menu_found = false;
+	foreach ((array)config_get_path('installedpackages/menu', []) as $menu) {
+		if (($menu['configfile'] ?? null) === 'sdwan.xml' && ($menu['url'] ?? null) === '/sdwan/status.php' &&
+		    ($menu['section'] ?? null) === 'Services') {
+			$menu_found = true;
+			break;
+		}
+	}
+	foreach ((array)config_get_path('installedpackages/service', []) as $service) {
+		if (($service['name'] ?? null) === 'sdwan' && ($service['rcfile'] ?? null) === 'sdwand.sh') {
+			return $menu_found;
+		}
+	}
+	return false;
+}
+
+function sdwan_release_worker_running(string $pidfile, int $worker_pid, bool $watchdog = false): bool {
+	$supervisor = trim((string)@file_get_contents($pidfile, false, null, 0, 32));
+	if ($worker_pid <= 0 || !preg_match('/\A[1-9][0-9]{0,9}\z/', $supervisor)) {
+		return false;
+	}
+	$process = '/usr/local/bin/php /usr/local/sbin/sdwand\.php' . ($watchdog ? ' --expiry-watchdog' : '');
+	return mwexec('/bin/pgrep -P ' . $supervisor . ' -u 0 -fx ' . escapeshellarg($process) .
+	    ' | /usr/bin/grep -Fx ' . $worker_pid, true) === 0;
+}
+
+function sdwan_release_watchdog_ready(): bool {
+	if (!config_get_path('gateways/sdwan_bindings/item', [])) {
+		return true;
+	}
+	require_once(__DIR__ . '/sdwan_steering.inc');
+	if (!sdwan_steering_supported()) {
+		return true;
+	}
+	$raw = @file_get_contents('/var/run/sdwan-expiry.heartbeat', false, null, 0, 513);
+	$data = is_string($raw) && strlen($raw) <= 512 ? json_decode($raw, true, 3) : null;
+	$stamp = $data['updated_ns'] ?? null;
+	$pid = $data['pid'] ?? null;
+	$now = hrtime(true);
+	// The bounded native reload can occupy the watchdog for up to 50 seconds.
+	return is_int($stamp) && $stamp > 0 && $stamp <= $now && $now - $stamp <= 65_000_000_000 &&
+	    is_int($pid) && sdwan_release_worker_running('/var/run/sdwan-expiry.pid', $pid, true);
 }
 
 function sdwan_release_service_running(bool $installed_now): bool {
@@ -212,35 +277,70 @@ function sdwan_release_service_running(bool $installed_now): bool {
 	return false;
 }
 
-function sdwan_release_verify_installation(string $version, ?int $installed_since = null): string {
+function sdwan_release_verify_installation(string $version, ?int $installed_since = null, bool $retry = false): string {
 	if (!sdwan_release_files_intact($version)) {
 		return 'verify_files';
 	}
-	if (!sdwan_release_service_running($installed_since !== null)) {
-		return $installed_since === null ? 'verify' : 'service_inactive';
+	if (!sdwan_release_registered($version)) {
+		return 'verify_registration';
 	}
-	// The native rc status tracks the daemon supervisor, including between worker restarts.
-	$supervisor = trim((string)@file_get_contents('/var/run/sdwand.pid', false, null, 0, 32));
-	if (!preg_match('/\A[1-9][0-9]{0,9}\z/', $supervisor)) {
+	if (!sdwan_release_service_running(!$retry && $installed_since !== null)) {
+		return !$retry && $installed_since !== null ? 'service_inactive' : 'verify';
+	}
+	if (!is_file('/var/run/sdwand.pid')) {
 		return 'verify';
 	}
 	require_once(__DIR__ . '/sdwan.inc');
 	require_once(__DIR__ . '/sdwan_engine.inc');
-	try {
-		$snapshot = sdwan_current_snapshot(sdwan_get_config(), sdwan_gateways());
-	} catch (UnexpectedValueException $e) {
-		return 'verify';
-	}
+	$snapshot = sdwan_current_snapshot(sdwan_get_config(), sdwan_gateways());
 	$observer = $snapshot['observer'] ?? null;
 	$pid = $observer['pid'] ?? null;
 	if (!is_array($observer) || !is_int($pid) || $pid <= 0 || ($observer['version'] ?? null) !== $version ||
-	    $snapshot['generated_at'] < ($installed_since ?? 0)) {
+	    $snapshot['generated_at'] < ($installed_since ?? 0) ||
+	    !sdwan_release_worker_running('/var/run/sdwand.pid', $pid) || !sdwan_release_watchdog_ready()) {
 		return 'verify';
 	}
-	// Confirm that the current supervised worker published the sample from its installed build.
-	$worker = '/bin/pgrep -P ' . $supervisor . ' -u 0 -fx ' .
-	    escapeshellarg('/usr/local/bin/php /usr/local/sbin/sdwand\.php');
-	return mwexec($worker . ' | /usr/bin/grep -Fx ' . $pid, true) === 0 ? 'verified' : 'verify';
+	return 'verified';
+}
+
+function sdwan_release_verify_safely(string $version, ?int $installed_since = null, bool $retry = false): string {
+	try {
+		return sdwan_release_verify_installation($version, $installed_since, $retry);
+	} catch (UnexpectedValueException) {
+		return 'verify';
+	} catch (Throwable) {
+		return 'verify_error';
+	}
+}
+
+function sdwan_release_recovery_dir(): string {
+	return g_get('varrun_path', '/var/run') . '/sdwan-package-recovery';
+}
+
+function sdwan_release_read_recovery(string $directory): ?array {
+	$state = $directory . '/state.json';
+	if (is_link($directory) || !is_dir($directory) || (fileperms($directory) & 0777) !== 0700 || is_link($state)) {
+		return null;
+	}
+	$raw = @file_get_contents($state, false, null, 0, 513);
+	$data = is_string($raw) && strlen($raw) <= 512 ? json_decode($raw, true, 3) : null;
+	if (!is_string($data['previous'] ?? null) || !sdwan_release_pkg_version($data['previous']) ||
+	    !is_string($data['attempted'] ?? null) || !sdwan_release_pkg_version($data['attempted']) ||
+	    !is_int($data['started_at'] ?? null) || $data['started_at'] <= 0 || $data['started_at'] > time()) {
+		return null;
+	}
+	return $data;
+}
+
+function sdwan_release_clear_recovery(string $directory, string $backup): void {
+	if ((is_file($backup) || is_link($backup)) && !@unlink($backup)) {
+		return;
+	}
+	$state = $directory . '/state.json';
+	if ((is_file($state) || is_link($state)) && !@unlink($state)) {
+		return;
+	}
+	@rmdir($directory);
 }
 
 /* The WebGUI caller checks the native install privilege and verifies CSRF before calling this. */
@@ -254,14 +354,31 @@ function sdwan_release_upgrade(array $target, bool $verify_only = false): string
 	}
 	$directory = null;
 	$staged_files = [];
-	$preserved_backup = null;
+	$recovery_dir = sdwan_release_recovery_dir();
+	$backup = null;
+	$retain_recovery = false;
 	try {
 		$installed = sdwan_release_installed();
+		$prior_recovery = sdwan_release_read_recovery($recovery_dir);
+		if ($installed !== null && $prior_recovery !== null &&
+		    in_array($installed, [$prior_recovery['previous'], $prior_recovery['attempted']], true)) {
+			$status = sdwan_release_verify_safely($installed, $prior_recovery['started_at'], true);
+			if ($status === 'verified') {
+				sdwan_release_clear_recovery($recovery_dir,
+				    $recovery_dir . '/' . SDWAN_RELEASE_PACKAGE . '-' . $prior_recovery['previous'] . '.pkg');
+			}
+			if ($installed === $target['version']) {
+				return $status;
+			}
+		}
 		if ($installed === $target['version']) {
-			return sdwan_release_verify_installation($installed);
+			return sdwan_release_verify_safely($installed);
 		}
 		if ($verify_only || $installed === null || pkg_version_compare($installed, $target['version']) !== '<') {
 			return 'not_newer';
+		}
+		if (file_exists($recovery_dir) || is_link($recovery_dir)) {
+			return 'recovery_pending';
 		}
 		$release = sdwan_release_check();
 		if ($release === null || $target['version'] !== $release['version'] ||
@@ -308,10 +425,12 @@ function sdwan_release_upgrade(array $target, bool $verify_only = false): string
 		if (sdwan_release_installed() !== $installed) {
 			return 'changed';
 		}
-		$backup = $directory . '/' . SDWAN_RELEASE_PACKAGE . '-' . $installed . '.pkg';
-		$staged_files[] = $backup;
+		if (!@mkdir($recovery_dir, 0700)) {
+			return 'backup';
+		}
+		$backup = $recovery_dir . '/' . SDWAN_RELEASE_PACKAGE . '-' . $installed . '.pkg';
 		if (!sdwan_release_files_intact($installed) ||
-		    pkg_exec('create -q -o ' . escapeshellarg($directory) . ' ' . SDWAN_RELEASE_PACKAGE, $output, $stderr) !== 0 ||
+		    pkg_exec('create -q -o ' . escapeshellarg($recovery_dir) . ' ' . SDWAN_RELEASE_PACKAGE, $output, $stderr) !== 0 ||
 		    !is_file($backup) || !sdwan_release_manifest_matches($backup, $installed)) {
 			return 'backup';
 		}
@@ -319,11 +438,26 @@ function sdwan_release_upgrade(array $target, bool $verify_only = false): string
 			return 'changed';
 		}
 		$installed_since = time();
-		$status = sdwan_release_add($path) ?
-		    sdwan_release_verify_installation($release['version'], $installed_since) : 'install_failed';
-		if (in_array($status, ['install_failed', 'verify_files', 'service_inactive'], true)) {
+		$state = json_encode(['previous' => $installed, 'attempted' => $release['version'], 'started_at' => $installed_since],
+		    JSON_THROW_ON_ERROR);
+		if (@file_put_contents($recovery_dir . '/state.json', $state, LOCK_EX) !== strlen($state)) {
+			return 'backup';
+		}
+		// Keep the one local recovery archive after any unconfirmed or interrupted transaction.
+		$retain_recovery = true;
+		try {
+			$status = sdwan_release_add($path) ?
+			    sdwan_release_verify_safely($release['version'], $installed_since) : 'install_failed';
+		} catch (Throwable) {
+			$status = 'install_failed';
+		}
+		if (in_array($status, ['install_failed', 'verify_files', 'verify_registration', 'service_inactive', 'verify_error'], true)) {
 			$failure = $status;
-			$status = sdwan_release_restore($backup, $installed, $release['version']);
+			try {
+				$status = sdwan_release_restore($backup, $installed, $release['version']);
+			} catch (Throwable) {
+				$status = 'rollback_failed';
+			}
 			if ($failure === 'service_inactive') {
 				if (function_exists('sdwan_log_emit')) {
 					sdwan_log_emit(LOG_WARNING, 'SD-WAN service did not start after the package update: ' . $status);
@@ -332,22 +466,24 @@ function sdwan_release_upgrade(array $target, bool $verify_only = false): string
 					$status = 'rolled_back_inactive';
 				}
 			}
-			if ($status === 'rollback_failed') {
-				$preserved_backup = $backup;
-				if (function_exists('sdwan_log_emit')) {
-					sdwan_log_emit(LOG_ERR, 'Automatic rollback failed. Local recovery archive: ' . $backup);
-				}
-			}
+		}
+		$retain_recovery = !in_array($status, ['verified', 'rolled_back', 'rolled_back_inactive'], true);
+		if ($retain_recovery && function_exists('sdwan_log_emit')) {
+			sdwan_log_emit($status === 'rollback_failed' ? LOG_ERR : LOG_WARNING,
+			    'Package operation requires verification. Local recovery archive: ' . $backup);
 		}
 		return $status === 'verified' ? 'success' : $status;
 	} finally {
 		foreach ($staged_files as $file) {
-			if ($file !== $preserved_backup && is_file($file)) {
+			if (is_file($file)) {
 				unlink($file);
 			}
 		}
-		if ($directory !== null && $preserved_backup === null) {
+		if ($directory !== null) {
 			rmdir($directory);
+		}
+		if ($backup !== null && !$retain_recovery) {
+			sdwan_release_clear_recovery($recovery_dir, $backup);
 		}
 		sdwan_unlock($lock);
 	}

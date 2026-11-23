@@ -8,6 +8,10 @@ function running_dpinger_processes(): array {
 	return config_get_path('processes', []);
 }
 
+function isvalidpid(string $pidfile): bool {
+	return is_file($pidfile) && trim(file_get_contents($pidfile)) === (string)config_get_path('fixture_live_dpinger_pid', 0);
+}
+
 function get_real_interface($interface, $family, $realv6iface, $flush) {
 	return config_get_path('fixture_devices', [])[$interface] ?? $interface;
 }

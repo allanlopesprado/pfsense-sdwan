@@ -145,9 +145,29 @@ $scoped_pairs = $rule_pairs;
 $scope = ['device' => 'em1', 'family' => 'inet', 'protocols' => ['tcp'],
 	'source' => ['address' => '192.168.1.10/32'], 'destination' => ['address' => '0.0.0.0/0', 'port' => '18080']];
 $scoped_pairs['771292101']['scope'] = $scope;
+$scoped_pairs['771292101']['tcp_flags'] = ['pass' => 'S/SA', 'guard' => 'S/SA', 'blocked' => 'any'];
 $scoped_status = static fn(array $rules, array $pairs): string =>
 	sdwan_steering_pf_status($binding, $state, $inventory, $rules, $pairs);
 $rows[] = audit_case('pf_matches_approved_literal_scope', 'applied', $scoped_status([$pass, $guard], $scoped_pairs));
+$rows[] = audit_case('pf_pass_flags_must_match_native_mask', 'pending',
+	$scoped_status([str_replace('flags S/SA', 'flags A/A', $pass), $guard], $scoped_pairs));
+$rows[] = audit_case('pf_guard_flags_must_match_native_mask', 'pending',
+	$scoped_status([$pass, str_replace('flags S/SA', 'flags A/A', $guard)], $scoped_pairs));
+$rows[] = audit_case('pf_normalizes_equivalent_flag_bit_order', 'applied',
+	$scoped_status(str_replace('flags S/SA', 'flags S/AS', [$pass, $guard]), $scoped_pairs));
+$any_mask_pairs = $scoped_pairs;
+$any_mask_pairs['771292101']['tcp_flags'] = ['pass' => 'any', 'guard' => 'any', 'blocked' => 'any'];
+$rows[] = audit_case('pf_any_flag_mask_may_be_implicit_on_native_guard', 'applied',
+	$scoped_status([str_replace('flags S/SA', 'flags any', $pass), str_replace(' flags S/SA', '', $guard)], $any_mask_pairs));
+$rows[] = audit_case('pf_fallback_block_has_no_implicit_syn_only_mask', 'blocked',
+	sdwan_steering_pf_status($binding, $blocked_state, $inventory, [$block, $guard], $scoped_pairs));
+$group_pairs = $scoped_pairs;
+$group_pairs['771292101']['interface_groups'] = ['BranchLANs'];
+$group_rule = 'block drop in quick on BranchLANs inet all ridentifier 771292099';
+$rows[] = audit_case('pf_earlier_interface_group_covers_member_interface', 'pending',
+	$scoped_status([$group_rule, $pass, $guard], $group_pairs));
+$rows[] = audit_case('pf_unrelated_interface_group_keeps_policy_effective', 'applied',
+	$scoped_status([$group_rule, $pass, $guard], $scoped_pairs));
 $rows[] = audit_case('pf_pair_matches_each_other_but_not_approved_port', 'pending',
 	$scoped_status(str_replace('port = 18080', 'port = 18081', [$pass, $guard]), $scoped_pairs), 'applied');
 $rows[] = audit_case('pf_pair_matches_each_other_but_not_approved_device', 'pending',
@@ -164,21 +184,24 @@ $rows[] = audit_case('pf_previous_interface_network_table', 'pending',
 	$scoped_status(str_replace('from 192.168.1.10', 'from <OPT1__NETWORK:0>', [$pass, $guard]), $network_pairs));
 $dual_pairs = $scoped_pairs;
 $dual_pairs['771292101']['scope']['protocols'] = ['tcp', 'udp'];
+$dual_pairs['771292101']['tcp_flags']['guard'] = 'any';
+$tcp_guard = str_replace(' flags S/SA', '', $guard);
 [$udp_pass, $udp_guard] = str_replace(['proto tcp', 'flags S/SA '], ['proto udp', ''], [$pass, $guard]);
 $rows[] = audit_case('pf_tcp_udp_expands_both_protocols_under_one_tracker', 'applied',
-	$scoped_status([$pass, $udp_pass, $guard, $udp_guard], $dual_pairs), 'pending');
+	$scoped_status([$pass, $udp_pass, $tcp_guard, $udp_guard], $dual_pairs), 'pending');
 $rows[] = audit_case('pf_tcp_udp_requires_both_protocols', 'pending',
-	$scoped_status([$pass, $guard, $udp_guard], $dual_pairs));
+	$scoped_status([$pass, $tcp_guard, $udp_guard], $dual_pairs));
 $rows[] = audit_case('pf_tcp_udp_requires_both_guards', 'pending',
-	$scoped_status([$pass, $udp_pass, $guard], $dual_pairs));
+	$scoped_status([$pass, $udp_pass, $tcp_guard], $dual_pairs));
 $rows[] = audit_case('pf_tcp_udp_rejects_duplicate_same_protocol', 'pending',
-	$scoped_status([$pass, $pass, $udp_pass, $guard, $udp_guard], $dual_pairs));
+	$scoped_status([$pass, $pass, $udp_pass, $tcp_guard, $udp_guard], $dual_pairs));
 $rows[] = audit_case('block_wrong_ingress', 'pending',
 	$status($blocked_state, [str_replace('on em1', 'on em3', $block), $guard]), 'blocked');
 $rows[] = audit_case('block_wrong_scope', 'pending',
 	$status($blocked_state, [str_replace('from 192.168.1.10', 'from any', $block), $guard]), 'blocked');
 $rows[] = audit_case('block_restricted_to_syn', 'pending',
-	$status($blocked_state, [str_replace('label "id=', 'flags S/SA label "id=', $block), $guard]), 'blocked');
+	sdwan_steering_pf_status($binding, $blocked_state, $inventory,
+	    [str_replace('label "id=', 'flags S/SA label "id=', $block), $guard], $scoped_pairs), 'blocked');
 
 $pool_state = ['gateway' => 'WAN1', 'pool' => ['WAN1', 'WAN2'], 'revision' => $state['revision']];
 $weighted = str_replace('route-to (em2 198.18.20.2)', 'route-to { ' . str_repeat('(em0 198.18.10.2), ', 2) .
@@ -501,15 +524,19 @@ $updated_binding = $preflight($merged_aliases)['binding'];
 $rows[] = audit_case('vti_merged_ipv4_alias_order_changes_default_peer', true,
 	$updated_binding !== null && $updated_binding !== $ordered);
 
-foreach (['ikev1', 'ikev2'] as $ike) {
+foreach (['ikev1' => 'ikev1', 'ikev2' => 'ikev2', 'default' => null, 'empty' => ''] as $label => $ike) {
 	$split = $merged;
-	$split['phase1'][0]['iketype'] = $ike;
+	if ($ike !== null) {
+		$split['phase1'][0]['iketype'] = $ike;
+	} else {
+		unset($split['phase1'][0]['iketype']);
+	}
 	if ($ike === 'ikev2') {
 		$split['phase1'][0]['splitconn'] = '';
 	}
 	$split_approval = $preflight($split)['binding'];
 	$split['phase2'][2]['remoteid']['address'] = '198.51.100.35';
-	$rows[] = audit_case("vti_{$ike}_other_split_device_keeps_revision", true,
+	$rows[] = audit_case("vti_{$label}_other_split_device_keeps_revision", true,
 	    $split_approval !== null && $preflight($split)['binding'] === $split_approval);
 }
 

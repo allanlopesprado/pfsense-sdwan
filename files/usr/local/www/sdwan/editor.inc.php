@@ -89,6 +89,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 		$saved = $position === false ? [] : $rows[$position];
 		$sdwan_record = $saved;
 		$cleared = [];
+		$policy_inputs = $_POST;
+		if ($collection === 'policies' && array_key_exists('policy_selection', $_POST)) {
+			$raw_selection = $_POST['policy_selection'];
+			$selection = is_string($raw_selection) && strlen($raw_selection) <= 1048576 ?
+			    json_decode($raw_selection, true, 5) : null;
+			if (!is_array($selection) || count($selection) !== 2 || !is_array($selection['members'] ?? null) ||
+			    !array_is_list($selection['members']) || !is_array($selection['overrides'] ?? null)) {
+				$errors[] = gettext('The policy selection could not be read. Reload the form and try again.');
+			} else {
+				$policy_inputs = ['members' => $selection['members']] + $selection['overrides'];
+				foreach ($selection['overrides'] as $field => $mode) {
+					if (!is_string($field) || !preg_match('/\A(?:primary|secondary)_check_[A-Za-z0-9][A-Za-z0-9_-]{0,31}\z/', $field) ||
+					    !is_string($mode) || !array_key_exists($mode, $service_modes)) {
+						$errors[] = gettext('Select a valid member service check requirement.');
+						break;
+					}
+				}
+			}
+		}
 		foreach ($columns[$collection] as $key => $label) {
 			if (in_array($key, $optional_fields, true)) {
 				if (!array_key_exists($key, $_POST)) {
@@ -104,7 +123,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 					$errors[] = sprintf(gettext('Enter a valid value for %s.'), $label);
 				}
 			} elseif ($key === 'members') {
-				$selected = $_POST[$key] ?? [];
+				$selected = $policy_inputs[$key] ?? [];
 				if (!is_array($selected) || array_filter($selected, 'is_string') !== $selected) {
 					$errors[] = gettext('Select valid members.');
 					$selected = [];
@@ -152,10 +171,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 				$override = $overrides[$member] ?? ['member' => $member];
 				foreach (array_keys($service_fields) as $field) {
 					$key = $field . '_' . $member;
-					if (!array_key_exists($key, $_POST)) {
+					if (!array_key_exists($key, $policy_inputs)) {
 						continue;
 					}
-					$mode = $_POST[$key];
+					$mode = $policy_inputs[$key];
 					if (!is_string($mode) || !array_key_exists($mode, $service_modes)) {
 						$errors[] = gettext('Select a valid member service check requirement.');
 					} elseif ($mode === '') {
@@ -318,6 +337,9 @@ elseif (!$display_form): ?>
 <?php else:
 	$form = new Form();
 	$form->setAction($url);
+	if ($collection === 'policies') {
+		$form->setAttribute('id', 'sdwan-policy-editor');
+	}
 	$form_titles = [
 		'members' => [gettext('Add member'), gettext('Edit member')],
 		'slas' => [gettext('Add performance SLA'), gettext('Edit performance SLA')],
@@ -407,5 +429,29 @@ elseif (!$display_form): ?>
 	}
 	$form->addGlobal(new Form_Button('cancel', gettext('Cancel'), $url, 'fa-solid fa-undo'));
 	print($form);
+if ($collection === 'policies'): ?>
+	<script>
+	events.push(function () {
+		const form = document.getElementById('sdwan-policy-editor');
+		form.addEventListener('formdata', function (event) {
+			const data = event.formData;
+			const members = data.getAll('members[]');
+			const selected = new Set(members);
+			const overrides = Object.create(null);
+			for (const [field, mode] of Array.from(data.entries())) {
+				const match = /^(?:primary|secondary)_check_([A-Za-z0-9][A-Za-z0-9_-]{0,31})$/.exec(field);
+				if (match) {
+					if (selected.has(':' + match[1])) {
+						overrides[field] = mode;
+					}
+					data.delete(field);
+				}
+			}
+			data.delete('members[]');
+			data.set('policy_selection', JSON.stringify({members, overrides}));
+		});
+	});
+	</script>
+<?php endif;
 endif;
 include('foot.inc');

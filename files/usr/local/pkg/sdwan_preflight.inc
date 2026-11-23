@@ -201,6 +201,13 @@ function sdwan_preflight_link_graph(array $interfaces): array {
 			}
 		}
 	}
+	foreach ((array)config_get_path('wireless/clone', []) as $clone) {
+		$name = $clone['cloneif'] ?? null;
+		$parent = $clone['if'] ?? null;
+		if (is_string($name) && $name !== '' && is_string($parent) && $parent !== '') {
+			$graph[$name] = [$parent];
+		}
+	}
 	return $graph;
 }
 
@@ -363,18 +370,75 @@ function sdwan_preflight_endpoint_covers(array $earlier, array $bound): bool {
 	    sdwan_preflight_prefixes_overlap($address, $bound_address);
 }
 
-function sdwan_preflight_rule_shadows(array $earlier, array $bound, string $family, string $ingress): bool {
+function sdwan_preflight_interface_groups(array $groups, string $ingress): array {
+	$names = [];
+	foreach ($groups as $group) {
+		$name = $group['ifname'] ?? null;
+		$members = $group['members'] ?? null;
+		if (is_string($name) && $name !== '' && is_string($members) &&
+		    in_array($ingress, preg_split('/\s+/', trim($members), -1, PREG_SPLIT_NO_EMPTY), true)) {
+			$names[] = $name;
+		}
+	}
+	return $names;
+}
+
+/* PF displays flags in bit order regardless of their order in config.xml. */
+function sdwan_tcp_flags_canonical(string $value): ?string {
+	if ($value === 'any') {
+		return $value;
+	}
+	$bits = 'FSRPAUEWe';
+	if (!preg_match('/\A([' . $bits . ']*)\/([' . $bits . ']+)\z/', $value, $parts) ||
+	    strspn($parts[1], $parts[2]) !== strlen($parts[1])) {
+		return null;
+	}
+	$order = str_split($bits);
+	return implode('', array_intersect($order, str_split($parts[1]))) . '/' .
+	    implode('', array_intersect($order, str_split($parts[2])));
+}
+
+function sdwan_preflight_tcp_flags(array $rule): ?string {
+	if (isset($rule['tcpflags_any'])) {
+		return 'any';
+	}
+	if (empty($rule['tcpflags2'])) {
+		return 'S/SA';
+	}
+	$names = ['fin' => 'F', 'syn' => 'S', 'rst' => 'R', 'psh' => 'P', 'ack' => 'A',
+	    'urg' => 'U', 'ece' => 'E', 'cwr' => 'W'];
+	$masks = [];
+	foreach (['tcpflags1', 'tcpflags2'] as $field) {
+		$value = $rule[$field] ?? '';
+		if (!is_string($value)) {
+			return null;
+		}
+		$flags = $value === '' ? [] : explode(',', $value);
+		if (array_diff($flags, array_keys($names))) {
+			return null;
+		}
+		$masks[] = implode('', array_map(static fn($flag) => $names[$flag], $flags));
+	}
+	return sdwan_tcp_flags_canonical(implode('/', $masks));
+}
+
+function sdwan_preflight_rule_shadows(array $earlier, array $bound, string $family, string $ingress,
+    array $interface_groups = []): bool {
 	/* Interface tabs are quick. Restrict this check to static predicates with
 	 * known semantics so local exemptions and partial traffic matches still work. */
 	$fields = ['type', 'interface', 'direction', 'ipprotocol', 'protocol', 'source', 'destination',
 	    'tracker', 'gateway', 'descr', 'created', 'updated', 'log', 'statetype', 'sched'];
-	return ($earlier['interface'] ?? '') === $ingress &&
+	$bound_protocol = $bound['protocol'] ?? '';
+	$earlier_protocol = $earlier['protocol'] ?? '';
+	$earlier_uses_tcp_flags = $earlier_protocol === 'tcp' || ($earlier['type'] ?? '') === 'pass';
+	return in_array($earlier['interface'] ?? '', [$ingress, ...$interface_groups], true) &&
 	    in_array($earlier['type'] ?? '', ['pass', 'block', 'reject'], true) &&
 	    in_array($earlier['direction'] ?? '', ['', 'in'], true) &&
 	    in_array($earlier['sched'] ?? '', ['', 'none'], true) &&
 	    in_array($earlier['ipprotocol'] ?? '', [$family, 'inet46'], true) &&
-	    in_array($earlier['protocol'] ?? '', ['', 'any', $bound['protocol'] ?? ''], true) &&
+	    in_array($earlier_protocol, ['', 'any', $bound_protocol], true) &&
 	    !array_diff(array_keys($earlier), $fields) &&
+	    ($bound_protocol !== 'tcp' || !$earlier_uses_tcp_flags || sdwan_preflight_tcp_flags($bound) === 'S/SA') &&
 	    sdwan_preflight_endpoint($earlier['source'] ?? null, $family, $ingress) &&
 	    sdwan_preflight_endpoint($earlier['destination'] ?? null, $family, $ingress) &&
 	    sdwan_preflight_endpoint_covers($earlier['source'], $bound['source']) &&
@@ -434,9 +498,15 @@ function sdwan_preflight_native_rules(array $native, string $group, string $fami
 		if (sdwan_preflight_unrestricted($rule['source']) && sdwan_preflight_unrestricted($rule['destination'])) {
 			return sdwan_preflight_error("Rule {$tracker} requires a specific source or destination.");
 		}
-		for ($preceding = 0; $preceding < $index; $preceding++) {
-			if (sdwan_preflight_rule_shadows($rules[$preceding], $rule, $family, $ingress)) {
-				return sdwan_preflight_error("An earlier rule on the same interface fully covers rule {$tracker}. Review rule order before binding.");
+		$interface_groups = sdwan_preflight_interface_groups((array)($native['interface_groups'] ?? []), $ingress);
+		foreach ($rules as $preceding => $earlier) {
+			if ($preceding >= $index && !$interface_groups) {
+				break;
+			}
+			/* pfSense evaluates interface groups before interface rules regardless of XML order. */
+			if (($preceding < $index || in_array($earlier['interface'] ?? '', $interface_groups, true)) &&
+			    sdwan_preflight_rule_shadows($earlier, $rule, $family, $ingress, $interface_groups)) {
+				return sdwan_preflight_error("An earlier interface or interface group rule fully covers rule {$tracker}. Review rule order before binding.");
 			}
 		}
 		$guard = $rules[$index + 1] ?? null;
@@ -459,8 +529,16 @@ function sdwan_preflight_native_rules(array $native, string $group, string $fami
 			'' => [!empty($rule['source']['port']) || !empty($rule['destination']['port']) ? 'tcp' : ''],
 			default => [$protocol],
 		};
+		$native_tcp_flags = $protocol === 'tcp' ? sdwan_preflight_tcp_flags($rule) : null;
+		if ($protocol === 'tcp' && $native_tcp_flags === null) {
+			return sdwan_preflight_error("Rule {$tracker} has an invalid TCP flags mask.");
+		}
 		$rule_pairs[$tracker] = ['guard' => (string)$guard_id, 'action' => $guard['type'],
-		    'explicit_tcp_flags' => !empty($rule['tcpflags2']),
+		    'interface_groups' => $interface_groups,
+		    'tcp_flags' => [
+		        'pass' => $native_tcp_flags ?? 'S/SA', 'guard' => $native_tcp_flags ?? 'any',
+		        'blocked' => !empty($rule['tcpflags2']) ? ($native_tcp_flags ?? 'any') : 'any',
+		    ],
 		    'state_policy' => !empty($rule['statepolicy']) ? $rule['statepolicy'] : ($native['statepolicy'] ?? null),
 		    'scope' => ['device' => $device, 'interface' => $ingress, 'family' => $family, 'protocols' => $protocols,
 		        'source' => $rule['source'], 'destination' => $rule['destination']]];

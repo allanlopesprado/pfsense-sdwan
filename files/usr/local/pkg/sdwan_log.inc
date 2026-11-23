@@ -121,11 +121,25 @@ function sdwan_log_plan(array $state, string $kind, array $snapshot, string $cau
 	}
 	foreach ($snapshot['steering'] ?? [] as $group => $binding) {
 		$choice = $binding['gateway'] ?? null;
-		$current['Group ' . sdwan_log_label((string)$group)] = [
+		$entry = [
 		    'choice' => $choice === null ? null : sdwan_log_label($choice), 'status' => 'forwarding',
 		];
+		$pool = $binding['pool'] ?? [];
+		if (is_array($pool) && count($pool) > 1) {
+			$pool = array_map('sdwan_log_label', $pool);
+			$entry['pool'] = hash('sha256', implode("\0", $pool));
+			$entry['choice'] = implode(', ', array_slice($pool, 0, 2));
+			if (count($pool) > 2) {
+				$entry['choice'] .= ' (+' . (count($pool) - 2) . ')';
+			}
+		}
+		$current['Group ' . sdwan_log_label((string)$group)] = $entry;
 	}
 	$reported = array_intersect_key($state['reported'] ?? [], $current);
+	$cursor = array_search($state['transition_cursor'] ?? null, array_keys($current), true);
+	if ($cursor !== false && ($state['count'] ?? 0) > 12) {
+		$current = array_slice($current, $cursor + 1, null, true) + array_slice($current, 0, $cursor + 1, true);
+	}
 	foreach ($current as $name => $next) {
 		$previous = $reported[$name] ?? null;
 		if ($previous === $next) {
@@ -146,7 +160,8 @@ function sdwan_log_plan(array $state, string $kind, array $snapshot, string $cau
 		$old = $previous['choice'] ?? null;
 		$new = $next['choice'];
 		if ($next['status'] === 'forwarding') {
-			$text = $new === null ? 'no forwarding target for new flows' : 'forwarding target ' . $new;
+			$text = $new === null ? 'no forwarding target for new flows' :
+			    (isset($next['pool']) ? 'forwarding pool ' : 'forwarding target ') . $new;
 			$text .= ' for the native filter to evaluate';
 		} elseif ($new === null) {
 			$text = 'no eligible path';
@@ -166,6 +181,7 @@ function sdwan_log_plan(array $state, string $kind, array $snapshot, string $cau
 		$entries[] = [($new === null || $next['status'] === 'degraded') ? LOG_WARNING : LOG_NOTICE,
 		    $name . ': ' . $text . '.'];
 		$reported[$name] = $next;
+		$state['transition_cursor'] = $name;
 		$state['count']++;
 	}
 	$state['reported'] = $reported;
@@ -173,16 +189,22 @@ function sdwan_log_plan(array $state, string $kind, array $snapshot, string $cau
 }
 
 function sdwan_log_event(string $kind, array $snapshot = [], string $cause = ''): void {
-	/* Nonblocking private runtime state also deduplicates separate --once
-	 * calls. A read-only /var/run falls back to this process's memory. */
+	/* The shared ledger deduplicates separate processes. On contention, a
+	 * short retry falls back to this process's ledger instead of losing events. */
 	static $fallback = [];
 	$handle = null;
 	try {
 		$handle = @fopen(SDWAN_SNAPSHOT_PATH . '.events', 'c+');
 		if (is_resource($handle)) {
 			if (!flock($handle, LOCK_EX | LOCK_NB)) {
-				return;
+				usleep(2000);
+				if (!flock($handle, LOCK_EX | LOCK_NB)) {
+					fclose($handle);
+					$handle = null;
+				}
 			}
+		}
+		if (is_resource($handle)) {
 			$contents = stream_get_contents($handle);
 			$old = is_string($contents) ? json_decode($contents, true) : null;
 		}
@@ -194,6 +216,10 @@ function sdwan_log_event(string $kind, array $snapshot = [], string $cause = '')
 			if (rewind($handle) && ftruncate($handle, 0)) {
 				fwrite($handle, $encoded);
 			}
+		}
+		if (is_resource($handle)) {
+			fclose($handle);
+			$handle = null;
 		}
 		foreach ($entries as [$priority, $message]) {
 			sdwan_log_emit($priority, $message);

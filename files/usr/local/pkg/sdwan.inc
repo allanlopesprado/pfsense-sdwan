@@ -208,7 +208,8 @@ function sdwan_vti_vip_path(array $index, mixed $interface): ?array {
 }
 
 function sdwan_vti_uses_split_connections(array $phase): bool {
-	return ($phase['iketype'] ?? '') === 'ikev1' || isset($phase['splitconn']);
+	/* Native IPsec defaults an absent or unknown version to IKEv1. */
+	return isset($phase['splitconn']) || !in_array($phase['iketype'] ?? '', ['auto', 'ikev2'], true);
 }
 
 /* A direct Phase 1 interface or a VIP chain can identify the assigned transport.

@@ -86,7 +86,7 @@ if ($group !== null) {
 		}
 	}
 }
-$sample = sdwan_ui_snapshot($sdwan);
+$sample = sdwan_ui_snapshot($sdwan, null, $sample_state);
 $winner = $sample['policies'][$policy_name]['selected'] ?? null;
 $member_gateways = array_column($sdwan['members'], 'gateway', 'name');
 $strategy = array_column($sdwan['policies'], 'strategy', 'name')[$policy_name] ?? '';
@@ -113,7 +113,7 @@ $pf_labels = [
 	'pending' => gettext('Active filter differs from the current decision'),
 	'requested' => gettext('Reload requested. Waiting for PF confirmation'),
 	'divergent' => gettext('Persistent divergence. Automatic retries exhausted'),
-	'expired' => gettext('No current observation. Inspect the observer before relying on the active rules'),
+	'observation_unavailable' => sdwan_ui_sample_notice($sample_state),
 	'unavailable' => gettext('Filter verification unavailable'),
 ];
 $inventory = sdwan_gateways();
@@ -124,7 +124,7 @@ $filter_status = match (true) {
 	$binding === null => null,
 	!$supported => 'unavailable',
 	!$binding_current => 'binding_changed',
-	$sample === null => 'expired',
+	$sample === null => 'observation_unavailable',
 	($steering['revision'] ?? null) !== sdwan_config_revision($binding) => 'observing',
 	default => sdwan_steering_pf_status($binding, $steering, $inventory, $rules, $binding_preview['rule_pairs']),
 };

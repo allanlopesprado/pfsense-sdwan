@@ -487,11 +487,9 @@ function sdwan_read_snapshot(?bool &$expired = null): ?array {
 }
 
 /* The configuration may have changed in System > Routing since the last poll. */
-function sdwan_current_snapshot(array $config, array $inventory, ?bool &$expired = null): ?array {
+function sdwan_current_snapshot(array $config, array $inventory, ?bool &$expired = null, ?bool &$identity_changed = null): ?array {
 	$snapshot = sdwan_read_snapshot($expired);
-	if (($snapshot['config_revision'] ?? null) !== sdwan_config_revision($config) ||
-	    ($snapshot['gateway_inventory_revision'] ?? null) !== sdwan_gateway_inventory_revision($config, $inventory)) {
-		return null;
-	}
-	return $snapshot;
+	$identity_changed = $snapshot !== null && ($snapshot['config_revision'] !== sdwan_config_revision($config) ||
+	    ($snapshot['gateway_inventory_revision'] ?? null) !== sdwan_gateway_inventory_revision($config, $inventory));
+	return $identity_changed ? null : $snapshot;
 }

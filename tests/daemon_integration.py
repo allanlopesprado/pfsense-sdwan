@@ -6,6 +6,7 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack
 import fcntl
 import json
+import os
 from pathlib import Path
 import shutil
 import socket
@@ -215,6 +216,30 @@ def run(binary, require_unix):
         assert list(sandbox.glob(".sdwan-*")) == []
         assert config_path.read_bytes() == original_config
         print("ok - degradation changes recommendation and atomically replaces the snapshot")
+
+        with ExitStack() as monitors:
+            configuration = fixture(sandbox)
+            configuration["fixture_live_dpinger_pid"] = os.getpid()
+            live = sandbox / "dpinger_GW_A~192.0.2.100~192.0.2.1.pid"
+            stale = sandbox / "dpinger_GW_A~192.0.2.252~192.0.2.1.pid"
+            for pidfile, pid in ((live, os.getpid()), (stale, 999_999)):
+                pidfile.write_text(str(pid))
+                monitors.callback(pidfile.unlink)
+            # Native enumeration retains only the lexicographically last PID.
+            configuration["processes"]["GW_A"].update(pidfile=str(stale), srcip="192.0.2.252",
+                                                      socket=str(stale.with_suffix(".sock")))
+            live_listener = monitors.enter_context(socket.socket(socket.AF_UNIX, socket.SOCK_STREAM))
+            live_listener.bind(str(live.with_suffix(".sock")))
+            monitors.callback(live.with_suffix(".sock").unlink)
+            live_listener.listen()
+            live_listener.settimeout(5)
+            reply = workers.submit(answer, live_listener, healthy["GW_A"])
+            recovered = observe(configuration, {"GW_B": healthy["GW_B"]})
+            reply.result()
+            assert recovered["policies"]["calls"]["selected"] == "a"
+            assert recovered["members"]["a"]["rtt_ms"] == 20
+        snapshot.write_text(json.dumps(second))
+        print("ok - a stale native PID cannot hide the live dpinger endpoint")
 
         current = ("require 'sdwan.inc'; require 'sdwan_engine.inc'; "
                    "echo json_encode(sdwan_current_snapshot(sdwan_get_config(), sdwan_gateways()));")

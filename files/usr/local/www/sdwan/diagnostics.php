@@ -23,7 +23,7 @@ if (sdwan_ui_scalar($_GET, 'traffic') === 'sample') {
 	}
 	exit;
 }
-$snapshot = sdwan_ui_snapshot($sdwan, $inventory);
+$snapshot = sdwan_ui_snapshot($sdwan, $inventory, $sample_state);
 $result = $snapshot['policies'][$selected_policy] ?? null;
 $slas = array_column($sdwan['slas'], null, 'name');
 $pgtitle = [gettext('Services'), gettext('SD-WAN'), gettext('Diagnostics')];
@@ -97,12 +97,7 @@ if ($policy !== null):
 			<?php endif; ?>
 		</div>
 		<?php if ($result === null) {
-			$notice = match (sdwan_service_state()) {
-				'stopped' => gettext('The SD-WAN service is stopped.'),
-				'unregistered' => gettext('The SD-WAN service is not registered in Status > Services.'),
-				default => gettext('No current sample for this policy. Check gateway monitoring.'),
-			};
-			print_info_box($notice, 'warning', false);
+			print_info_box(sdwan_ui_sample_notice($sample_state), 'warning', false);
 		} ?>
 	</div>
 	<?php if ($result !== null): ?>

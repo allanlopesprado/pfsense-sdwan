@@ -41,10 +41,14 @@ function update_status($message) {
 }
 """ + hook + "\necho json_encode([$calls, $services, $writes, $progress]);"
     rcfile = "/usr/local/etc/rc.d/sdwand.sh "
-    current = [{"name": "other", "rcfile": "other.sh"}, {"name": "sdwan", "rcfile": "sdwand.sh"},
+    current = [{"name": "other", "rcfile": "other.sh"}, {"name": "sdwan", "rcfile": "sdwand.sh",
+               "custom_php_service_status_command": "mwexec('/usr/local/etc/rc.d/sdwand.sh service_status', true) === 0"},
                {"name": "sdwand", "rcfile": "unrelated.sh"}]
     legacy = {"name": "sdwand", "rcfile": "sdwand.sh"}
-    for status, action, services, writes in [(0, "restart", [legacy, *current, legacy], 1), (1, "start", current, 0)]:
+    old_status = {"name": "sdwan", "rcfile": "sdwand.sh",
+                  "custom_php_service_status_command": "mwexec('/usr/local/etc/rc.d/sdwand.sh status', true) === 0"}
+    for status, action, services, writes in [(0, "restart", [legacy, current[0], old_status, current[2], legacy], 2),
+                                           (1, "start", current, 0)]:
         messages = {
             0: f"SD-WAN observer {action} requested. Check Services > SD-WAN > Status for a current observation.",
             1: f"SD-WAN observer {action} failed (exit 1). Package registration continues. "
@@ -72,6 +76,7 @@ def check_shell_hooks(tmp, php):
     commit = tmp / "sdwan-filter-commit.json"
     pid = tmp / "sdwand.pid"
     watchdog_pid = tmp / "sdwan-expiry.pid"
+    heartbeat = tmp / "sdwan-expiry.heartbeat"
     removal_ready = tmp / "sdwan-package-removal.ready"
     fpm_pid = tmp / "php-fpm.pid"
     service = tmp / "rc.d" / "sdwand.sh"
@@ -130,6 +135,7 @@ function delete_package_xml($name, $phase) {
             ("/var/run/sdwan-filter-commit.json", str(commit)),
             ("/var/run/sdwand.pid", str(pid)),
             ("/var/run/sdwan-expiry.pid", str(watchdog_pid)),
+            ("/var/run/sdwan-expiry.heartbeat", str(heartbeat)),
             ("/var/run/sdwan-package-removal.ready", str(removal_ready)),
             ("/var/run/sdwan-settings.lock", str(settings_lock)),
             ("/var/run/sdwan-package-upgrade.lock", str(upgrade_lock)),
@@ -170,12 +176,13 @@ function delete_package_xml($name, $phase) {
     if calls() or "rc.packages pfSense-pkg-SDWAN POST-INSTALL" not in deferred.stderr:
         raise AssertionError("Missing PHP-FPM must defer registration and show how to resume")
     fpm_pid.touch()
+    heartbeat.touch()
     run("install", "POST-INSTALL", PKG_UPGRADE="true")
     run("deinstall", "DEINSTALL")
     assert removal_ready.exists()
     run("deinstall", "POST-DEINSTALL")
     assert not removal_ready.exists()
-    if state.exists() or log_state.exists():
+    if state.exists() or log_state.exists() or heartbeat.exists():
         raise AssertionError("Runtime measurement or event suppression state survived removal")
     expected = ["-f /etc/rc.packages pfSense-pkg-SDWAN POST-INSTALL", "service stop",
                 "-f /etc/rc.packages pfSense-pkg-SDWAN DEINSTALL",

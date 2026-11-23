@@ -152,6 +152,20 @@ foreach ([
 	preflight_check($n, $allowed, 'earlier rule ' . $label);
 }
 $n = $native;
+$n['interface_groups'] = [['ifname' => 'BranchLANs', 'members' => 'lan  opt99']];
+$n['rules'][] = array_replace($earlier, ['interface' => 'BranchLANs']);
+preflight_check($n, false, 'an interface group precedes the ingress rule even when listed after it in XML');
+$n['interface_groups'][0]['members'] = 'opt99';
+preflight_check($n, true, 'an interface group without the ingress interface cannot cover it');
+$n = $native;
+$n['rules'][0] += ['tcpflags1' => 'syn,cwr', 'tcpflags2' => 'ack,cwr,syn'];
+$n['rules'][1] = guard_for($n['rules'][0]);
+$mask_preview = sdwan_steering_preflight($config, 'Office', 'BRANCH', $n);
+if (($mask_preview['rule_pairs'][$n['rules'][0]['tracker']]['tcp_flags'] ?? null) !==
+    ['pass' => 'SW/SAW', 'guard' => 'SW/SAW', 'blocked' => 'SW/SAW']) {
+	throw new Exception('Preflight must preserve the effective native flags for all rule modes.');
+}
+$n = $native;
 $n['gateways']['ISP_A']['monitor'] = '192.0.2.45';
 $n['gateways']['ISP_B']['monitor'] = '192.0.2.45';
 preflight_check($n, false, 'shared static IPv4 monitor');
@@ -348,6 +362,10 @@ $current = [
 	'laggs/lagg' => [['laggif' => 'lagg0', 'members' => 'igb1,igb2']],
 	'bridges/bridged' => [['bridgeif' => 'bridge0', 'members' => 'opt99,lan']],
 	'ppps/ppp' => [['if' => 'pppoe0', 'ports' => 'igb0.20']],
+	'wireless/clone' => [
+		['cloneif' => 'ath0_wlan0', 'if' => 'ath0'], ['cloneif' => 'ath0_wlan1', 'if' => 'ath0'],
+		['cloneif' => 'ath1_wlan0', 'if' => 'ath1'],
+	],
 ];
 $n = $native;
 $n['interfaces']['opt99'] = ['enable' => '', 'if' => 'lagg0.40'];
@@ -376,6 +394,11 @@ preflight_check($topology, false, 'recursive link dependency cannot be establish
 $n['interfaces']['wan']['if'] = 'igb2';
 $n['interfaces']['opt1']['if'] = 'bridge0';
 preflight_check($n, false, 'bridge contains VLAN on the other WAN port');
+$n['interfaces']['wan']['if'] = 'ath0_wlan0';
+$n['interfaces']['opt1']['if'] = 'ath0_wlan1';
+preflight_check($n, false, 'wireless clones on the same radio share a physical link');
+$n['interfaces']['opt1']['if'] = 'ath1_wlan0';
+preflight_check($n, true, 'wireless clones with distinct radios remain independent');
 
 $n = $vti;
 $n['links'] = sdwan_preflight_link_graph($n['interfaces']);

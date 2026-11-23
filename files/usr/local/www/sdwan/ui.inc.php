@@ -49,11 +49,29 @@ function sdwan_ui_choice_value(string $value): string {
 	return str_starts_with($value, ':') ? substr($value, 1) : $value;
 }
 
-function sdwan_ui_snapshot(array $config, ?array $inventory = null): ?array {
-	if (sdwan_service_state() !== 'running') {
+function sdwan_ui_snapshot(array $config, ?array $inventory = null, ?string &$state = null): ?array {
+	$state = sdwan_service_state();
+	if ($state !== 'running') {
 		return null;
 	}
-	return sdwan_current_snapshot($config, $inventory ?? sdwan_gateways());
+	$snapshot = sdwan_current_snapshot($config, $inventory ?? sdwan_gateways(), $expired, $changed);
+	$state = match (true) {
+		$snapshot !== null => 'current',
+		$expired => 'expired',
+		$changed => 'changed',
+		default => 'unavailable',
+	};
+	return $snapshot;
+}
+
+function sdwan_ui_sample_notice(string $state): string {
+	return match ($state) {
+		'stopped' => gettext('The SD-WAN service is stopped.'),
+		'unregistered' => gettext('The SD-WAN service is not registered in Status > Services.'),
+		'expired' => gettext('The last SD-WAN observation expired.'),
+		'changed' => gettext('Waiting for an observation of the current configuration or gateway paths.'),
+		default => gettext('No current observation. Check gateway monitoring.'),
+	};
 }
 
 /* Read native interface counters for Diagnostics without involving the observer or PF. */

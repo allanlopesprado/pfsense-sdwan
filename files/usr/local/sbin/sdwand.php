@@ -18,15 +18,26 @@ require_once('/usr/local/pkg/sdwan_log.inc');
  * Read the four fields of the native pfSense dpinger status socket. Bound the
  * read time. An initializing monitor returns all zeros, not a healthy sample.
  */
-function sdwan_sample_socket(array $process, string $name): ?array {
-	$socket = @stream_socket_client('unix://' . $process['socket'], $errno, $error, 0.25);
+function sdwan_sample_socket(array $process, array $gateway, string $name, int $deadline): ?array {
+	if (!sdwan_monitor_matches($gateway, $process) ||
+	    (isset($process['pidfile']) && !@isvalidpid($process['pidfile']))) {
+		return null;
+	}
+	$remaining = intdiv($deadline - hrtime(true), 1000);
+	if ($remaining <= 0) {
+		return null;
+	}
+	$socket = @stream_socket_client('unix://' . $process['socket'], $errno, $error, $remaining / 1_000_000);
 	if ($socket === false) {
 		return null;
 	}
 	try {
-		stream_set_timeout($socket, 0, 250000);
+		$remaining = intdiv($deadline - hrtime(true), 1000);
+		if ($remaining <= 0 || !stream_set_timeout($socket, 0, $remaining)) {
+			return null;
+		}
 		$line = fgets($socket, 512);
-		if (!is_string($line) || stream_get_meta_data($socket)['timed_out']) {
+		if (!is_string($line) || !str_ends_with($line, "\n") || stream_get_meta_data($socket)['timed_out']) {
 			return null;
 		}
 	} finally {
@@ -35,8 +46,24 @@ function sdwan_sample_socket(array $process, string $name): ?array {
 	return sdwan_parse_dpinger_line($line, $name);
 }
 
+/* The native lookup retains only the last PID filename for each gateway.
+ * Keep alternatives when stale files hide the process for the current path. */
+function sdwan_dpinger_candidates(): array {
+	$processes = [];
+	foreach (glob(dirname(SDWAN_SNAPSHOT_PATH) . '/dpinger_*.pid') ?: [] as $pidfile) {
+		if (preg_match('/^dpinger_(.+)~([^~]+)~([^~]+)\.pid$/D', basename($pidfile), $parts)) {
+			$processes[$parts[1]][] = [
+				'srcip' => $parts[2], 'targetip' => $parts[3], 'pidfile' => $pidfile,
+				'socket' => substr($pidfile, 0, -4) . '.sock',
+			];
+		}
+	}
+	return $processes;
+}
+
 function sdwan_gateway_observations(array $names, array $inventory): array {
 	$processes = running_dpinger_processes();
+	$candidates = null;
 	$defaults = return_dpinger_defaults();
 	$observations = [];
 	foreach (array_unique($names) as $name) {
@@ -49,10 +76,23 @@ function sdwan_gateway_observations(array $names, array $inventory): array {
 			continue;
 		}
 		$process = $processes[$name] ?? null;
-		if ($process === null || !sdwan_monitor_matches($gateway, $process)) {
-			continue;
+		$deadline = hrtime(true) + 250_000_000;
+		$values = $process !== null ? sdwan_sample_socket($process, $gateway, $name, $deadline) : null;
+		if ($values === null) {
+			$candidates ??= sdwan_dpinger_candidates();
+			foreach ($candidates[$name] ?? [] as $candidate) {
+				if (hrtime(true) >= $deadline) {
+					break;
+				}
+				if ($candidate['socket'] === ($process['socket'] ?? null)) {
+					continue;
+				}
+				$values = sdwan_sample_socket($candidate, $gateway, $name, $deadline);
+				if ($values !== null) {
+					break;
+				}
+			}
 		}
-		$values = sdwan_sample_socket($process, $name);
 		if ($values === null) {
 			continue;
 		}
@@ -262,6 +302,7 @@ function sdwan_observe_once(): void {
  * supervisor only reads the atomic snapshot and waits on the native filter. */
 function sdwan_expiry_watchdog(): never {
 	sdwan_load_steering();
+	$heartbeat = dirname(SDWAN_SNAPSHOT_PATH) . '/sdwan-expiry.heartbeat';
 	$previous = [];
 	$withdrawal = null;
 	$attempts = 0;
@@ -269,6 +310,9 @@ function sdwan_expiry_watchdog(): never {
 	for (;;) {
 		try {
 			clearstatcache();
+			if (!sdwan_steering_write_receipt($heartbeat, ['pid' => getmypid(), 'updated_ns' => hrtime(true)])) {
+				sdwan_log_event('filter_expiry_unconfirmed');
+			}
 			$pending = sdwan_steering_watchdog_pending($withdrawal);
 			if ($pending === null) {
 				sdwan_log_event('filter_expiry_unconfirmed');

@@ -282,6 +282,8 @@ def exercise(ce, benchmark, qemu, cleanup, provider):
         measure(ce, qemu, "dns_aaaa_missing", ("DNS check failed", "DNS check failed"), (True, True))
         measure(ce, qemu, "https_expected_marker", ("Passed", "Passed"), (True, True))
         mismatch = "HTTPS response marker mismatch"
+        measure(ce, qemu, "https_large", ("Passed", "Passed"), (True, True))
+        measure(ce, qemu, "https_large_marker", (mismatch, mismatch), (True, True))
         measure(ce, qemu, "https_wrong_marker", (mismatch, mismatch), (True, True))
         measure(ce, qemu, "https_wrong_name", ("HTTPS check failed", "HTTPS check failed"), (True, True))
         ce.command(qemu, f"route -n delete -host {TARGET} -fib 2")

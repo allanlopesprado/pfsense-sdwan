@@ -34,6 +34,33 @@ set_error_handler(function ($severity, $message, $file) use ($classes) {
 $installed_release = $request['installed_release'] ?? '0.4.7';
 $upgrade_calls = 0;
 $rollback_calls = 0;
+
+function g_get($key, $default) {
+	if ($key !== 'varrun_path') {
+		return $default;
+	}
+	static $runtime = null;
+	if ($runtime === null) {
+		$runtime = $GLOBALS['web'] . '/runtime-' . bin2hex(random_bytes(6));
+		mkdir($runtime, 0700);
+	}
+	return $runtime;
+}
+
+function fixture_update_registration(): void {
+	global $disk, $current, $installed_release, $request;
+	if (!empty($request['registration_failure']) && $installed_release === '0.4.8') {
+		return;
+	}
+	foreach (['version' => $installed_release, 'configurationfile' => 'sdwan.xml'] as $key => $value) {
+		$disk["installedpackages/package/0/{$key}"] = $current["installedpackages/package/0/{$key}"] = $value;
+	}
+}
+
+function get_package_id($name) {
+	return $name === 'SDWAN' ? 0 : -1;
+}
+
 function pkg_exec($query, &$stdout, &$stderr) {
 	global $installed_release, $upgrade_calls, $rollback_calls, $request, $config;
 	$stderr = '';
@@ -46,21 +73,24 @@ function pkg_exec($query, &$stdout, &$stderr) {
 			return 1;
 		}
 		file_put_contents($arguments[2] . "/pfSense-pkg-SDWAN-{$installed_release}.pkg", 'previous package fixture');
-	} elseif (str_starts_with($query, 'query -F ')) {
+	} elseif (str_starts_with($query, 'info --raw --raw-format json -F ')) {
 		$archive_version = str_contains($query, 'pfSense-pkg-SDWAN-0.4.8.pkg') ? '0.4.8' : $installed_release;
-		$stdout = "pfSense-pkg-SDWAN {$archive_version} net/pfSense-pkg-SDWAN";
+		$stdout = json_encode(['name' => 'pfSense-pkg-SDWAN', 'version' => $archive_version,
+		    'origin' => 'net/pfSense-pkg-SDWAN', 'prefix' => '/usr/local', 'abi' => 'FreeBSD:16:*']);
 	} elseif (str_starts_with($query, '-o DEVELOPER_MODE=yes add -f ')) {
 		$rollback_calls++;
 		if (!empty($request['rollback_failure'])) {
 			return 1;
 		}
 		$installed_release = '0.4.7';
+		fixture_update_registration();
 	} elseif (str_starts_with($query, '-o DEVELOPER_MODE=yes add ')) {
 		$upgrade_calls++;
+		$installed_release = '0.4.8';
+		fixture_update_registration();
 		if (!empty($request['install_failure'])) {
 			return 1;
 		}
-		$installed_release = '0.4.8';
 		if (!empty($request['install_hook_failure'])) {
 			$stdout = "pkg-static: POST-INSTALL script failed\n";
 		}
@@ -103,9 +133,10 @@ if ($page === 'updates') {
 		$release_http[array_key_last($release_http)]['body'] = str_repeat('x', strlen($archive));
 	}
 	register_shutdown_function(static function () {
+		$recovery = g_get('varrun_path', '') . '/sdwan-package-recovery/state.json';
 		echo "\nUPGRADES=" . $GLOBALS['upgrade_calls'] . ' HTTP=' . http_response_code() .
 		    ' REQUESTS=' . count($GLOBALS['release_requests'] ?? []) .
-		    ' ROLLBACKS=' . $GLOBALS['rollback_calls'] . "\n";
+		    ' ROLLBACKS=' . $GLOBALS['rollback_calls'] . ' RECOVERY=' . (int)is_file($recovery) . "\n";
 	});
 }
 function isAllowedPage($url) {
@@ -147,6 +178,15 @@ $GLOBALS['csrf'] = [];
 session_id('sdwan-editor-fixture');
 $_COOKIE['PHPSESSID'] = session_id();
 $disk = $current = $request['native'];
+if ($page === 'updates') {
+	$disk['installedpackages/menu'] = $current['installedpackages/menu'] = [
+	    ['configfile' => 'sdwan.xml', 'url' => '/sdwan/status.php', 'section' => 'Services'],
+	];
+	$disk['installedpackages/service'] = $current['installedpackages/service'] = [
+	    ['name' => 'sdwan', 'rcfile' => 'sdwand.sh'],
+	];
+	fixture_update_registration();
+}
 $config = $request['config'];
 $disk[SDWAN_CONFIG_PATH] = $current[SDWAN_CONFIG_PATH] = sdwan_encode_config($config);
 $writes = 0;

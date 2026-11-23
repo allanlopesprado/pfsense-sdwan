@@ -53,6 +53,30 @@ function mwexec($command, $quiet): int {
 	return 0; // Model a ready supervisor while the isolated root deliberately skips pfSense hooks.
 }
 
+function g_get($key, $default) {
+	return $key === 'varrun_path' ? $GLOBALS['arg_root'] . '/var/run' : $default;
+}
+
+function config_read_file($use_backup, $use_cache): bool {
+	check(!$use_backup && !$use_cache);
+	return true;
+}
+
+function get_package_id($name) {
+	return $name === 'SDWAN' ? 0 : -1;
+}
+
+function config_get_path($path, $default = null) {
+	return match ($path) {
+		'installedpackages/package/0/version' => sdwan_release_installed(),
+		'installedpackages/package/0/configurationfile' => 'sdwan.xml',
+		'installedpackages/menu' => [['configfile' => 'sdwan.xml', 'url' => '/sdwan/status.php', 'section' => 'Services']],
+		'installedpackages/service' => $GLOBALS['registration_failure'] && sdwan_release_installed() === $GLOBALS['version'] ?
+		    [] : [['name' => 'sdwan', 'rcfile' => 'sdwand.sh']],
+		default => $default,
+	};
+}
+
 $version = $argv[3] ?? '0.4.8';
 $arg_root = $argv[2] ?? null;
 $baseline = $argv[5] ?? null;
@@ -66,6 +90,7 @@ $release = $target + ['maturity' => 'experimental'];
 $pkg_adds = 0;
 $pkg_rollbacks = 0;
 $fail_after_native_add = null;
+$registration_failure = false;
 
 
 check(sdwan_release_check() === $release);
@@ -73,6 +98,10 @@ check(sdwan_release_asset_size($release) === strlen($archive));
 if ($arg_root !== null) {
 	// Under FreeBSD, every package command operates on the real isolated pkg database.
 	check(sdwan_release_installed() === $baseline);
+	$varrun = g_get('varrun_path', '/var/run');
+	check(is_dir($varrun) || mkdir($varrun, 0700, true));
+	$recovery = sdwan_release_recovery_dir();
+	$backup = $recovery . '/pfSense-pkg-SDWAN-' . $baseline . '.pkg';
 	$release_http[$package]['body'] = substr($archive, 0, 80);
 	$release_http[$package]['ok'] = false;
 	check(sdwan_release_upgrade($target) === 'download' && $pkg_adds === 0);
@@ -83,17 +112,28 @@ if ($arg_root !== null) {
 	check(sdwan_release_installed() === $baseline);
 	$release_http = $index_http;
 	$fail_after_native_add = 'exit';
-	check(sdwan_release_upgrade($target) === 'rolled_back' && $pkg_adds === 1 && $pkg_rollbacks === 1);
+	check(sdwan_release_upgrade($target) === 'rollback_verify' && $pkg_adds === 1 && $pkg_rollbacks === 1);
 	check(sdwan_release_installed() === $baseline && sdwan_release_files_intact($baseline));
+	check(is_file($backup) && sdwan_release_read_recovery($recovery)['previous'] === $baseline);
+	check(sdwan_release_upgrade($target) === 'recovery_pending' && $pkg_adds === 1);
+	sdwan_release_clear_recovery($recovery, $backup);
 	$fail_after_native_add = 'hook';
-	check(sdwan_release_upgrade($target) === 'rolled_back' && $pkg_adds === 2 && $pkg_rollbacks === 2);
+	check(sdwan_release_upgrade($target) === 'rollback_verify' && $pkg_adds === 2 && $pkg_rollbacks === 2);
 	check(sdwan_release_installed() === $baseline && sdwan_release_files_intact($baseline));
+	check(is_file($backup));
+	sdwan_release_clear_recovery($recovery, $backup);
 	$fail_after_native_add = null;
-	check(sdwan_release_upgrade($target) === 'verify' && $pkg_adds === 3 && $pkg_rollbacks === 2);
+	$registration_failure = true;
+	check(sdwan_release_upgrade($target) === 'rollback_verify' && $pkg_adds === 3 && $pkg_rollbacks === 3);
+	check(sdwan_release_installed() === $baseline && is_file($backup));
+	sdwan_release_clear_recovery($recovery, $backup);
+	$registration_failure = false;
+	check(sdwan_release_upgrade($target) === 'verify' && $pkg_adds === 4 && $pkg_rollbacks === 3);
 	check(sdwan_release_installed() === $version);
 	$release_requests = [];
-	check(sdwan_release_upgrade($target) === 'verify' && $pkg_adds === 3 && $release_requests === []);
-	echo "ok - bad downloads preserve the package, installation and hook failures roll back, readiness retry stays local\n";
+	check(sdwan_release_upgrade($target) === 'verify' && $pkg_adds === 4 && $release_requests === [] && is_file($backup));
+	sdwan_release_clear_recovery($recovery, $backup);
+	echo "ok - bad downloads preserve the package, installation and registration failures roll back, pending recovery retains the archive\n";
 	exit;
 }
 

@@ -100,6 +100,28 @@ if ($action === 'probe') {
 
 require_once('config.inc');
 require_once('/usr/local/pkg/sdwan_steering.inc');
+if ($action === 'release_manifest' || $action === 'release_readiness') {
+    require_once('pkg-utils.inc');
+    require_once('/usr/local/pkg/sdwan_release.inc');
+    $version = $argv[2] ?? '';
+    if (!sdwan_release_pkg_version($version)) {
+        throw new InvalidArgumentException('Expected the candidate package version');
+    }
+    if ($action === 'release_manifest') {
+        if (!sdwan_release_manifest_matches('/root/sdwan-lab/candidate.pkg', $version)) {
+            throw new RuntimeException('Candidate did not pass the updater full manifest check');
+        }
+        echo 'UPDATER_FULL_MANIFEST_OK version=', $version, PHP_EOL;
+        exit;
+    }
+    $since = isset($argv[3]) ? (int)$argv[3] : null;
+    $status = sdwan_release_verify_safely($version, $since, true);
+    $guard_required = (bool)config_get_path('gateways/sdwan_bindings/item', []) && sdwan_steering_supported();
+    echo json_encode(['verification' => $status, 'registered' => sdwan_release_registered($version),
+        'guard_required' => $guard_required, 'guard_ready' => $guard_required && sdwan_release_watchdog_ready()],
+        JSON_THROW_ON_ERROR), PHP_EOL;
+    exit;
+}
 if ($action === 'floating_erp_block') {
     $mode = $argv[2] ?? '';
     if (!in_array($mode, ['on', 'off'], true)) {
@@ -127,6 +149,8 @@ if ($action === 'package_fib_probe') {
         'dns_aaaa' => 'dns://service.sdwan.test 192.0.2.168 type=AAAA',
         'dns_aaaa_missing' => 'dns://ipv4only.service.sdwan.test 192.0.2.168 type=AAAA',
         'https' => 'https://service.sdwan.test/healthz 192.0.2.168',
+        'https_large' => 'https://service.sdwan.test/healthz-large 192.0.2.168',
+        'https_large_marker' => 'https://service.sdwan.test/healthz-large 192.0.2.168 expect=ok',
         'https_expected_marker' => 'https://service.sdwan.test/healthz 192.0.2.168 expect=ok',
         'https_wrong_marker' => 'https://service.sdwan.test/healthz 192.0.2.168 expect=ready',
         'https_wrong_name' => 'https://other.sdwan.test/healthz 192.0.2.168',

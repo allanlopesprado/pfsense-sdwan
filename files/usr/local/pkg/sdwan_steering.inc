@@ -76,6 +76,7 @@ function sdwan_steering_native(?array $inventory = null): array {
 		'phase1' => 'ipsec/phase1', 'phase2' => 'ipsec/phase2', 'vips' => 'virtualip/vip',
 		'openvpn_servers' => 'openvpn/openvpn-server', 'openvpn_clients' => 'openvpn/openvpn-client',
 		'dyndns' => 'dyndnses/dyndns', 'dnsupdates' => 'dnsupdates/dnsupdate', 'interfaces' => 'interfaces',
+		'interface_groups' => 'ifgroups/ifgroupentry',
 	];
 	$native = ['steering_abi' => sdwan_steering_abi()];
 	foreach ($paths as $key => $path) {
@@ -1006,7 +1007,7 @@ function sdwan_steering_retire_observation(bool $startup = false): bool {
 /* Compare the packet selectors reflected by PF on a bound rule and its native
  * fallback, independent of action, logging, route selection and TCP state. */
 function sdwan_steering_loaded_scope(string $rule): ?string {
-	if (!preg_match('/^(?:pass|block(?: (?:drop|return\S*(?: \([^)]*\))?))?) in (?:log(?: \([^)]*\))? )?quick on ([a-z0-9_.-]+) (.+)$/D',
+	if (!preg_match('/^(?:pass|block(?: (?:drop|return\S*(?: \([^)]*\))?))?) in (?:log(?: \([^)]*\))? )?quick on ([A-Za-z0-9_.-]+) (.+)$/D',
 	    $rule, $parts)) {
 		return null;
 	}
@@ -1017,7 +1018,7 @@ function sdwan_steering_loaded_scope(string $rule): ?string {
 }
 
 function sdwan_steering_scope_fields(string $scope, bool $options = false): ?array {
-	if (!preg_match('/^([a-z0-9_.-]+) (inet6?)(?: proto ([a-z0-9_-]+))? (.*)$/D', $scope, $head)) {
+	if (!preg_match('/^([A-Za-z0-9_.-]+) (inet6?)(?: proto ([a-z0-9_-]+))? (.*)$/D', $scope, $head)) {
 		return null;
 	}
 	[, $device, $family, $protocol, $match] = $head;
@@ -1100,24 +1101,36 @@ function sdwan_steering_scope_matches(array $actual, array $expected): bool {
 	return true;
 }
 
+function sdwan_steering_loaded_tcp_flags(string $rule): ?string {
+	return preg_match('/\bflags\s+(any|[A-Za-z]*\/[A-Za-z]+)(?=\s|$)/', $rule, $flags) ?
+	    sdwan_tcp_flags_canonical($flags[1]) : 'any';
+}
+
 /* Prove full coverage for plain quick rules. Rules with extra match options,
  * anchors, aliases or partial overlap require a traffic test. */
-function sdwan_steering_loaded_shadow(array $lines, int $position, string $scope): bool {
+function sdwan_steering_loaded_shadow(array $lines, int $position, string $scope, array $interface_groups = []): bool {
 	$bound = sdwan_steering_scope_fields($scope);
 	if ($bound === null) {
 		return false;
 	}
+	$devices = [$bound['device'], ...$interface_groups];
+	[$bound_rule] = explode(' label "', $lines[$position], 2);
+	$bound_flags = sdwan_steering_loaded_tcp_flags($bound_rule);
 	for ($i = 0; $i < $position; $i++) {
 		$rule = preg_replace('/\s+label "(?:[^"\\\\]|\\\\.)*"/', '', $lines[$i]);
-		$rule = preg_replace('/(?: flags (?:any|S\/SA))?(?:(?: keep state(?: \((?:if-bound|floating)\))?)| no state)?' .
+		$flags = sdwan_steering_loaded_tcp_flags($rule);
+		if ($flags === null || ($flags !== 'any' && $flags !== $bound_flags)) {
+			continue;
+		}
+		$rule = preg_replace('/(?: flags (?:any|[A-Za-z]*\/[A-Za-z]+))?(?:(?: keep state(?: \((?:if-bound|floating)\))?)| no state)?' .
 		    '(?: ridentifier [0-9]+)?$/D', '', $rule);
-		if (!preg_match('/^(?:pass|block(?: (?:drop|return))?) (?:in )?(?:log(?: \([^)]*\))? )?quick ' .
-		    '(?:on ([a-z0-9_.-]+) )?(?:(inet6?) )?((?:proto [a-z0-9_-]+ )?(?:all|from .+))$/D', $rule, $match)) {
+		if (!preg_match('/^(?:pass|block(?: (?:drop|return\S*(?: \([^)]*\))?))?) (?:in )?(?:log(?: \([^)]*\))? )?quick ' .
+		    '(?:on ([A-Za-z0-9_.-]+) )?(?:(inet6?) )?((?:proto [a-z0-9_-]+ )?(?:all|from .+))$/D', $rule, $match)) {
 			continue;
 		}
 		$prior = sdwan_steering_scope_fields(($match[1] ?: $bound['device']) . ' ' .
 		    ($match[2] ?: $bound['family']) . ' ' . $match[3]);
-		if ($prior !== null && $prior['device'] === $bound['device'] && $prior['family'] === $bound['family'] &&
+		if ($prior !== null && in_array($prior['device'], $devices, true) && $prior['family'] === $bound['family'] &&
 		    ($prior['protocol'] === '' || $prior['protocol'] === $bound['protocol']) &&
 		    sdwan_preflight_endpoint($prior['source'], $prior['family'], $bound['source']['network'] ?? '') &&
 		    sdwan_preflight_endpoint($prior['destination'], $prior['family'], $bound['destination']['network'] ?? '') &&
@@ -1206,6 +1219,12 @@ function sdwan_steering_pf_status(array $binding, array $state, array $inventory
 			}
 			$protocol = $actual['protocol'];
 		}
+		$flags_role = !$is_bound ? 'guard' : ($target === null ? 'blocked' : 'pass');
+		$expected_flags = $pair['tcp_flags'][$flags_role] ?? null;
+		if ($expected_flags !== null && in_array($protocol, ['', 'tcp'], true) &&
+		    sdwan_steering_loaded_tcp_flags($rule) !== $expected_flags) {
+			return 'pending';
+		}
 		$key = $identifier . ':' . $protocol;
 		if (!$is_bound) {
 			if (isset($guards[$key]) || !str_starts_with($rule, 'block ')) {
@@ -1218,9 +1237,7 @@ function sdwan_steering_pf_status(array $binding, array $state, array $inventory
 			return 'pending';
 		}
 		if ($target === null) {
-			if (!preg_match('/^block (?:drop |return\S*(?: \([^)]*\))? )?in (?:log(?: \([^)]*\))? )?quick on /', $rule) ||
-			    ($rule_pairs !== null && empty($pair['explicit_tcp_flags']) &&
-			    preg_match('/\bflags\s+(?!any(?:\s|$))\S+/', $rule))) {
+			if (!preg_match('/^block (?:drop |return\S*(?: \([^)]*\))? )?in (?:log(?: \([^)]*\))? )?quick on /', $rule)) {
 				return 'pending';
 			}
 		} elseif (!sdwan_steering_loaded_path_matches($rule, $gateways) || ($rule_pairs !== null &&
@@ -1228,15 +1245,15 @@ function sdwan_steering_pf_status(array $binding, array $state, array $inventory
 		    !sdwan_steering_loaded_pass_metadata($line, $rule, $pair, $pool, $binding['group'] ?? '')))) {
 			return 'pending';
 		}
-		$matched[$key] = [$position, $scope, ($pair['guard'] ?? '') . ':' . $protocol];
+		$matched[$key] = [$position, $scope, ($pair['guard'] ?? '') . ':' . $protocol, $pair['interface_groups'] ?? []];
 	}
 	if (count($matched) !== $expected_count) {
 		return 'pending';
 	}
 	if ($rule_pairs !== null) {
-		foreach ($matched as [$position, $scope, $guard]) {
+		foreach ($matched as [$position, $scope, $guard, $interface_groups]) {
 			if (!isset($guards[$guard]) || $scope === null || $guards[$guard][0] <= $position ||
-			    $guards[$guard][1] !== $scope || sdwan_steering_loaded_shadow($lines, $position, $scope)) {
+			    $guards[$guard][1] !== $scope || sdwan_steering_loaded_shadow($lines, $position, $scope, $interface_groups)) {
 				return 'pending';
 			}
 		}

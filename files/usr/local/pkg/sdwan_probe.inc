@@ -297,6 +297,32 @@ function sdwan_probe_fib_close($worker, $output, bool $running): void {
 	proc_close($worker);
 }
 
+function sdwan_probe_https_write(object $body, string $chunk, int $marker_limit): int {
+	$length = strlen($chunk);
+	$body->bytes += $length;
+	if ($body->bytes > 65536) {
+		$body->limit_reached = true;
+		return 0;
+	}
+	if ($marker_limit > 0 && $body->bytes <= $marker_limit) {
+		$body->value .= $chunk;
+	}
+	return $length;
+}
+
+function sdwan_probe_https_outcome(bool $complete, bool $write_error, int $status, ?string $marker, object $body): string {
+	if ($status < 200 || $status >= 300 || (!$complete && !($write_error && $body->limit_reached))) {
+		return 'HTTPS check failed';
+	}
+	/* A status-only check has enough evidence once the body reaches its cap.
+	 * A marker check still needs the exact, complete response body. */
+	if ($marker !== null && (!$complete || $body->bytes > strlen($marker) + 2 ||
+	    !sdwan_probe_https_marker_matches($body->value, $marker))) {
+		return 'HTTPS response marker mismatch';
+	}
+	return 'Passed';
+}
+
 /* Start pending HTTPS work and consume ready replies without waiting for I/O. */
 function sdwan_probe_collect_ready(array &$jobs, array &$results, $curl, int $deadline): void {
 	if (!$jobs || hrtime(true) >= $deadline) {
@@ -353,18 +379,14 @@ function sdwan_probe_collect_ready(array &$jobs, array &$results, $curl, int $de
 			$status = curl_getinfo($job['curl'], CURLINFO_RESPONSE_CODE);
 			$peer = curl_getinfo($job['curl'], CURLINFO_PRIMARY_IP);
 			$source = curl_getinfo($job['curl'], CURLINFO_LOCAL_IP);
-			$replied = $done['result'] === CURLE_OK && $status >= 200 && $status < 300 &&
-			    is_string($peer) && filter_var($peer, FILTER_VALIDATE_IP) !== false &&
+			$verified_endpoints = is_string($peer) && filter_var($peer, FILTER_VALIDATE_IP) !== false &&
 			    inet_pton($peer) === inet_pton($job['target']['address']) &&
 			    is_string($source) && filter_var($source, FILTER_VALIDATE_IP) !== false &&
 			    inet_pton($source) === inet_pton($job['path']['source']);
-			$failure = 'HTTPS check failed';
-			if ($replied && isset($job['target']['expect']) &&
-			    ($job['body']->oversized || !sdwan_probe_https_marker_matches($job['body']->value, $job['target']['expect']))) {
-				$replied = false;
-				$failure = 'HTTPS response marker mismatch';
-			}
-			$results[$job['member']][$job['field']] = sdwan_probe_result($job, $replied, $failure, $deadline);
+			$outcome = $verified_endpoints ? sdwan_probe_https_outcome($done['result'] === CURLE_OK,
+			    $done['result'] === CURLE_WRITE_ERROR, $status, $job['target']['expect'] ?? null, $job['body']) :
+			    'HTTPS check failed';
+			$results[$job['member']][$job['field']] = sdwan_probe_result($job, $outcome === 'Passed', $outcome, $deadline);
 			curl_multi_remove_handle($curl, $job['curl']);
 			unset($jobs[$index]);
 			break;
@@ -464,8 +486,8 @@ function sdwan_probe_observe(array $members, array $inventory, array $observatio
 				$jobs[] = $job + ['socket' => $socket, 'id' => $id, 'question' => $question];
 			} elseif ($curl !== null && $remaining >= 1000) {
 				$host = $target['host'];
-				$body = isset($target['expect']) ? (object)['value' => '', 'oversized' => false] : null;
-				$marker_limit = $body === null ? 0 : strlen($target['expect']) + 2;
+				$body = (object)['value' => '', 'bytes' => 0, 'limit_reached' => false];
+				$marker_limit = isset($target['expect']) ? strlen($target['expect']) + 2 : 0;
 				$handle = curl_init('https://' . $host . ':443' . $target['path']);
 				if ($handle === false) {
 					continue;
@@ -479,18 +501,8 @@ function sdwan_probe_observe(array $members, array $inventory, array $observatio
 					CURLOPT_CONNECTTIMEOUT_MS => min(900, intdiv($remaining, 1000)),
 					CURLOPT_TIMEOUT_MS => min(1800, intdiv($remaining, 1000)),
 					CURLOPT_NOPROGRESS => true, CURLOPT_NOSIGNAL => true,
-					CURLOPT_WRITEFUNCTION => static function ($handle, string $chunk) use ($body, $marker_limit): int {
-						static $bytes = 0;
-						$bytes += strlen($chunk);
-						if ($body !== null) {
-							if ($bytes <= $marker_limit) {
-								$body->value .= $chunk;
-							} else {
-								$body->oversized = true;
-							}
-						}
-						return $bytes <= 65536 ? strlen($chunk) : 0;
-					},
+					CURLOPT_WRITEFUNCTION => static fn($handle, string $chunk): int =>
+					    sdwan_probe_https_write($body, $chunk, $marker_limit),
 				]) || curl_multi_add_handle($curl, $handle) !== CURLM_OK) {
 					continue;
 				}

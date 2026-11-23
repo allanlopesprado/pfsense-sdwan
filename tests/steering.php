@@ -125,7 +125,7 @@ file_put_contents(SDWAN_SNAPSHOT_PATH, json_encode($snapshot));
 verify(sdwan_steering_gateway_for_rule($raw, $rule) === 'A', 'fresh matching snapshot returns only the selected native gateway');
 $watched_rules = [
 	'pass in quick on igb2 route-to (igb0 192.0.2.1) inet from 10.23.0.0/24 to any ' .
-	    'keep state (if-bound) label "gw=1:G" ridentifier 301',
+	    'flags S/SA keep state (if-bound) label "gw=1:G" ridentifier 301',
 	'block drop in quick on igb2 inet from 10.23.0.0/24 to any ridentifier 302',
 ];
 verify(sdwan_steering_watchdog_stale_trackers($bindings, null, []) === [] &&

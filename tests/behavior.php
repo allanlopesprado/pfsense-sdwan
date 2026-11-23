@@ -281,6 +281,23 @@ check('HTTPS accepts an exact response marker with an optional line ending',
     !sdwan_probe_https_marker_matches('not-ready', 'ready') &&
     !sdwan_probe_https_marker_matches("ready\nmaintenance", 'ready') &&
     !sdwan_probe_https_marker_matches(" ready", 'ready'));
+$body = (object)['value' => '', 'bytes' => 0, 'limit_reached' => false];
+check('status-only HTTPS caps the transfer and accepts its own cutoff only for a 2xx response',
+    sdwan_probe_https_write($body, str_repeat('x', 65536), 0) === 65536 &&
+    sdwan_probe_https_outcome(false, true, 200, null, $body) === 'HTTPS check failed' &&
+    sdwan_probe_https_write($body, 'x', 0) === 0 && $body->value === '' &&
+    sdwan_probe_https_outcome(false, true, 200, null, $body) === 'Passed' &&
+    sdwan_probe_https_outcome(false, true, 302, null, $body) === 'HTTPS check failed' &&
+    sdwan_probe_https_outcome(false, true, 503, null, $body) === 'HTTPS check failed' &&
+    sdwan_probe_https_outcome(false, false, 200, null, $body) === 'HTTPS check failed');
+$body = (object)['value' => '', 'bytes' => 0, 'limit_reached' => false];
+check('HTTPS evaluates a marker only against a complete and bounded body',
+    sdwan_probe_https_write($body, 'ready', 7) === 5 &&
+    sdwan_probe_https_outcome(true, false, 200, 'ready', $body) === 'Passed' &&
+    sdwan_probe_https_write($body, "\r\n", 7) === 2 &&
+    sdwan_probe_https_outcome(true, false, 200, 'ready', $body) === 'Passed' &&
+    sdwan_probe_https_write($body, str_repeat('x', 65536), 7) === 0 && $body->value === "ready\r\n" &&
+    sdwan_probe_https_outcome(false, true, 200, 'ready', $body) === 'HTTPS response marker mismatch');
 check('probe destinations and HTTPS paths preserve the explicit check boundary',
     sdwan_probe_target('tcp://169.254.1.1:443') === null &&
     sdwan_probe_target('dns://example.com fe80::1') === null &&

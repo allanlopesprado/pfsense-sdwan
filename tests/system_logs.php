@@ -65,6 +65,20 @@ verify(!$logs, 'repeated snapshots within the burst window stay quiet');
 [$ledger, $logs] = sdwan_log_plan($ledger, 'observation', $many, '', 260);
 [$ledger, $logs] = sdwan_log_plan($ledger, 'observation', $many, '', 320);
 verify(count($ledger['reported']) === 30 && count($logs) === 6, 'unreported final choices are reconciled after each window');
+$busy = ['policies' => array_slice($many['policies'], 0, 13)];
+[$ledger] = sdwan_log_plan([], 'observation', $busy, '', 330);
+foreach (array_slice(array_keys($busy['policies']), 0, 12) as $name) {
+	$busy['policies'][$name]['selected'] = 'backup';
+}
+[$ledger, $logs] = sdwan_log_plan($ledger, 'observation', $busy, '', 390);
+verify(isset($ledger['reported']['Policy p12']) && str_starts_with($logs[0][1], 'Policy p12:'),
+    'a busy set of policies cannot starve a deferred policy');
+$balanced = ['steering' => ['WAN' => ['gateway' => 'A', 'pool' => ['A', 'B', 'C']]]];
+[$ledger] = sdwan_log_plan([], 'observation', $balanced, '', 390);
+$balanced['steering']['WAN']['pool'] = ['A', 'C'];
+[, $logs] = sdwan_log_plan($ledger, 'observation', $balanced, '', 391);
+verify(count($logs) === 1 && str_contains($logs[0][1], 'forwarding pool A, C'),
+    'pool membership changes are recorded when the first gateway stays the same');
 $malicious = ['policies' => ["bad\ncredential" => ['selected' => "PSK\nsecret", 'path_status' => 'single']]];
 [, $logs] = sdwan_log_plan([], 'observation', $malicious, '', 400);
 verify(!str_contains($logs[0][1], 'credential') && !str_contains($logs[0][1], 'secret'), 'malformed names cannot inject new messages or disclose additional text');
