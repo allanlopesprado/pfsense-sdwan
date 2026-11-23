@@ -3,6 +3,7 @@
 
 const SDWAN_FILTER_PROVIDER = '/usr/local/pkg/sdwan_steering.inc';
 const SDWAN_FILTER_BOOT_MARKER = '/var/run/sdwan-filter-boot.json';
+const SDWAN_FILTER_BOOT_MARKER_LIMIT = 512;
 
 function filter_sdwan_binding_api(): int {
 	return 2;
@@ -12,15 +13,33 @@ function filter_sdwan_withdrawal_proof_api(): int {
 	return 1;
 }
 
+function filter_sdwan_boot_file_identity(string $path): ?array {
+	// Bind the proof to this installation as well as its exact bytes.
+	$fields = array_flip(['dev', 'ino', 'size', 'mtime', 'ctime']);
+	clearstatcache(true, $path);
+	$before = @lstat($path);
+	if ($before === false || ($before['mode'] & 0170000) !== 0100000) {
+		return null;
+	}
+	$digest = @hash_file('sha256', $path);
+	clearstatcache(true, $path);
+	$after = @lstat($path);
+	if ($digest === false || $after === false ||
+	    array_intersect_key($before, $fields) !== array_intersect_key($after, $fields)) {
+		return null;
+	}
+	return ['sha256' => $digest] + array_intersect_key($after, $fields);
+}
+
 function filter_sdwan_boot_identity(): ?array {
-	$generator = @hash_file('sha256', __DIR__ . '/filter.inc');
-	$adapter = @hash_file('sha256', __FILE__);
-	return $generator !== false && $adapter !== false ? ['generator' => $generator, 'adapter' => $adapter] : null;
+	$generator = filter_sdwan_boot_file_identity(__DIR__ . '/filter.inc');
+	$adapter = filter_sdwan_boot_file_identity(__FILE__);
+	return $generator !== null && $adapter !== null ? ['generator' => $generator, 'adapter' => $adapter] : null;
 }
 
 function filter_sdwan_boot_marker_trusted(array|false $stat): bool {
 	return $stat !== false && $stat['uid'] === 0 && ($stat['mode'] & 0170022) === 0100000 &&
-	    $stat['size'] > 0 && $stat['size'] <= 192;
+	    $stat['size'] > 0 && $stat['size'] <= SDWAN_FILTER_BOOT_MARKER_LIMIT;
 }
 
 function filter_sdwan_boot_ready(): bool {
@@ -35,9 +54,10 @@ function filter_sdwan_boot_ready(): bool {
 		    $stat['ino'] !== $opened['ino']) {
 			return false;
 		}
-		$contents = stream_get_contents($marker, 193);
+		$contents = stream_get_contents($marker, SDWAN_FILTER_BOOT_MARKER_LIMIT + 1);
 		$identity = filter_sdwan_boot_identity();
-		return is_string($contents) && $identity !== null && json_decode($contents, true, 2) === $identity;
+		return is_string($contents) && strlen($contents) <= SDWAN_FILTER_BOOT_MARKER_LIMIT &&
+		    $identity !== null && json_decode($contents, true, 3) === $identity;
 	} finally {
 		fclose($marker);
 	}

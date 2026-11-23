@@ -15,7 +15,7 @@ git diff --no-index pfsense-base/src/etc/inc/filter.inc sdwan-core-lab/src/etc/i
 
 The last command displays the diff and returns 1 when there are changes. The tool checks the original file's SHA-256, patches a copy, and generates two files under `sdwan-core-lab/src/etc/inc`. Incorporate both into the matching revision used by the image build. Before porting to another base, compare gateway inventory, rule generation, XML parsing, and filter reload behavior. Restoring the clone snapshot recovers its reference image. [Building away from the firewall](https://docs.netgate.com/pfsense/en/latest/development/compile-software.html) · [Image tests and rollback](../docs/LAB.md)
 
-Restart the SD-WAN service after changing the native adapter so its long-running PHP process loads the updated generator. Use a dedicated gateway group and verify that a fresh connection follows the policy while the system default route stays on the original WAN.
+Clear `/var/run/sdwan-filter-boot.json` before replacing either overlay file or restoring the original generator. Reboot after installing the overlay so the observer and native reload service start against the same generation. The next successful boot-time PF load records the installed files' hashes and filesystem identities. Use a dedicated gateway group and verify that a fresh connection follows the policy while the system default route stays on the original WAN.
 
 ### Signed CE 2.9.1 and CE 2.9.2 lab copies
 

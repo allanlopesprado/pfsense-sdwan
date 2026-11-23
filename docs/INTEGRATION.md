@@ -1,6 +1,6 @@
 # pfSense forwarding and IPsec integration
 
-The package recommends one member per policy using dpinger, the pfSense gateway monitor. On stock CE, the recommendation is informational and native configuration governs forwarding. Experimental forwarding requires steering ABI 1 or 2 and explicit bindings for existing rules. Verify each flow in both directions to establish its actual path. Acceptance on pfSense CE 2.9.1 and 2.9.2 requires the traffic tests below, including when the peer runs FortiOS.
+The package recommends one member per policy using dpinger, the pfSense gateway monitor. On stock CE, the recommendation is informational and native configuration governs forwarding. The forwarding engine recognizes existing bindings on steering ABI 1 or 2. New approvals and changes require the current adapter and a verified PF load at boot. Verify each flow in both directions to establish its actual path. Acceptance on pfSense CE 2.9.1 and 2.9.2 requires the traffic tests below, including when the peer runs FortiOS.
 
 ## What the package accesses
 

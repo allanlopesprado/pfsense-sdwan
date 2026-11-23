@@ -931,6 +931,13 @@ def acceptance(qemu, cleanup, provider, *, cold_restart):
     assert route_and_nat(qemu) == reference
     tcp_pair("native rollback", (A, A))
     management("native rollback", certificate)
+    # Reinstall the same bytes without rebooting, with the old proof still present.
+    command(qemu, f"test -s /var/run/sdwan-filter-boot.json; cp {LAB}/filter*.inc /etc/inc/")
+    assert "NATIVE_WARM_BIND_REFUSED_BEFORE_OVERLAY_BOOT" in command(
+        qemu, f"php {LAB}/ce291-guest.php refuse_warm_bind"
+    )
+    print("NATIVE_SAME_OVERLAY_REINSTALL_REQUIRES_REBOOT", flush=True)
+    command(qemu, f"cp -p {LAB}/filter.stock /etc/inc/filter.inc; rm /etc/inc/filter-sdwan.inc")
     command(qemu, f"pkg add -f {rollback}", timeout=180)
     assert command(qemu, "pkg query '%v' pfSense-pkg-SDWAN") == previous_version
     command(qemu, "pkg check -s pfSense-pkg-SDWAN; /usr/local/etc/rc.d/sdwand.sh status")

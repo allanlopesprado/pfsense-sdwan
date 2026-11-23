@@ -67,7 +67,8 @@ if (filter_sdwan_boot_load(null, true) || filter_sdwan_boot_load([false, 'failed
 unset($GLOBALS['native_booting']);
 $boot_stat = ['uid' => 0, 'mode' => 0100644, 'size' => 157];
 foreach ([false, array_replace($boot_stat, ['uid' => 80]), array_replace($boot_stat, ['mode' => 0120777]),
-    array_replace($boot_stat, ['mode' => 0100664]), array_replace($boot_stat, ['size' => 193])] as $unsafe_marker) {
+    array_replace($boot_stat, ['mode' => 0100664]),
+    array_replace($boot_stat, ['size' => SDWAN_FILTER_BOOT_MARKER_LIMIT + 1])] as $unsafe_marker) {
 	if (filter_sdwan_boot_marker_trusted($unsafe_marker)) {
 		throw new RuntimeException('An unsafe native boot marker was trusted');
 	}
@@ -76,6 +77,38 @@ if (!filter_sdwan_boot_marker_trusted($boot_stat)) {
 	throw new RuntimeException('A trusted native boot marker was rejected');
 }
 echo "ok - forwarding approvals require a boot-time PF transaction and a root-owned marker\n";
+
+$overlay = tempnam(sys_get_temp_dir(), 'sdwan-');
+$replacement = tempnam(sys_get_temp_dir(), 'sdwan-');
+try {
+	file_put_contents($overlay, 'overlay');
+	file_put_contents($replacement, 'overlay');
+	$original = filter_sdwan_boot_file_identity($overlay);
+	if ($original === null || $original !== filter_sdwan_boot_file_identity($overlay)) {
+		throw new RuntimeException('The installed overlay identity was unstable');
+	}
+	$identity = ['generator' => $original, 'adapter' => $original];
+	$marker = json_encode($identity, JSON_THROW_ON_ERROR);
+	if (strlen($marker) > SDWAN_FILTER_BOOT_MARKER_LIMIT || json_decode($marker, true, 3) !== $identity) {
+		throw new RuntimeException('The boot marker did not retain the exact overlay file identities');
+	}
+	if (!unlink($overlay) || !rename($replacement, $overlay)) {
+		throw new RuntimeException('Could not replace the overlay fixture');
+	}
+	$installed = filter_sdwan_boot_file_identity($overlay);
+	// Windows PHP does not expose the filesystem's stable inode identity.
+	if ($installed === null || $original['sha256'] !== $installed['sha256'] ||
+	    (PHP_OS_FAMILY !== 'Windows' && $original === $installed)) {
+		throw new RuntimeException('An identical reinstall reused the booted overlay identity');
+	}
+} finally {
+	foreach ([$overlay, $replacement] as $file) {
+		if (is_file($file)) {
+			unlink($file);
+		}
+	}
+}
+echo "ok - a same-content overlay replacement invalidates the recorded filesystem identity\n";
 
 function parse_xml_config(string $path, array $root): mixed {
 	if ($path !== '/fixture/config.xml' || $root !== ['pfsense']) {
