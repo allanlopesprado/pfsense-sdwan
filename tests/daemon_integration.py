@@ -67,9 +67,12 @@ def answer(listener, sample, before_reply=None):
 
 
 def stage(sandbox):
-    # Only replace absolute installation paths. Keep the actual daemon and
-    # snapshot read/write logic so this exercises the shipped CLI entry point.
+    # Offset the elapsed clock so a fresh CI host can exercise expiry without
+    # waiting for 31 seconds after boot.
+    clock = "hrtime(true) + 60_000_000_000"
     daemon = (ROOT / "files/usr/local/sbin/sdwand.php").read_text()
+    assert daemon.count("$observed_at = hrtime(true);") == 1
+    daemon = daemon.replace("$observed_at = hrtime(true);", f"$observed_at = {clock};")
     for name in ("sdwan.inc", "sdwan_engine.inc", "sdwan_log.inc", "sdwan_probe.inc"):
         installed = f"/usr/local/pkg/{name}"
         assert daemon.count(installed) == 1, f"Unknown daemon layout: {installed}"
@@ -81,6 +84,8 @@ def stage(sandbox):
     engine = (PKG / "sdwan_engine.inc").read_text()
     runtime = "/var/run/sdwan-observer.json"
     assert engine.count(runtime) == 1, "Unknown snapshot path"
+    assert engine.count("$now = hrtime(true);") == 1
+    engine = engine.replace("$now = hrtime(true);", f"$now = {clock};")
     (sandbox / "sdwan_engine.inc").write_text(engine.replace(runtime, str(sandbox / "snapshot.json")))
     for name in ("config.inc", "gwlb.inc"):
         shutil.copy(ROOT / "tests/fixtures" / name, sandbox)
@@ -151,14 +156,15 @@ def run(binary, require_unix):
         assert json.loads(php(binary, "-r", read))["config_revision"] == offline["config_revision"]
         print("ok - a failed snapshot replacement removes temporary files and recovers after storage is writable again")
 
-        offline["generated_at"] -= 300
-        snapshot.write_text(json.dumps(offline))
+        legacy = {key: value for key, value in offline.items() if key != "observed_at_ns"}
+        snapshot.write_text(json.dumps(legacy | {"generated_at": offline["generated_at"] - 300}))
         assert json.loads(php(binary, "-r", read)) is None
         print("ok - --once publishes an unavailable gateway and expires the stale snapshot")
         now = int(time.time())
         for label, broken in [
             ("truncated JSON", '{"members":'),
-            ("future sample", json.dumps(dict(offline, generated_at=now + 3600))),
+            ("future legacy sample", json.dumps(dict(legacy, generated_at=now + 3600))),
+            ("future monotonic sample", json.dumps(dict(offline, observed_at_ns=offline["observed_at_ns"] + 3_600_000_000_000))),
             ("malformed policy", json.dumps(dict(offline, generated_at=now, policies={"calls": "partial"}))),
             ("malformed member", json.dumps(dict(offline, generated_at=now, members={"a": []}))),
             ("invalid revision", json.dumps(dict(offline, generated_at=now, config_revision="other"))),
