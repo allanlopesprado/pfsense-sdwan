@@ -206,6 +206,25 @@ def verify_activation_guard(ce, qemu):
     print("CE_ERP_ACTIVATION_GUARD_OK", flush=True)
 
 
+def verify_cold_activation_guard(ce, qemu):
+    installed_since = int(ce.command(qemu, "date +%s"))
+    version, _ = ce.install_candidate(qemu)
+    initial_boot = ce.command(qemu, "sysctl -n kern.boottime")
+    qemu.sendline("shutdown -r now")
+    ce.console_shell(qemu)
+    ce.wait_lease(qemu, ce.B, ce.GATEWAYS["GW_B"][1])
+    current_boot = ce.command(qemu, "sysctl -n kern.boottime")
+    assert current_boot != initial_boot, (initial_boot, current_boot)
+    overlay = ce.command(qemu, f"""test -S /var/run/check_reload_status
+        cmp -s {ce.LAB}/filter.inc /etc/inc/filter.inc
+        cmp -s {ce.LAB}/filter-sdwan.inc /etc/inc/filter-sdwan.inc
+        sha256 -q /etc/inc/filter.inc /etc/inc/filter-sdwan.inc""")
+    print(f"CE_COLD_OVERLAY_BOOT_OK boot={current_boot!r} sha256={overlay.splitlines()!r}", flush=True)
+    ce.verify_updater_readiness(qemu, version, installed_since, forwarding=False)
+    verify_activation_guard(ce, qemu)
+    print("CE_ERP_ACTIVATION_GUARD_COLD_OK", flush=True)
+
+
 def verify_interface_traffic(ce, qemu, active):
     def read_counters():
         response = ce.command(qemu, """php <<'PHP'
@@ -481,8 +500,11 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("image", type=Path)
     parser.add_argument("ce_version", choices=("2.9.1", "2.9.2"))
-    parser.add_argument("--activation-guard", action="store_true",
-                        help="isolate first binding activation with the observer suspended")
+    scenarios = parser.add_mutually_exclusive_group()
+    scenarios.add_argument("--activation-guard", action="store_true",
+                           help="isolate first binding activation with the observer suspended")
+    scenarios.add_argument("--cold-activation-guard", action="store_true",
+                           help="exercise first binding after rebooting with the overlay installed")
     args = parser.parse_args()
     benchmark = load_benchmark()
     ce = benchmark.appliance_module()
@@ -491,11 +513,13 @@ def main():
         if args.activation_guard:
             ce.install_candidate(qemu)
             verify_activation_guard(ce, qemu)
+        elif args.cold_activation_guard:
+            verify_cold_activation_guard(ce, qemu)
         else:
             exercise(ce, benchmark, qemu, cleanup, provider)
 
     ce.appliance(args.image.resolve(), args.ce_version, scenario=scenario)
-    if not args.activation_guard:
+    if not (args.activation_guard or args.cold_activation_guard):
         print(f"CE_{args.ce_version.replace('.', '')}_READINESS_OK", flush=True)
 
 

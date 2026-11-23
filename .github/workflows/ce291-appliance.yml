@@ -43,7 +43,7 @@ on:
         description: Appliance acceptance, diagnostics, recovery, or package security inventory
         type: choice
         default: acceptance
-        options: [acceptance, paths, benchmark, recovery, shared-target, inspection, activation-guard, security]
+        options: [acceptance, paths, benchmark, recovery, shared-target, inspection, activation-guard, activation-guard-cold, security]
       pairs:
         description: Number of native versus SD-WAN pairs for the benchmark
         type: number
@@ -109,7 +109,7 @@ jobs:
         run: |
           set -eu
           case "$CE_VERSION" in 2.9.1|2.9.2) ;; *) exit 1 ;; esac
-          case "$CE_SCENARIO" in acceptance|paths|benchmark|recovery|shared-target|inspection|activation-guard|security) ;; *) exit 1 ;; esac
+          case "$CE_SCENARIO" in acceptance|paths|benchmark|recovery|shared-target|inspection|activation-guard|activation-guard-cold|security) ;; *) exit 1 ;; esac
           if [ "$CE_SCENARIO" = recovery ]; then
             test "$CE_VERSION" = 2.9.1
           elif [ "$CE_SCENARIO" = benchmark ]; then
@@ -190,6 +190,9 @@ jobs:
               ;;
             activation-guard)
               ce_python tests/lab/ce-shared-target.py "$CE_LAB.raw" "$CE_VERSION" --activation-guard | tee -a "$CE_LAB-result.log"
+              ;;
+            activation-guard-cold)
+              ce_python tests/lab/ce-shared-target.py "$CE_LAB.raw" "$CE_VERSION" --cold-activation-guard | tee -a "$CE_LAB-result.log"
               ;;
             inspection)
               ce_python tests/lab/ce-sdwan-inspection.py "$CE_LAB.raw" "$CE_VERSION" | tee -a "$CE_LAB-result.log"
