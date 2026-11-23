@@ -252,8 +252,11 @@ def run(php, classes, screenshot_dir=None):
                        "sdwan_release.inc", "sdwan_log.inc", "sdwan_probe.inc"):
             shutil.copyfile(SOURCE / "pkg" / module, root / module)
         for ui in (root / "sdwan/ui.inc.php", root / "sdwan/editor.inc.php", root / "sdwan/forwarding.php",
-                   root / "sdwan/updates.php"):
+                   root / "sdwan/updates.php", root / "sdwan/diagnostics.php"):
             ui.write_text(ui.read_text().replace("'/usr/local/pkg/", "__DIR__ . '/../"))
+        probe = root / "sdwan_probe.inc"
+        probe.write_text(re.sub(r"(?m)^function (sdwan_probe_fib_count|sdwan_probe_path)\(",
+                                r"function fixture_native_\1(", probe.read_text()))
         version = root / "pfsense-version"
         supervisor = root / "sdwand.pid"
         supervisor.write_text("501\n")
@@ -406,6 +409,39 @@ def run(php, classes, screenshot_dir=None):
         assert form.fields["gateway"] == [("", True), (":FREE", False)], form.fields
         restored = request("members", get={"edit": "backup"})
         assert (":GONE", True) in Choices(restored).fields["gateway"] and "GONE (unavailable)" in restored
+        review_config = {**config, "members": [dict(member) for member in config["members"]]}
+        review_config["members"][0]["probe_primary"] = "fib=1 tcp://192.0.2.45:7"
+        review_form = Choices(request("members", config=review_config, get={"edit": "01"}))
+        review_post = {"action": "save", "review_routes": "1", "name": "01", "original": "01",
+                       "gateway": ":GW2", "cost": "3", "probe_primary": "fib=1 tcp://192.0.2.45:7",
+                       "__csrf_magic": review_form.tokens[0], "revision": review_form.revisions[0]}
+        duplicate = request("members", config=review_config, post=review_post, probe_fib_count=3, probe_path=False)
+        assert "The target already has another check in this routing table." in duplicate
+        assert "<code>fib=2 tcp://192.0.2.45:7</code>" in duplicate
+        assert json.loads(duplicate.split("SAVED=")[1]) == [0, review_config]
+        path = {"fib": 2, "address": "192.0.2.45", "interface": "wan", "match": True,
+                "expected": {"device": "vtnet2", "source": "203.0.113.1", "next_hop": "203.0.113.2"}}
+        ready_post = {**review_post, "probe_primary": "fib=2 tcp://192.0.2.45:7"}
+        ready = request("members", config=review_config, post=ready_post, probe_fib_count=3, probe_path=path)
+        assert "Host route verified" in ready and "Expected interface vtnet2, source 203.0.113.1, next hop 203.0.113.2." in ready
+        assert "<code>route -n get -inet 192.0.2.45 -fib 2</code>" in ready
+        assert json.loads(ready.split("SAVED=")[1]) == [0, review_config]
+        wrong = request("members", config=review_config, post=ready_post, probe_fib_count=3,
+                        probe_path={**path, "match": False})
+        assert "Host route unverified" in wrong
+        absent = request("members", config=review_config, post=ready_post, probe_fib_count=2, probe_path=False)
+        assert "This routing table is unavailable" in absent
+        malformed = request("members", config=review_config, post={**ready_post, "review_routes": ["1"]},
+                            probe_fib_count=3, probe_path=False)
+        assert json.loads(malformed.split("SAVED=")[1]) == [0, review_config]
+        assert "Select an available gateway" in malformed
+        skipped = request("members", config=review_config, post={**ready_post, "probe_primary": "tcp://127.0.0.1:7"},
+                          probe_fib_count=3, probe_path=False)
+        assert "Enter a valid check." in skipped
+        bad_token = request("members", config=review_config, post={**ready_post, "__csrf_magic": "invalid"},
+                            probe_fib_count=3, probe_path=False)
+        assert "CSRF check failed" in bad_token and "Host route verified" not in bad_token
+        print("ok - member probe route preview checks FIB conflicts and live route scope without saving")
         blocked = request("members", post={"action": "delete", "original": "backup", "__csrf_magic": form.tokens[0]})
         assert "following policies first: VOICE." in blocked
         assert json.loads(blocked.split("SAVED=")[1]) == [0, config]
@@ -531,6 +567,19 @@ def run(php, classes, screenshot_dir=None):
 
         assert "diagnostics.php?policy=VOICE" in request("status")
         assert "diagnostics.php?policy=VOICE" not in request("status", inspect=False)
+        history = ("Apr  8 10:00:00 pfSense sdwan[27]: SD-WAN Policy VOICE: "
+                   "PF confirmed gateway BACKUP in group VOICEGROUP.\n"
+                   "Apr  8 10:00:01 pfSense sdwan[27]: SD-WAN Policy VOICE: "
+                   "recommended member &<marker>.\n"
+                   "Apr  8 10:00:02 pfSense sdwan[27]: SD-WAN Policy OTHER: "
+                   "recommended member PRIVATE.\n")
+        history_report = request("diagnostics", system_log=history)
+        assert "Recent policy events" in history_report and "Confirmed by PF" in history_report
+        assert "VOICEGROUP." in history_report and "&amp;&lt;marker&gt;" in history_report
+        assert "PRIVATE" not in history_report
+        restricted_history = request("diagnostics", system_log=history, privileges={"/status_logs.php": False})
+        assert "Recent policy events" not in restricted_history and "VOICEGROUP." not in restricted_history
+        print("ok - policy history is filtered, escaped and requires the System Logs privilege")
         native_without_backup = native
         native = {**native, "gateways/gateway_item": [*native["gateways/gateway_item"],
                   {"interface": "wan", "name": "GONE"}]}

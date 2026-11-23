@@ -388,6 +388,10 @@ function sdwan_snapshot_steering_valid(mixed $steering, ?int $sample_time = null
 	return true;
 }
 
+function sdwan_snapshot_clock(array $snapshot): int {
+	return isset($snapshot['observed_at_ns']) ? intdiv($snapshot['observed_at_ns'], 1_000_000_000) : $snapshot['generated_at'];
+}
+
 function sdwan_read_snapshot(?bool &$expired = null): ?array {
 	$expired = false;
 	$contents = @file_get_contents(SDWAN_SNAPSHOT_PATH);
@@ -396,18 +400,30 @@ function sdwan_read_snapshot(?bool &$expired = null): ?array {
 	}
 	$data = json_decode($contents, true);
 	$when = $data['generated_at'] ?? null;
-	$now = time();
-	if (!is_int($when) || $when < 0 || $when > $now ||
+	if (!is_int($when) || $when < 0 ||
 	    !is_array($data['members'] ?? null) || !is_array($data['policies'] ?? null) ||
 	    !is_string($data['config_revision'] ?? null) ||
 	    !preg_match('/^[a-f0-9]{64}$/D', $data['config_revision'])) {
 		return null;
 	}
-	if ($now - $when > SDWAN_MAX_SNAPSHOT_AGE) {
+	if (array_key_exists('observed_at_ns', $data)) {
+		$observed = $data['observed_at_ns'];
+		$now = hrtime(true);
+		if (!is_int($observed) || $observed <= 0 || $observed > $now) {
+			return null;
+		}
+		$age = ($now - $observed) / 1_000_000_000;
+	} else {
+		$age = time() - $when;
+		if ($age < 0) {
+			return null;
+		}
+	}
+	if ($age > SDWAN_MAX_SNAPSHOT_AGE) {
 		$expired = true;
 		return null;
 	}
-	if (array_key_exists('steering', $data) && !sdwan_snapshot_steering_valid($data['steering'], $when)) {
+	if (array_key_exists('steering', $data) && !sdwan_snapshot_steering_valid($data['steering'], sdwan_snapshot_clock($data))) {
 		return null;
 	}
 	$gateways = $data['gateways'] ?? [];

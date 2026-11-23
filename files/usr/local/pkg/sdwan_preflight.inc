@@ -246,9 +246,33 @@ function sdwan_preflight_canonical(array $value): array {
 	return $value;
 }
 
-/* Dynamic aliases and scheduled rules can be omitted by the native generator.
- * Limit initial bindings to predicates which the filter can always render. */
-function sdwan_preflight_endpoint($endpoint, string $family, string $ingress): bool {
+/* Only a native host table with a bounded, explicit list of IPs/FQDNs can
+ * extend a direct-WAN destination. The native resolver owns its live contents. */
+function sdwan_preflight_host_alias(array $aliases, mixed $name): ?array {
+	if (!is_string($name) || !preg_match('/\A[A-Za-z][A-Za-z0-9_]{0,31}\z/', $name) ||
+	    str_ends_with(strtoupper($name), '__NETWORK')) {
+		return null;
+	}
+	$matches = array_values(array_filter($aliases, static fn($alias) => ($alias['name'] ?? null) === $name));
+	if (count($matches) !== 1 || ($matches[0]['type'] ?? null) !== 'host' ||
+	    !is_string($addresses = $matches[0]['address'] ?? null) || strlen($addresses) > 16384) {
+		return null;
+	}
+	$entries = preg_split('/\s+/', trim($addresses), -1, PREG_SPLIT_NO_EMPTY);
+	if (!$entries || count($entries) > 128) {
+		return null;
+	}
+	foreach ($entries as $entry) {
+		if (filter_var($entry, FILTER_VALIDATE_IP) === false &&
+		    (!str_contains(rtrim($entry, '.'), '.') ||
+		    filter_var($entry, FILTER_VALIDATE_DOMAIN, FILTER_FLAG_HOSTNAME) === false)) {
+			return null;
+		}
+	}
+	return ['name' => $name, 'entries' => $entries];
+}
+
+function sdwan_preflight_endpoint($endpoint, string $family, string $ingress, ?string $host_alias = null): bool {
 	if (!is_array($endpoint) || isset($endpoint['not'])) {
 		return false;
 	}
@@ -274,6 +298,9 @@ function sdwan_preflight_endpoint($endpoint, string $family, string $ingress): b
 	}
 	if (!is_string($selectors['address'])) {
 		return false;
+	}
+	if ($selectors['address'] === $host_alias) {
+		return true;
 	}
 	$parts = explode('/', $selectors['address'], 2);
 	$flags = $family === 'inet' ? FILTER_FLAG_IPV4 : FILTER_FLAG_IPV6;
@@ -364,6 +391,9 @@ function sdwan_preflight_endpoint_covers(array $earlier, array $bound): bool {
 	if ($address === null || $bound_address === null) {
 		return false;
 	}
+	if ($address === $bound_address) {
+		return true;
+	}
 	$prefix = sdwan_preflight_prefix(explode('/', $address, 2));
 	$bound_prefix = sdwan_preflight_prefix(explode('/', $bound_address, 2));
 	return $prefix !== null && $bound_prefix !== null && $prefix[1] <= $bound_prefix[1] &&
@@ -423,7 +453,7 @@ function sdwan_preflight_tcp_flags(array $rule): ?string {
 }
 
 function sdwan_preflight_rule_shadows(array $earlier, array $bound, string $family, string $ingress,
-    array $interface_groups = []): bool {
+    array $interface_groups = [], ?string $destination_alias = null): bool {
 	/* Interface tabs are quick. Restrict this check to static predicates with
 	 * known semantics so local exemptions and partial traffic matches still work. */
 	$fields = ['type', 'interface', 'direction', 'ipprotocol', 'protocol', 'source', 'destination',
@@ -440,7 +470,7 @@ function sdwan_preflight_rule_shadows(array $earlier, array $bound, string $fami
 	    !array_diff(array_keys($earlier), $fields) &&
 	    ($bound_protocol !== 'tcp' || !$earlier_uses_tcp_flags || sdwan_preflight_tcp_flags($bound) === 'S/SA') &&
 	    sdwan_preflight_endpoint($earlier['source'] ?? null, $family, $ingress) &&
-	    sdwan_preflight_endpoint($earlier['destination'] ?? null, $family, $ingress) &&
+	    sdwan_preflight_endpoint($earlier['destination'] ?? null, $family, $ingress, $destination_alias) &&
 	    sdwan_preflight_endpoint_covers($earlier['source'], $bound['source']) &&
 	    sdwan_preflight_endpoint_covers($earlier['destination'], $bound['destination']);
 }
@@ -478,10 +508,12 @@ function sdwan_preflight_native_rules(array $native, string $group, string $fami
 		    !in_array($rule['statetype'] ?? '', ['', 'keep state'], true)) {
 			return sdwan_preflight_error("Rule {$tracker} must be an enabled, stateful interface ingress pass rule for the group family, independent of NAT and ingress WANs.");
 		}
+		$destination_alias = $vti ? null : sdwan_preflight_host_alias((array)($native['aliases'] ?? []),
+		    $rule['destination']['address'] ?? null);
 		if (!in_array($rule['sched'] ?? '', ['', 'none'], true) ||
 		    !sdwan_preflight_endpoint($rule['source'] ?? null, $family, $ingress) ||
-		    !sdwan_preflight_endpoint($rule['destination'] ?? null, $family, $ingress)) {
-			return sdwan_preflight_error("Rule {$tracker} requires an unscheduled match with literal addresses, the ingress subnet or any, and numeric ports.");
+		    !sdwan_preflight_endpoint($rule['destination'] ?? null, $family, $ingress, $destination_alias['name'] ?? null)) {
+			return sdwan_preflight_error("Rule {$tracker} requires an unscheduled match with literal addresses, the ingress subnet or any, and numeric ports. Direct WAN rules can use a native host alias as a destination.");
 		}
 		$vpn_sources = $vti ? [] : ($native['full_tunnel_sources'][$family] ?? []);
 		if ($vpn_sources) {
@@ -505,7 +537,7 @@ function sdwan_preflight_native_rules(array $native, string $group, string $fami
 			}
 			/* pfSense evaluates interface groups before interface rules regardless of XML order. */
 			if (($preceding < $index || in_array($earlier['interface'] ?? '', $interface_groups, true)) &&
-			    sdwan_preflight_rule_shadows($earlier, $rule, $family, $ingress, $interface_groups)) {
+			    sdwan_preflight_rule_shadows($earlier, $rule, $family, $ingress, $interface_groups, $destination_alias['name'] ?? null)) {
 				return sdwan_preflight_error("An earlier interface or interface group rule fully covers rule {$tracker}. Review rule order before binding.");
 			}
 		}
@@ -542,9 +574,13 @@ function sdwan_preflight_native_rules(array $native, string $group, string $fami
 		    'state_policy' => !empty($rule['statepolicy']) ? $rule['statepolicy'] : ($native['statepolicy'] ?? null),
 		    'scope' => ['device' => $device, 'interface' => $ingress, 'family' => $family, 'protocols' => $protocols,
 		        'source' => $rule['source'], 'destination' => $rule['destination']]];
+		if ($destination_alias !== null) {
+			$rule_pairs[$tracker]['scope']['destination_alias'] = $destination_alias['name'];
+		}
 		unset($rule['created'], $rule['updated'], $rule['descr']);
 		$rule['tracker'] = $tracker;
-		$scope[] = [$rule, $device, (string)$guard_id, $guard['type']];
+		$scope[] = $destination_alias === null ? [$rule, $device, (string)$guard_id, $guard['type']] :
+		    [$rule, $device, (string)$guard_id, $guard['type'], $destination_alias];
 	}
 	if (!$trackers) {
 		return sdwan_preflight_error('Select a dedicated group already referenced by an enabled ingress pass rule.');

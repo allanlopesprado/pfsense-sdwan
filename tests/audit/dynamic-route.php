@@ -29,12 +29,12 @@ foreach ($sources as $name) {
         );
     } elseif ($name === 'sdwan_probe.inc') {
         $code = str_replace(
-            ["!is_executable('/sbin/route')", "!is_executable('/bin/timeout')", "exec('/bin/timeout"],
-            ['false', 'false', "fixture_route_get('/bin/timeout"],
+            ["!is_executable('/sbin/route')", "!is_executable('/bin/timeout')", "exec('/bin/timeout ' . \$seconds"],
+            ['false', 'false', "fixture_route_get('/bin/timeout ' . \$seconds"],
             $code,
             $changes,
         );
-        if ($changes !== 3) {
+        if ($changes !== 4) {
             throw new RuntimeException('Probe fixture could not isolate every native route boundary.');
         }
     }

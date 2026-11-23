@@ -3,6 +3,8 @@
 import argparse
 import importlib.util
 import json
+import re
+import sys
 import time
 from pathlib import Path
 
@@ -296,6 +298,52 @@ php {script}""")
     ce.tcp_pair("original policies restored", (ce.A, ce.A))
 
 
+def verify_erp_host_alias(ce, qemu):
+    guest = f"php {ce.LAB}/ce291-guest.php"
+    result = ce.command(qemu, f"{guest} unbind G")
+    withdrawal = re.findall(r"^WITHDRAWAL_START_NS=(\d+)$", result, re.MULTILINE)
+    assert len(withdrawal) == 1, result
+    ce.wait_paths(qemu, "before approving the alias", {"B": "GW_A"}, native_choices={"G": "GW_A"},
+                  withdrawal_after=int(withdrawal[0]))
+    ce.command(qemu, f"{guest} erp_host_alias; {guest} bind G")
+    ce.wait_paths(qemu, "native host alias approved", NATIVE_PATHS)
+
+    table = "SDWAN_LAB_ERP"
+    extra = "192.0.2.169"
+
+    def members():
+        return set(ce.command(qemu, f"pfctl -t {table} -T show").split())
+
+    def extra_flow(expected, label):
+        result = ce.run(*ce.in_ns("sdwan-client", sys.executable, ce.SCRIPT, "flow", extra),
+                        input=label + "\n", capture_output=True)
+        assert result.stdout.strip() == f"{expected} {label}", result.stdout
+        print(f"{label}: {extra} replied from {expected}", flush=True)
+
+    assert members() == {ce.ERP}
+    backup = ce.loaded(qemu)["41003"]
+    try:
+        ce.fault(f'iifname "sw-wire0" ip saddr {ce.A} ip daddr 192.0.2.164 tcp dport 7 drop')
+        active = {"G": "GW_B", "B": "GW_A"}
+        before = ce.wait_paths(qemu, "alias ERP failover", active)
+        rules = ce.command(qemu, "pfctl -P -sr 2>/dev/null | awk '/ridentifier (41001|41002)$/'").splitlines()
+        assert len(rules) == 2 and rules[0].startswith("pass ") and rules[1].startswith("block "), rules
+        assert all(re.search(rf"\bto <{table}(?::[0-9]+)?> port = 7\b", rule) for rule in rules), rules
+        assert ce.loaded(qemu)["41003"] == backup
+        ce.tcp_pair("alias ERP failover", (ce.B, ce.A))
+        extra_flow(ce.A, "before refreshing the host table")
+        ce.command(qemu, f"pfctl -t {table} -T add {extra}")
+        assert members() == {ce.ERP, extra}
+        extra_flow(ce.B, "after refreshing the host table")
+        after = ce.wait_paths(qemu, "confirmed alias after native table refresh", active)
+        assert after["signature"] == before["signature"], (before, after)
+        assert members() == {ce.ERP, extra}
+        ce.tcp_pair("existing alias destination and backup after table refresh", (ce.B, ce.A))
+    finally:
+        ce.fault()
+    print("NATIVE_HOST_ALIAS_TABLE_AND_REFRESH_STEERING_OK", flush=True)
+
+
 def exercise(ce, benchmark, qemu, cleanup, provider):
     version, _ = ce.install_bound_candidate(qemu)
     active = ce.wait_paths(qemu, "before installed package verification", NATIVE_PATHS)
@@ -357,6 +405,8 @@ def exercise(ce, benchmark, qemu, cleanup, provider):
         assert_native_routing(ce, qemu, reference)
     finally:
         remove_routes(ce, qemu)
+    verify_erp_host_alias(ce, qemu)
+    assert_native_routing(ce, qemu, reference)
 
 
 def main():

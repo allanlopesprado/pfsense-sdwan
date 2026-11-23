@@ -136,6 +136,7 @@ function sdwan_observe_once(): void {
 		}
 		$config = sdwan_get_config();
 		$started = time();
+		$observed_at = hrtime(true);
 		$inventory = sdwan_gateways();
 		$inventory_revision = sdwan_gateway_inventory_revision($config, $inventory);
 		$members = array_column($config['members'], 'gateway');
@@ -147,6 +148,7 @@ function sdwan_observe_once(): void {
 			    sdwan_probe_secondary_first($config));
 		}
 		$snapshot = sdwan_evaluate($config, $observations, $started, $inventory, $service_checks);
+		$snapshot['observed_at_ns'] = $observed_at;
 		$snapshot['config_revision'] = sdwan_config_revision($config);
 		// A native or SD-WAN edit can land while the observer waits on probe I/O.
 		if (!config_read_file(false, true)) {
@@ -182,7 +184,13 @@ function sdwan_observe_once(): void {
 				try {
 					$bindings = sdwan_steering_bindings();
 					$rule_pairs = [];
-					$snapshot['steering'] = sdwan_steering_observations($config, $snapshot, $prior['steering'] ?? [], $rule_pairs);
+					$prior_steering = $prior['steering'] ?? [];
+					if (!isset($prior['observed_at_ns'])) {
+						// Keep the previous paths but restart holds inherited from a civil clock.
+						$prior_steering = array_map(static fn($state) =>
+						    array_intersect_key($state, ['gateway' => true, 'pool' => true, 'revision' => true]), $prior_steering);
+					}
+					$snapshot['steering'] = sdwan_steering_observations($config, $snapshot, $prior_steering, $rule_pairs);
 				} catch (UnexpectedValueException $e) {
 					/* Unreadable bindings produce no pass decisions. */
 					$invalid_bindings = true;
@@ -218,10 +226,18 @@ function sdwan_observe_once(): void {
 					}
 					$clear_receipt = !$bindings && !$invalid_bindings && $withdrawal === null;
 					$matches = $rules !== null && $withdrawal === null && !$invalid_bindings;
+					$confirmed_bindings = [];
 					foreach ($bindings as $group => $binding) {
-						$status = sdwan_steering_pf_status($binding, $snapshot['steering'][$group] ?? [], $inventory, $rules,
+						$state = $snapshot['steering'][$group] ?? [];
+						$status = sdwan_steering_pf_status($binding, $state, $inventory, $rules,
 						    $rule_pairs[$group] ?? null);
 						$matches = $matches && in_array($status, ['applied', 'blocked'], true);
+						if ($matches) {
+							$confirmed_bindings[$group] = ['policy' => $binding['policy'], 'status' => $status, 'state' => $state];
+						}
+					}
+					if (!$matches) {
+						$confirmed_bindings = [];
 					}
 					if ($clear_receipt) {
 						$receipt = null;
@@ -291,7 +307,8 @@ function sdwan_observe_once(): void {
 		if ($invalid_bindings) {
 			sdwan_log_event('error', [], 'bindings');
 		} else {
-			sdwan_log_event('observation', $snapshot);
+			// These events describe the active PF readback, not merely the prospective steering choice.
+			sdwan_log_event('observation', $snapshot + ['pf_confirmed' => $confirmed_bindings ?? []]);
 		}
 	} finally {
 		fclose($lock);

@@ -170,6 +170,44 @@ if ($policy !== null):
 	</div>
 	<?php endif; ?>
 </div>
+<?php if (isAllowedPage('/status_logs.php')):
+	require_once('/usr/local/pkg/sdwan_log.inc');
+	$events_for_policy = sdwan_log_recent_policy_events(g_get('varlog_path', '/var/log') . '/system.log', $selected_policy);
+	$event_labels = [
+		'recommended' => gettext('Recommendation'),
+		'unavailable' => gettext('No eligible path'),
+		'applied' => gettext('Confirmed by PF'),
+		'blocked' => gettext('Block confirmed by PF'),
+	];
+?>
+<div class="panel panel-default">
+	<div class="panel-heading"><h2 class="panel-title"><?=gettext('Recent policy events')?></h2></div>
+	<?php if (!$events_for_policy): ?>
+	<div class="panel-body"><?= $events_for_policy === null ?
+	    gettext('Recent policy events are unavailable.') : gettext('No matching events in the recent System Log.') ?></div>
+	<?php else: ?>
+	<div class="table-responsive" tabindex="0" role="region" aria-label="<?=gettext('Recent policy events')?>">
+		<table class="table table-striped table-condensed">
+			<thead><tr>
+				<th scope="col"><?=gettext('System Log time')?></th>
+				<th scope="col"><?=gettext('Event')?></th>
+				<th scope="col"><?=gettext('Details')?></th>
+			</tr></thead>
+			<tbody>
+			<?php foreach ($events_for_policy as $entry): ?>
+				<tr>
+					<td class="text-nowrap"><?=sdwan_ui_escape($entry['time'])?></td>
+					<td><?=sdwan_ui_escape($event_labels[$entry['type']])?></td>
+					<td><?=sdwan_ui_escape($entry['detail'])?></td>
+				</tr>
+			<?php endforeach; ?>
+			</tbody>
+		</table>
+	</div>
+	<div class="panel-footer"><?=gettext('Up to 20 recorded transitions from the active System Log. Repeated changes may be grouped.')?></div>
+	<?php endif; ?>
+</div>
+<?php endif; ?>
 <?php if (function_exists('pfSense_get_interface_stats')):
 	$traffic_url = '/sdwan/diagnostics.php?' . http_build_query([
 		'policy' => sdwan_ui_choice($selected_policy), 'traffic' => 'sample',

@@ -46,8 +46,11 @@ def main():
         options = dict(cwd=overlay, check=True, env={**os.environ, "GIT_CEILING_DIRECTORIES": str(overlay.parent)})
         subprocess.run(["git", "apply", "--check", str(diff)], **options)
         subprocess.run(["git", "apply", str(diff)], **options)
-        if b"filter_sdwan_begin_reload();" not in dest.read_bytes():
-            raise RuntimeError("git did not produce the expected native gateway hook")
+        patched = dest.read_bytes()
+        if (b"filter_sdwan_begin_reload($sdwan_persisted);" not in patched or
+                b"filter_generate_gateways($sdwan_persisted);" not in patched or
+                b"filter_sdwan_read_persisted_bindings()" not in patched):
+            raise RuntimeError("git did not produce the expected native approval and gateway hooks")
         shutil.copyfile(HERE / "filter-sdwan.inc", dest.with_name("filter-sdwan.inc"))
         overlay.rename(out)
     print(f"Prepared {out / FILTER} and its filter-sdwan.inc dependency.")

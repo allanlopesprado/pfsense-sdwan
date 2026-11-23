@@ -204,9 +204,20 @@ function sdwan_probe_fib_supported(): bool {
 	    is_executable('/usr/local/bin/php') && is_readable(__DIR__ . '/sdwan_probe_worker.php');
 }
 
+function sdwan_probe_fib_count(): ?int {
+	if (PHP_OS_FAMILY !== 'BSD' || !function_exists('exec') ||
+	    !is_executable('/sbin/sysctl') || !is_executable('/bin/timeout')) {
+		return null;
+	}
+	$raw = exec('/bin/timeout 0.300000 /sbin/sysctl -n net.fibs 2>/dev/null', $lines, $status);
+	return $status === 0 && count($lines) === 1 && is_string($raw) &&
+	    preg_match('/\A[1-9][0-9]{0,4}\z/D', $raw) && (int)$raw <= 65536 ? (int)$raw : null;
+}
+
 /* All sockets are bound to the live interface source. Require a native host
  * route pinned to the gateway or its PPP link, and check it again before accepting results. */
-function sdwan_probe_path(array $target, array $gateway, ?int $deadline = null): ?array {
+function sdwan_probe_path(array $target, array $gateway, ?int $deadline = null, ?array &$expected = null): ?array {
+	$expected = null;
 	$family = $target['family'];
 	$fib = $target['fib'] ?? 0;
 	if (($deadline !== null && hrtime(true) >= $deadline) ||
@@ -234,6 +245,7 @@ function sdwan_probe_path(array $target, array $gateway, ?int $deadline = null):
 	if ($next === null) {
 		return null;
 	}
+	$expected = ['device' => $device, 'source' => $source, 'next_hop' => $next];
 	$timeout = $deadline === null ? 300000 : min(300000, sdwan_probe_remaining_us($deadline));
 	if ($timeout === 0) {
 		return null;
@@ -254,7 +266,7 @@ function sdwan_probe_path(array $target, array $gateway, ?int $deadline = null):
 	}
 	return sdwan_probe_route_matches($output, $device, $next, $direct_target) &&
 	    ($deadline === null || hrtime(true) <= $deadline)
-	    ? ['device' => $device, 'source' => $source, 'next_hop' => $next] : null;
+	    ? $expected : null;
 }
 
 function sdwan_probe_result(array $job, bool $replied, string $failure, int $deadline): string {

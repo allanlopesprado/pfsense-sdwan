@@ -165,7 +165,7 @@ def observer(binary, *, two_bindings=False):
         del config["fixture_now"]
 
         old = json.loads(snapshot.read_bytes())
-        old["generated_at"] = int(time.time()) - 31
+        old["observed_at_ns"] -= 31_000_000_000
         snapshot.write_text(json.dumps(old))
         lookup = php(binary, *params, "-r", include + "echo json_encode(sdwan_read_snapshot());")
         results.append(case("expired_observation", "withdrawn", "withdrawn" if lookup == "null" else "usable"))

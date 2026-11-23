@@ -776,6 +776,18 @@ def acceptance(qemu, cleanup, provider, *, cold_restart):
     command(qemu, f"php {LAB}/ce291-guest.php bind")
     wait_paths(qemu, "baseline", primary)
     verify_updater_readiness(qemu, version, installed_since, forwarding=True)
+    history_script = ('require "/usr/local/pkg/sdwan_log.inc"; '
+                      'echo json_encode(sdwan_log_recent_policy_events("/var/log/system.log", "ERP"));')
+    deadline = time.monotonic() + 30
+    while True:
+        history = json.loads(command(qemu, f"php -r {shlex.quote(history_script)}")) or []
+        if (any(event["type"] == "recommended" for event in history)
+                and any(event["type"] == "applied" and "gateway GW_A in group G." in event["detail"]
+                        for event in history)):
+            break
+        assert time.monotonic() < deadline, history
+        time.sleep(1)
+    print("NATIVE_SYSLOG_POLICY_RECOMMENDATION_AND_PF_CONFIRMATION_OK", flush=True)
     tcp_pair("baseline", (A, A))
     assert "ACTIVE_POLICY_REJECTED_INVALID_PROBE_ROUTE" in command(qemu, f"php {LAB}/ce291-guest.php probe_route_guard")
     wait_paths(qemu, "rejected policy edit", primary)

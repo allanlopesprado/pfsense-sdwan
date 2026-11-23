@@ -4,6 +4,65 @@ if (!defined('SDWAN_GUI')) {
 	exit;
 }
 
+function sdwan_ui_review_probe_routes(array $member, array $saved_members, string $original, array $gateway): array {
+	require_once('/usr/local/pkg/sdwan_probe.inc');
+	$slots = ['probe_primary' => gettext('Primary service check'), 'probe_secondary' => gettext('Secondary service check')];
+	$used = [];
+	foreach ($saved_members as $saved) {
+		if ($saved['name'] === $original) {
+			continue;
+		}
+		foreach ($slots as $key => $label) {
+			$target = sdwan_probe_target($saved[$key] ?? null);
+			if ($target !== null) {
+				$used[$target['address']][$target['fib'] ?? 0] = true;
+			}
+		}
+	}
+	$fib_count = sdwan_probe_fib_count();
+	$reviews = [];
+	foreach ($slots as $key => $label) {
+		$value = $member[$key] ?? null;
+		if ($value === null) {
+			continue;
+		}
+		$target = sdwan_probe_target($value);
+		$review = ['label' => $label];
+		if ($target === null || ($key === 'probe_secondary' && !isset($member['probe_primary']))) {
+			$review['result'] = gettext('Enter a valid check. A secondary check also requires a primary check.');
+		} elseif ($target['family'] !== $gateway['family']) {
+			$review['result'] = gettext('The target must match the gateway address family.');
+		} else {
+			$fib = $target['fib'] ?? 0;
+			$address = $target['address'];
+			$review['target'] = sprintf(gettext('%1$s in FIB %2$d'), $address, $fib);
+			$other_key = $key === 'probe_primary' ? 'probe_secondary' : 'probe_primary';
+			$other = sdwan_probe_target($member[$other_key] ?? null);
+			if (isset($used[$address][$fib]) ||
+			    ($other !== null && $other['address'] === $address && ($other['fib'] ?? 0) === $fib)) {
+				$review['result'] = gettext('The target already has another check in this routing table.');
+				for ($available = 1; $fib_count !== null && $available < $fib_count; $available++) {
+					if ($available !== $fib && !isset($used[$address][$available]) &&
+					    ($other === null || $other['address'] !== $address || ($other['fib'] ?? 0) !== $available)) {
+						$review['suggestion'] = 'fib=' . $available . ' ' . preg_replace('/\Afib=[0-9]+ /', '', $value);
+						break;
+					}
+				}
+			} elseif ($fib > 0 && ($fib_count === null || $fib >= $fib_count)) {
+				$review['result'] = gettext('This routing table is unavailable. Check the system FIB count before assigning a table.');
+			} else {
+				$path = sdwan_probe_path($target, $gateway, null, $expected);
+				$review['expected'] = $expected;
+				$review['result'] = $path !== null ? gettext('Host route verified') :
+				    gettext('Host route unverified. Check the gateway, interface address and pinned host route.');
+				$review['lookup'] = 'route -n get -' . $target['family'] . ' ' . $address . ' -fib ' . $fib;
+			}
+		}
+		$reviews[] = $review;
+	}
+	return [$reviews, $fib_count];
+}
+
 $sections = [
 	'members' => gettext('Members'),
 	'slas' => gettext('Performance SLAs'),
@@ -28,6 +87,8 @@ $editing = sdwan_ui_scalar($_GET, 'edit');
 $original = $editing;
 $display_form = isset($_GET['edit']) || isset($_GET['add']);
 $confirm_deletion = false;
+$review_routes = false;
+$probe_reviews = [];
 $errors = [];
 $sdwan_record = [];
 $optional_fields = match ($collection) {
@@ -58,6 +119,7 @@ if ($collection === 'policies') {
 $bound_message = gettext('Remove the forwarding binding before deleting this policy.');
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 	$action = sdwan_ui_scalar($_POST, 'action');
+	$review_routes = $collection === 'members' && $action === 'save' && array_key_exists('review_routes', $_POST);
 	$submitted_original = $_POST['original'] ?? null;
 	$original = is_string($submitted_original) ? $submitted_original : '';
 	$position = array_search($original, $names, true);
@@ -205,7 +267,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 	} else {
 		$errors[] = gettext('Unknown action.');
 	}
-	if (!$errors && !$confirm_deletion) {
+	if ($review_routes && !$errors) {
+		$inventory = sdwan_gateways();
+		$gateway = $inventory[$sdwan_record['gateway'] ?? ''] ?? null;
+		if (($_POST['review_routes'] ?? null) !== '1' || $gateway === null) {
+			$errors[] = gettext('Select an available gateway to review its probe routes.');
+		} else {
+			[$probe_reviews, $probe_fib_count] = sdwan_ui_review_probe_routes($sdwan_record, $sdwan['members'], $original, $gateway);
+			if (!$probe_reviews) {
+				$errors[] = gettext('Enter a service check to review its route.');
+			}
+		}
+	} elseif (!$errors && !$confirm_deletion) {
 		$candidate = $sdwan;
 		$candidate[$collection] = array_values($rows);
 		$errors = sdwan_save_config($candidate, $expected_revision, sdwan_can_edit_forwarding());
@@ -427,8 +500,48 @@ elseif (!$display_form): ?>
 	foreach (['revision' => $revision, 'action' => 'save', 'original' => $original] as $field => $value) {
 		$form->addGlobal(new Form_Input($field, '', 'hidden', $value));
 	}
+	if ($collection === 'members') {
+		$review_button = new Form_Button('review_routes', gettext('Review probe routes'), null, 'fa-solid fa-route');
+		$review_button->addClass('btn-default');
+		$form->addGlobal($review_button->setAttribute('value', '1'));
+	}
 	$form->addGlobal(new Form_Button('cancel', gettext('Cancel'), $url, 'fa-solid fa-undo'));
 	print($form);
+if ($probe_reviews): ?>
+	<div class="panel panel-default">
+		<div class="panel-heading"><h2 class="panel-title"><?=gettext('Probe route review')?></h2></div>
+		<div class="panel-body">
+			<p><?=gettext('This review checks the live host route. Use Diagnostics to verify service responses after saving.')?></p>
+			<?php if ($probe_fib_count === 1): ?>
+				<p><?=gettext('Only the default routing table is available. A shared target on two WANs requires separate routing tables.')?></p>
+			<?php elseif ($probe_fib_count !== null): ?>
+				<p><?=sdwan_ui_escape(sprintf(gettext('The system provides routing tables 0 through %d.'), $probe_fib_count - 1))?></p>
+			<?php endif; ?>
+			<div class="table-responsive"><table class="table table-striped table-hover table-condensed">
+				<thead><tr><th scope="col"><?=gettext('Service check')?></th><th scope="col"><?=gettext('Route')?></th></tr></thead>
+				<tbody>
+				<?php foreach ($probe_reviews as $review): ?>
+					<tr><th scope="row"><?=sdwan_ui_escape($review['label'])?>
+						<?php if (isset($review['target'])): ?><br><small><?=sdwan_ui_escape($review['target'])?></small><?php endif; ?>
+					</th><td><?=sdwan_ui_escape($review['result'])?>
+						<?php if (isset($review['expected'])):
+							$expected = $review['expected']; ?>
+							<br><?=sdwan_ui_escape(sprintf(gettext('Expected interface %1$s, source %2$s, next hop %3$s.'),
+							    $expected['device'], $expected['source'], $expected['next_hop']))?>
+						<?php endif; ?>
+						<?php if (isset($review['lookup'])): ?><br><code><?=sdwan_ui_escape($review['lookup'])?></code><?php endif; ?>
+						<?php if (isset($review['suggestion'])): ?>
+							<br><?=gettext('Configure the host route in the suggested table if it is dedicated to this WAN.')?>
+							<code><?=sdwan_ui_escape($review['suggestion'])?></code>
+						<?php endif; ?>
+					</td></tr>
+				<?php endforeach; ?>
+				</tbody>
+			</table></div>
+			<p><?=gettext('Keep probe routes in dedicated tables and restore them after a reboot or WAN renewal.')?></p>
+		</div>
+	</div>
+<?php endif;
 if ($collection === 'policies'): ?>
 	<script>
 	events.push(function () {

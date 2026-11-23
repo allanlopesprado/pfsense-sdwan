@@ -21,6 +21,18 @@ foreach (['sdwan.inc', 'sdwan_engine.inc', 'sdwan_steering.inc', 'sdwan_prefligh
 set_include_path(__DIR__ . '/fixtures/write');
 require 'config.inc';
 require $dir . '/sdwan_steering.inc';
+$alias_scope = [
+	'device' => 'igb0', 'interface' => 'lan', 'family' => 'inet', 'protocols' => ['tcp'],
+	'source' => ['network' => 'lan'], 'destination' => ['address' => 'ApprovedHosts', 'port' => '443'],
+	'destination_alias' => 'ApprovedHosts',
+];
+foreach (['<ApprovedHosts>' => true, '<ApprovedHosts:2>' => true, '<DifferentHostTable:2>' => false, '192.0.2.144' => false] as $selector => $allowed) {
+	$loaded_scope = sdwan_steering_scope_fields("igb0 inet proto tcp from <LAN__NETWORK:1> to {$selector} port = 443");
+	if (sdwan_steering_scope_matches($loaded_scope, $alias_scope) !== $allowed) {
+		throw new RuntimeException('The loaded rule must identify the exact native host table.');
+	}
+}
+
 function config_path_enabled($section, $key): bool {
 	return isset(config_get_path($section, [])[$key]);
 }

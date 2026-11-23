@@ -76,7 +76,7 @@ function sdwan_steering_native(?array $inventory = null): array {
 		'phase1' => 'ipsec/phase1', 'phase2' => 'ipsec/phase2', 'vips' => 'virtualip/vip',
 		'openvpn_servers' => 'openvpn/openvpn-server', 'openvpn_clients' => 'openvpn/openvpn-client',
 		'dyndns' => 'dyndnses/dyndns', 'dnsupdates' => 'dnsupdates/dnsupdate', 'interfaces' => 'interfaces',
-		'interface_groups' => 'ifgroups/ifgroupentry',
+		'interface_groups' => 'ifgroups/ifgroupentry', 'aliases' => 'aliases/alias',
 	];
 	$native = ['steering_abi' => sdwan_steering_abi()];
 	foreach ($paths as $key => $path) {
@@ -551,7 +551,7 @@ function sdwan_steering_observations(array $config, array $snapshot, array $prev
 			}
 			$applied = sdwan_steering_pf_status($binding, $old, $native['gateways'], $loaded, $check['rule_pairs']) === 'applied';
 		}
-		$states[$group] = sdwan_steering_state($config, $binding, $result, $old, $snapshot['generated_at'], $applied);
+		$states[$group] = sdwan_steering_state($config, $binding, $result, $old, sdwan_snapshot_clock($snapshot), $applied);
 	}
 	return $states;
 }
@@ -1077,6 +1077,13 @@ function sdwan_steering_scope_matches(array $actual, array $expected): bool {
 	foreach (['source', 'destination'] as $field) {
 		$loaded = sdwan_steering_scope_endpoint($actual[$field]);
 		$configured = sdwan_steering_scope_endpoint($expected[$field]);
+		$alias = $field === 'destination' ? ($expected['destination_alias'] ?? null) : null;
+		if ($alias !== null) {
+			if (!preg_match('/\A<' . preg_quote($alias, '/') . '(?::[0-9]+)?>\z/', $loaded['address'] ?? '')) {
+				return false;
+			}
+			$loaded['address'] = $alias;
+		}
 		if ($expected['family'] === 'inet6' && str_starts_with($configured['address'] ?? '', '::')) {
 			$interface = $expected['interface'] ?? '';
 			if ($interface === '' || !function_exists('merge_ipv6_delegated_prefix') ||
@@ -1092,7 +1099,7 @@ function sdwan_steering_scope_matches(array $actual, array $expected): bool {
 			$configured['address'] = $address;
 		}
 		$ingress = $configured['network'] ?? '';
-		if (!sdwan_preflight_endpoint($loaded, $expected['family'], $ingress) ||
+		if (!sdwan_preflight_endpoint($loaded, $expected['family'], $ingress, $alias) ||
 		    !sdwan_preflight_endpoint_covers($configured, $loaded) ||
 		    !sdwan_preflight_endpoint_covers($loaded, $configured)) {
 			return false;
@@ -1106,14 +1113,16 @@ function sdwan_steering_loaded_tcp_flags(string $rule): ?string {
 	    sdwan_tcp_flags_canonical($flags[1]) : 'any';
 }
 
-/* Prove full coverage for plain quick rules. Rules with extra match options,
- * anchors, aliases or partial overlap require a traffic test. */
+/* Prove full coverage for plain quick rules. Distinct tables, anchors,
+ * and partial overlaps still require a traffic test. */
 function sdwan_steering_loaded_shadow(array $lines, int $position, string $scope, array $interface_groups = []): bool {
 	$bound = sdwan_steering_scope_fields($scope);
 	if ($bound === null) {
 		return false;
 	}
 	$devices = [$bound['device'], ...$interface_groups];
+	$destination = $bound['destination']['address'] ?? '';
+	$same_table = preg_match('/\A<[A-Za-z][A-Za-z0-9_]{0,31}(?::[0-9]+)?>\z/', $destination) ? $destination : null;
 	[$bound_rule] = explode(' label "', $lines[$position], 2);
 	$bound_flags = sdwan_steering_loaded_tcp_flags($bound_rule);
 	for ($i = 0; $i < $position; $i++) {
@@ -1133,7 +1142,7 @@ function sdwan_steering_loaded_shadow(array $lines, int $position, string $scope
 		if ($prior !== null && in_array($prior['device'], $devices, true) && $prior['family'] === $bound['family'] &&
 		    ($prior['protocol'] === '' || $prior['protocol'] === $bound['protocol']) &&
 		    sdwan_preflight_endpoint($prior['source'], $prior['family'], $bound['source']['network'] ?? '') &&
-		    sdwan_preflight_endpoint($prior['destination'], $prior['family'], $bound['destination']['network'] ?? '') &&
+		    sdwan_preflight_endpoint($prior['destination'], $prior['family'], $bound['destination']['network'] ?? '', $same_table) &&
 		    sdwan_preflight_endpoint_covers($prior['source'], $bound['source']) &&
 		    sdwan_preflight_endpoint_covers($prior['destination'], $bound['destination'])) {
 			return true;

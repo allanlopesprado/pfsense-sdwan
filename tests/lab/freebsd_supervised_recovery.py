@@ -225,7 +225,7 @@ def run(parent, rendered, client, firewall, lan, wan_a, wan_b):
             jexec(firewall, "/bin/kill", "-KILL", supervisor_pid, worker_pid, check=True)
 
             stale = json.loads(snapshot.read_text())
-            stale["generated_at"] -= 31
+            stale["observed_at_ns"] -= 31_000_000_000
             snapshot.write_text(json.dumps(stale))
             assert jexec(firewall, *php, "-r", read_current, check=True).stdout == "expired"
             assert scoped_rule().startswith("pass "), "The test no longer demonstrates the resident-rule limit"

@@ -92,3 +92,44 @@ verify($same === $ledger && $logs === [], 'PF read failures are rate-limited for
 verify(count($logs) === 1, 'a prolonged PF read failure can be reported again');
 [, $logs] = sdwan_log_plan($ledger, 'filter_applied', [], '', 901);
 verify(count($logs) === 1 && $logs[0][0] === LOG_NOTICE, 'PF confirmation can be reported immediately when rules become readable');
+
+$decision = snapshot('ISP_B', 'alternatives');
+$decision['steering']['Group_B'] = ['gateway' => 'ISP_A', 'pool' => ['ISP_A', 'ISP_B']];
+[$ledger, $logs] = sdwan_log_plan([], 'observation', $decision, '', 1000);
+verify(count(array_filter($logs, static fn($entry) => str_contains($entry[1], 'PF confirmed'))) === 0,
+    'recommendation and prospective steering do not imply confirmation in PF');
+$policy_name = array_key_first($decision['policies']);
+$decision['pf_confirmed']['Group_B'] = ['policy' => $policy_name, 'status' => 'applied',
+    'state' => $decision['steering']['Group_B']];
+[$ledger, $logs] = sdwan_log_plan($ledger, 'observation', $decision, '', 1001);
+verify($logs === [[LOG_NOTICE, "Policy {$policy_name}: PF confirmed forwarding pool ISP_A, ISP_B in group Group_B."]],
+    'confirmed forwarding is attributed to the policy at readback time');
+[$ledger, $logs] = sdwan_log_plan($ledger, 'observation', $decision, '', 1002);
+verify($logs === [], 'an unchanged PF confirmation stays quiet');
+$decision['pf_confirmed']['Group_B'] = ['policy' => $policy_name, 'status' => 'blocked', 'state' => []];
+[, $logs] = sdwan_log_plan($ledger, 'observation', $decision, '', 1003);
+verify($logs === [[LOG_WARNING, "Policy {$policy_name}: PF confirmed block for new connections in group Group_B."]],
+    'a confirmed scope block has a distinct policy event');
+
+$history = tempnam(sys_get_temp_dir(), 'sdwan-history-');
+try {
+	$bsd = 'Apr  8 10:00:00 pfSense sdwan[27]: SD-WAN Policy ERP: ';
+	$rfc5424 = '<29>1 2026-04-08T20:00:00.123456+00:00 pfSense sdwan 27 - - SD-WAN Policy ERP: ';
+	file_put_contents($history, $bsd . "recommended member PREVIOUS-TIER.\n" . str_repeat(' ', 262144) . "\n" .
+	    $bsd . "recommended member A.\n" . $rfc5424 . "PF confirmed block for new connections in group G.\n" .
+	    str_replace('[27]', '[28]', str_replace('sdwan', 'other', $bsd)) . "recommended member FOREIGN.\n" .
+	    str_replace('Policy ERP:', 'Policy ERP-extra:', $bsd) . "recommended member UNRELATED.\n" .
+	    $rfc5424 . "PF confirmed gateway B in group G.");
+	$events = sdwan_log_recent_policy_events($history, 'ERP');
+	verify(array_column($events, 'type') === ['blocked', 'recommended'] &&
+	    array_column($events, 'time') === ['2026-04-08T20:00:00.123456+00:00', 'Apr  8 10:00:00'],
+	    'policy history reads complete records within the bounded active log tail in both native formats');
+	verify(sdwan_log_recent_policy_events($history, 'OTHER') === [] &&
+	    sdwan_log_recent_policy_events($history, '../system.log') === null,
+	    'policy names are filtered literally and do not select log files');
+	file_put_contents($history, str_repeat($bsd . "recommended member A.\n", 30));
+	verify(count(sdwan_log_recent_policy_events($history, 'ERP')) === 20,
+	    'the policy history response has a fixed record limit');
+} finally {
+	unlink($history);
+}

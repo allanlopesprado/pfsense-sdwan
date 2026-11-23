@@ -41,6 +41,34 @@ if ($baseline['trackers'] !== ['101'] || $baseline['gateways'] !== ['ISP_A', 'IS
 	throw new Exception('Binding identities must match native rules and configured candidates.');
 }
 
+$host_alias = $native;
+$host_alias['aliases'] = [['name' => 'ApprovedHosts', 'type' => 'host', 'address' => 'erp.example.test 192.0.2.144']];
+$host_alias['rules'][0]['destination']['address'] = 'ApprovedHosts';
+$host_alias['rules'][1] = guard_for($host_alias['rules'][0]);
+$first_approval = preflight_check($host_alias, true, 'direct WAN rules share an approved host table');
+$edited_alias = $host_alias;
+$edited_alias['aliases'][0]['address'] = 'erp-replacement.example.test';
+$second_approval = preflight_check($edited_alias, true, 'changed approved host alias');
+if ($first_approval['rules_revision'] === $second_approval['rules_revision']) {
+	throw new Exception('Changing the configured host alias must require reapproval.');
+}
+$wrong_guard = $host_alias;
+$wrong_guard['rules'][1]['destination']['address'] = '192.0.2.144';
+preflight_check($wrong_guard, false, 'guard must share the same host table');
+$shadowed_alias = $host_alias;
+$shadow = guard_for($shadowed_alias['rules'][0]);
+$shadow['tracker'] = '97';
+array_unshift($shadowed_alias['rules'], $shadow);
+preflight_check($shadowed_alias, false, 'earlier native block already covers the shared table');
+foreach (['other_alias', '*.example.test', '192.0.2.0/24', 'https://example.test/'] as $invalid) {
+	$invalid_alias = $host_alias;
+	$invalid_alias['aliases'][0]['address'] = $invalid;
+	preflight_check($invalid_alias, false, 'nested, wildcard, prefix and URL entries remain outside host table support');
+}
+$wrong_type = $host_alias;
+$wrong_type['aliases'][0]['type'] = 'urltable';
+preflight_check($wrong_type, false, 'remote list alias must not create a direct WAN approval');
+
 $probe_config = $config;
 $probe_config['members'][0] += [
 	'probe_primary' => 'tcp://192.0.2.20:443',

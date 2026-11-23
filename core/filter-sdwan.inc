@@ -69,9 +69,10 @@ function filter_sdwan_pool_route(array $paths, bool $sticky = false): ?string {
 
 /* An index belongs to a single native generation. Conflicting tracker entries
  * are denied instead of depending on XML order. */
-function filter_sdwan_tracker_index(): array {
+function filter_sdwan_tracker_index(?array $rows = null): array {
 	$index = [];
-	foreach ((array)config_get_path('gateways/sdwan_bindings/item', []) as $binding) {
+	$rows ??= (array)config_get_path('gateways/sdwan_bindings/item', []);
+	foreach ($rows as $binding) {
 		$trackers = $binding['trackers']['item'] ?? [];
 		$valid = is_array($trackers) && array_is_list($trackers);
 		foreach ((array)$trackers as $id) {
@@ -84,9 +85,80 @@ function filter_sdwan_tracker_index(): array {
 	return $index;
 }
 
-function filter_sdwan_begin_reload(): void {
+/* The native parser reads the persisted file without replacing the current
+ * caller's config. Restore its scratch globals after taking the sample. */
+function filter_sdwan_read_persisted_bindings(): ?array {
+	$keys = ['listtags', 'parsedcfg', 'curpath', 'depth', 'havedata'];
+	$state = [];
+	foreach ($keys as $key) {
+		if (array_key_exists($key, $GLOBALS)) {
+			$state[$key] = $GLOBALS[$key];
+		}
+	}
+	try {
+		$config = parse_xml_config(g_get('conf_path') . '/config.xml', [g_get('xml_rootobj')]);
+	} catch (Throwable) {
+		return null;
+	} finally {
+		foreach ($keys as $key) {
+			if (array_key_exists($key, $state)) {
+				$GLOBALS[$key] = $state[$key];
+			} else {
+				unset($GLOBALS[$key]);
+			}
+		}
+	}
+	if (!is_array($config) || !$config) {
+		return null;
+	}
+	$section = $config['gateways']['sdwan_bindings'] ?? [];
+	if ($section === '' || $section === []) {
+		return [];
+	}
+	$rows = $section['item'] ?? null;
+	if (!is_array($rows) || !array_is_list($rows)) {
+		return null;
+	}
+	foreach ($rows as $binding) {
+		$trackers = $binding['trackers']['item'] ?? null;
+		if (!is_array($trackers) || !array_is_list($trackers) || !$trackers) {
+			return null;
+		}
+		foreach ($trackers as $tracker) {
+			if (!is_string($tracker) || !preg_match('/\A[1-9][0-9]{0,9}\z/', $tracker)) {
+				return null;
+			}
+		}
+	}
+	return $rows;
+}
+
+function filter_sdwan_matching_binding(array $memory, array $saved): bool {
+	// Native XML represents a single <group> as a list; its editor may use a scalar.
+	$normalize = static function (array $binding): array {
+		$group = $binding['group'] ?? null;
+		if (is_array($group) && array_keys($group) === [0]) {
+			$binding['group'] = $group[0];
+		}
+		ksort($binding, SORT_STRING);
+		return $binding;
+	};
+	return $normalize($memory) === $normalize($saved);
+}
+
+function filter_sdwan_begin_reload(?array $persisted_rows = null): void {
 	$started = hrtime(true);
 	$bindings = filter_sdwan_tracker_index();
+	if ($persisted_rows !== null) {
+		$saved = filter_sdwan_tracker_index($persisted_rows);
+		foreach ($bindings + $saved as $tracker => $_) {
+			$current = $bindings[$tracker] ?? null;
+			$persisted = $saved[$tracker] ?? null;
+			if (!is_array($current) || !is_array($persisted) || !filter_sdwan_matching_binding($current, $persisted)) {
+				$bindings[$tracker] = false;
+			}
+		}
+	}
 	$trackers = array_map('strval', array_keys($bindings));
 	sort($trackers, SORT_STRING);
 	$GLOBALS['sdwan_filter_cycle'] = [

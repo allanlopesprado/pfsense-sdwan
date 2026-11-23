@@ -140,6 +140,31 @@ if ($action === 'floating_erp_block') {
     write_config('Toggle the disposable Floating ERP block');
     exit;
 }
+if ($action === 'erp_host_alias') {
+    $name = 'SDWAN_LAB_ERP';
+    $aliases = config_get_path('aliases/alias', []);
+    if (in_array($name, array_column($aliases, 'name'), true)) {
+        throw new RuntimeException('The disposable ERP alias already exists');
+    }
+    $aliases[] = ['name' => $name, 'type' => 'host', 'address' => '192.0.2.162',
+        'descr' => 'Disposable ERP host alias', 'detail' => 'ERP'];
+    $rules = config_get_path('filter/rule', []);
+    $edited = 0;
+    foreach ($rules as &$rule) {
+        if (in_array((string)($rule['tracker'] ?? ''), ['41001', '41002'], true) &&
+            ($rule['destination']['address'] ?? null) === '192.0.2.162') {
+            $rule['destination']['address'] = $name;
+            $edited++;
+        }
+    }
+    unset($rule);
+    if ($edited !== 2 || !is_array(config_set_path('aliases/alias', $aliases)) ||
+        !is_array(config_set_path('filter/rule', $rules)) ||
+        !is_array(write_config('Set the disposable ERP host alias on the paired LAN rules'))) {
+        throw new RuntimeException('Cannot set the disposable ERP host alias');
+    }
+    exit;
+}
 if ($action === 'package_fib_probe') {
     require_once('/usr/local/pkg/sdwan_probe.inc');
     $tables = ($argv[2] ?? '') === 'reversed' ? [2, 1] : [1, 2];

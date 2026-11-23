@@ -332,7 +332,10 @@ def run(binary, require_unix):
         assert json.loads(php(binary, "-r", read)) == native
         print("ok - native gateways publish real measurements before SD-WAN members exist")
 
-        second["generated_at"] -= 300
+        wall_clock_jump = second | {"generated_at": second["generated_at"] + 600}
+        snapshot.write_text(json.dumps(wall_clock_jump))
+        assert json.loads(php(binary, "-r", read)) == wall_clock_jump
+        second["observed_at_ns"] -= 31_000_000_000
         snapshot.write_text(json.dumps(second))
         assert json.loads(php(binary, "-r", read)) is None
         print("ok - the snapshot reader rejects an expired observation")

@@ -46,3 +46,54 @@ foreach ([null, 0, -1, 31] as $invalid_weight) {
 	}
 }
 echo "ok - null and out-of-range weights fail closed before pool arithmetic\n";
+
+function config_get_path(string $path, mixed $default = null): mixed {
+	return $path === 'gateways/sdwan_bindings/item' ? $GLOBALS['memory_rows'] : $default;
+}
+
+function g_get(string $key): string {
+	return ['conf_path' => '/fixture', 'xml_rootobj' => 'pfsense'][$key];
+}
+
+function parse_xml_config(string $path, array $root): mixed {
+	if ($path !== '/fixture/config.xml' || $root !== ['pfsense']) {
+		throw new LogicException('Invalid native parser arguments');
+	}
+	$GLOBALS['parsedcfg'] = 'parser scratch';
+	$GLOBALS['havedata'] = 1;
+	return $GLOBALS['disk_config'];
+}
+
+$row = static fn(string $tracker, string|array $group = 'G'): array => [
+	'group' => $group, 'policy' => 'ERP', 'rules_revision' => str_repeat('a', 64),
+	'trackers' => ['item' => [$tracker]], 'gateways' => ['item' => ['A', 'B']],
+];
+$GLOBALS['memory_rows'] = [$row('41001'), $row('41002'), $row('41003')];
+$saved = [$row('41001', ['G']), array_replace($row('41002'), ['rules_revision' => str_repeat('b', 64)]), $row('41004')];
+$GLOBALS['disk_config'] = ['gateways' => ['sdwan_bindings' => ['item' => $saved]]];
+$GLOBALS['parsedcfg'] = 'before';
+$persisted = filter_sdwan_read_persisted_bindings();
+if ($persisted !== $saved || $GLOBALS['parsedcfg'] !== 'before' || isset($GLOBALS['havedata'])) {
+	throw new RuntimeException('Persisted config read did not preserve the native parser state');
+}
+filter_sdwan_begin_reload($persisted);
+if ($GLOBALS['sdwan_filter_cycle']['trackers'] !== ['41001', '41002', '41003', '41004'] ||
+    $GLOBALS['sdwan_filter_cycle']['bindings']['41001'] !== $row('41001') ||
+    filter_sdwan_rule_route(['tracker' => '41002'], []) !== false ||
+    filter_sdwan_rule_route(['tracker' => '41003'], []) !== false ||
+    filter_sdwan_rule_route(['tracker' => '41004'], []) !== false ||
+    filter_sdwan_rule_route(['tracker' => '41005'], []) !== null) {
+	throw new RuntimeException('A reload did not preserve the union of approved tracker IDs');
+}
+
+$GLOBALS['disk_config'] = ['system' => []];
+if (filter_sdwan_read_persisted_bindings() !== []) {
+	throw new RuntimeException('A valid config without bound rules did not return an empty authority index');
+}
+foreach ([-1, ['gateways' => ['sdwan_bindings' => ['item' => [[$row('41001')]]]]]] as $malformed) {
+	$GLOBALS['disk_config'] = $malformed;
+	if (filter_sdwan_read_persisted_bindings() !== null) {
+		throw new RuntimeException('An unreadable approval list was accepted for native generation');
+	}
+}
+echo "ok - native rule generation uses saved approval authority while preserving unrelated rules\n";

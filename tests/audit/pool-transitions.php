@@ -96,7 +96,10 @@ for ($trial = 0; $trial < $trials; $trial++) {
 	// The civil jump stays below the snapshot age limit. The simulated elapsed
 	// time has not reached the policy hold, even though the wall clock has.
 	$steady = $next($all, $firstRecovers, $start + $elapsed);
-	$jumped = $next($all, $firstRecovers, $start + $hold);
+	$jumped = $next($all, $firstRecovers, sdwan_snapshot_clock([
+	    'generated_at' => $start + $hold,
+	    'observed_at_ns' => ($start + $elapsed) * 1_000_000_000,
+	]));
 	$steadyHolds = $steady['pool'] === [$survivor] && ($steady['recovering'][$first] ?? null) === $start;
 	$clockHolds += (int)($steadyHolds && $jumped['pool'] === [$survivor] &&
 	    ($jumped['recovering'][$first] ?? null) === $start);

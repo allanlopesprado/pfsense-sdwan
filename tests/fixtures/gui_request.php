@@ -36,6 +36,9 @@ $upgrade_calls = 0;
 $rollback_calls = 0;
 
 function g_get($key, $default) {
+	if ($key === 'varlog_path' && isset($GLOBALS['request']['system_log'])) {
+		return g_get('varrun_path', $default);
+	}
 	if ($key !== 'varrun_path') {
 		return $default;
 	}
@@ -154,6 +157,22 @@ function is_service_running($name): bool {
 }
 function get_interface_gateway($interface) { return config_get_path('fixture_dynamic_targets', [])[$interface] ?? null; }
 function get_interface_gateway_v6($interface) { return get_interface_gateway($interface); }
+function sdwan_probe_fib_count(): ?int {
+	return $GLOBALS['request']['probe_fib_count'] ?? fixture_native_sdwan_probe_fib_count();
+}
+function sdwan_probe_path(array $target, array $gateway, ?int $deadline = null, ?array &$expected = null): ?array {
+	$request = $GLOBALS['request'];
+	if (!array_key_exists('probe_path', $request)) {
+		return fixture_native_sdwan_probe_path($target, $gateway, $deadline, $expected);
+	}
+	$path = $request['probe_path'];
+	if ($path === false || ($target['fib'] ?? 0) !== $path['fib'] || $target['address'] !== $path['address'] ||
+	    $gateway['interface'] !== $path['interface']) {
+		throw new LogicException('Unexpected probe route lookup from the editor.');
+	}
+	$expected = $path['expected'];
+	return $path['match'] ? $expected : null;
+}
 if (isset($request['interface_counters'])) {
 	function get_real_interface($interface, $family, $real, $flush) {
 		return config_get_path('interfaces', [])[$interface]['if'] ?? null;
@@ -207,6 +226,9 @@ function fixture_write_snapshot(array $snapshot, array $config): void {
 }
 if (isset($request['snapshot'])) {
 	fixture_write_snapshot($request['snapshot'], $config);
+}
+if (isset($request['system_log'])) {
+	file_put_contents(g_get('varlog_path', '') . '/system.log', $request['system_log']);
 }
 if ($_POST) {
 	$_POST['revision'] ??= sdwan_config_revision($config);

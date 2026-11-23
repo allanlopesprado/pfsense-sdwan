@@ -38,6 +38,21 @@ function sdwan_log_label($value): string {
 	return is_string($value) && preg_match('/^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/D', $value) ? $value : '[unnamed]';
 }
 
+function sdwan_log_forwarding_choice(array $binding): array {
+	$choice = $binding['gateway'] ?? null;
+	$entry = ['choice' => $choice === null ? null : sdwan_log_label($choice)];
+	$pool = $binding['pool'] ?? [];
+	if (is_array($pool) && count($pool) > 1) {
+		$pool = array_map('sdwan_log_label', $pool);
+		$entry['pool'] = hash('sha256', implode("\0", $pool));
+		$entry['choice'] = implode(', ', array_slice($pool, 0, 2));
+		if (count($pool) > 2) {
+			$entry['choice'] .= ' (+' . (count($pool) - 2) . ')';
+		}
+	}
+	return $entry;
+}
+
 /* Keep the last reported choices. If several paths flap, publish at most 12
  * policy/forwarding events per minute and reconcile the final choices after it. */
 function sdwan_log_plan(array $state, string $kind, array $snapshot, string $cause, int $now): array {
@@ -117,23 +132,23 @@ function sdwan_log_plan(array $state, string $kind, array $snapshot, string $cau
 		$current['Policy ' . sdwan_log_label((string)$name)] = [
 		    'choice' => $choice === null ? null : sdwan_log_label($choice),
 		    'status' => $policy['path_status'] ?? 'unknown',
+		    'reason' => match ($policy['reason'] ?? null) {
+			    'Lowest configured cost within SLA' => 'lowest configured cost within SLA',
+			    'Lowest measured RTT within SLA' => 'lowest measured RTT within SLA',
+			    'Weighted connections across eligible gateways' => 'weighted connections across eligible gateways',
+			    default => null,
+		    },
 		];
 	}
 	foreach ($snapshot['steering'] ?? [] as $group => $binding) {
-		$choice = $binding['gateway'] ?? null;
-		$entry = [
-		    'choice' => $choice === null ? null : sdwan_log_label($choice), 'status' => 'forwarding',
+		$current['Group ' . sdwan_log_label((string)$group)] =
+		    sdwan_log_forwarding_choice($binding) + ['status' => 'forwarding'];
+	}
+	foreach ($snapshot['pf_confirmed'] ?? [] as $group => $binding) {
+		$current['PF ' . sdwan_log_label((string)$group)] = sdwan_log_forwarding_choice($binding['state']) + [
+		    'status' => $binding['status'], 'policy' => sdwan_log_label($binding['policy']),
+		    'group' => sdwan_log_label((string)$group),
 		];
-		$pool = $binding['pool'] ?? [];
-		if (is_array($pool) && count($pool) > 1) {
-			$pool = array_map('sdwan_log_label', $pool);
-			$entry['pool'] = hash('sha256', implode("\0", $pool));
-			$entry['choice'] = implode(', ', array_slice($pool, 0, 2));
-			if (count($pool) > 2) {
-				$entry['choice'] .= ' (+' . (count($pool) - 2) . ')';
-			}
-		}
-		$current['Group ' . sdwan_log_label((string)$group)] = $entry;
 	}
 	$reported = array_intersect_key($state['reported'] ?? [], $current);
 	$cursor = array_search($state['transition_cursor'] ?? null, array_keys($current), true);
@@ -159,24 +174,40 @@ function sdwan_log_plan(array $state, string $kind, array $snapshot, string $cau
 		}
 		$old = $previous['choice'] ?? null;
 		$new = $next['choice'];
+		if (isset($next['policy'])) {
+			$detail = $next['status'] === 'blocked' ? 'block for new connections' :
+			    (isset($next['pool']) ? 'forwarding pool ' : 'gateway ') . $new;
+			$entries[] = [$next['status'] === 'blocked' ? LOG_WARNING : LOG_NOTICE,
+			    'Policy ' . $next['policy'] . ': PF confirmed ' . $detail . ' in group ' . $next['group'] . '.'];
+			$reported[$name] = $next;
+			$state['transition_cursor'] = $name;
+			$state['count']++;
+			continue;
+		}
+		$weighted = ($next['reason'] ?? null) === 'weighted connections across eligible gateways';
 		if ($next['status'] === 'forwarding') {
 			$text = $new === null ? 'no forwarding target for new flows' :
 			    (isset($next['pool']) ? 'forwarding pool ' : 'forwarding target ') . $new;
 			$text .= ' for the native filter to evaluate';
 		} elseif ($new === null) {
 			$text = 'no eligible path';
+		} elseif ($weighted) {
+			$text = 'weighted forwarding recommended';
 		} elseif ($previous !== null && $old === null) {
 			$text = 'eligible path restored, recommended member ' . $new;
 		} else {
 			$text = 'recommended member ' . $new;
 		}
-		if ($old !== null && $old !== $new) {
+		if (!$weighted && $old !== null && $old !== $new) {
 			$text .= ' (previously ' . $old . ')';
 		}
 		if ($next['status'] === 'degraded') {
 			$text .= ', only one eligible member remains';
 		} elseif ($previous !== null && $previous['status'] === 'degraded' && $next['status'] === 'alternatives') {
 			$text .= ', alternatives available again';
+		}
+		if (!$weighted && $new !== null && isset($next['reason'])) {
+			$text .= ', ' . $next['reason'];
 		}
 		$entries[] = [($new === null || $next['status'] === 'degraded') ? LOG_WARNING : LOG_NOTICE,
 		    $name . ': ' . $text . '.'];
@@ -186,6 +217,73 @@ function sdwan_log_plan(array $state, string $kind, array $snapshot, string $cau
 	}
 	$state['reported'] = $reported;
 	return [$state, $entries];
+}
+
+/* Only read named policy entries written by the SD-WAN syslog identity.
+ * Keep timestamps in the native log format, including older RFC 3164 rows. */
+function sdwan_log_recent_policy_events(string $logfile, string $policy): ?array {
+	if (sdwan_log_label($policy) !== $policy || is_link($logfile) || !is_file($logfile)) {
+		return null;
+	}
+	$handle = @fopen($logfile, 'rb');
+	if ($handle === false) {
+		return null;
+	}
+	try {
+		$stat = fstat($handle);
+		if ($stat === false || ($stat['mode'] & 0170000) !== 0100000) {
+			return null;
+		}
+		$limit = 262144;
+		$offset = max(0, $stat['size'] - $limit);
+		if (fseek($handle, $offset) !== 0) {
+			return null;
+		}
+		$tail = stream_get_contents($handle, $limit);
+		if ($tail === false) {
+			return null;
+		}
+	} finally {
+		fclose($handle);
+	}
+	$lines = explode("\n", $tail);
+	array_pop($lines); // Ignore a trailing partial line during concurrent append.
+	if ($offset > 0) {
+		array_shift($lines);
+	}
+	$prefix = 'SD-WAN Policy ' . $policy . ': ';
+	$events = [];
+	foreach (array_reverse($lines) as $line) {
+		$line = rtrim($line, "\r");
+		if (strlen($line) > 1024 || !str_contains($line, $prefix)) {
+			continue;
+		}
+		if (!preg_match('/\A([A-Z][a-z]{2} {1,2}[0-9]{1,2} [0-9]{2}(?::[0-9]{2}){2}) \S+ sdwan\[[0-9]+\]: (.+)\z/D', $line, $match) &&
+		    !preg_match('/\A<[0-9]{1,3}>1 ([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}(?::[0-9]{2}){2}(?:\.[0-9]{1,6})?(?:Z|[+-][0-9]{2}:[0-9]{2})) \S+ sdwan [0-9]+ - - (.+)\z/D', $line, $match)) {
+			continue;
+		}
+		if (!str_starts_with($match[2], $prefix)) {
+			continue;
+		}
+		$detail = substr($match[2], strlen($prefix));
+		$type = match (true) {
+			str_starts_with($detail, 'PF confirmed block ') => 'blocked',
+			str_starts_with($detail, 'PF confirmed gateway '),
+			str_starts_with($detail, 'PF confirmed forwarding pool ') => 'applied',
+			str_starts_with($detail, 'no eligible path') => 'unavailable',
+			str_starts_with($detail, 'recommended member '),
+			str_starts_with($detail, 'weighted forwarding recommended'),
+			str_starts_with($detail, 'eligible path restored, recommended member ') => 'recommended',
+			default => null,
+		};
+		if ($type !== null) {
+			$events[] = ['time' => $match[1], 'type' => $type, 'detail' => $detail];
+			if (count($events) === 20) {
+				break;
+			}
+		}
+	}
+	return $events;
 }
 
 function sdwan_log_event(string $kind, array $snapshot = [], string $cause = ''): void {

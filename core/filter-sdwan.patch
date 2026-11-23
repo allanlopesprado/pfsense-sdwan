@@ -19,7 +19,31 @@
  	/**
  	 * Reset the configuration hash.
  	 */
-@@ -1093,6 +1098,7 @@
+@@ -902,6 +907,15 @@
+ 	/* Use filter lock to not allow concurrent filter reloads during this run. */
+ 	$filterlck = lock('filter', LOCK_EX);
+ 
++	$sdwan_persisted = is_resource($filterlck) ? filter_sdwan_read_persisted_bindings() : null;
++	if ($sdwan_persisted === null) {
++		$message = gettext("SD-WAN skipped a filter reload because saved forwarding approvals could not be read under the filter lock.");
++		update_filter_reload_status($message, true);
++		logger(LOG_ERR, $message, LOG_PREFIX_FILTER);
++		unlock($filterlck);
++		return;
++	}
++
+ 	filter_pflog_start();
+ 	update_filter_reload_status(gettext("Initializing"), true);  // second argument = overwrite existing file
+ 
+@@ -925,6 +939,6 @@
+ 	update_filter_reload_status(gettext("Creating aliases"));
+ 	$vpns_list = filter_get_vpns_list();
+ 	filter_generate_aliases();
+-	filter_generate_gateways();
++	filter_generate_gateways($sdwan_persisted);
+ 	if (is_platform_booting()) {
+ 		echo ".";
+@@ -1093,6 +1107,7 @@
  	} else {
  		update_filter_reload_status(gettext("Skipping filter configuration reload"));
  	}
@@ -27,18 +51,19 @@
  	reload_filterdns();
  	filter_run_commands_late();
  
-@@ -1718,7 +1724,9 @@
+@@ -1718,7 +1733,9 @@
  }
  
- function filter_generate_gateways() {
+-function filter_generate_gateways() {
 -	global $PFConfig, $GatewaysList, $GatewaysStatus;
++function filter_generate_gateways(?array $sdwan_persisted = null) {
 +	global $PFConfig, $GatewaysList, $GatewaysStatus, $sdwan_gateway_routes;
 +	$sdwan_gateway_routes = [];
-+	filter_sdwan_begin_reload();
++	filter_sdwan_begin_reload($sdwan_persisted);
  
  	$rules = '';
  
-@@ -1758,2 +1766,8 @@
+@@ -1758,2 +1775,8 @@
 +		if ($route !== '') {
 +			$path = filter_sdwan_gateway_route($gateway, $gwip);
 +			if ($path !== null) {
@@ -47,7 +72,7 @@
 +		}
  		$rules .= "GW{$gwname} = \" {$route} \"\n";
  	}
-@@ -4273,6 +4287,7 @@
+@@ -4273,6 +4296,7 @@
  }
  
  function filter_generate_user_rule($rule) {
@@ -55,7 +80,7 @@
  	global $g, $FilterIflist, $GatewaysList, $vpns_list, $use_floating_states_for_ipsec;
  	global $dummynet_name_list, $vlanprio_values, $time_based_rules;
  
-@@ -4408,6 +4423,22 @@
+@@ -4408,6 +4432,22 @@
  		$type = "pass";
  	}
  
@@ -78,7 +103,7 @@
  	if (array_path_enabled($rule, 'nat')) {
  		$nat_type = match ($rule['ipprotocol']) {
  			'inet6' => '64',
-@@ -4467,7 +4498,10 @@
+@@ -4467,7 +4507,10 @@
  	}
  	/* if user has selected a custom gateway, lets work with it */
  	else if ($rule['gateway'] <> "" && $type == "pass") {
