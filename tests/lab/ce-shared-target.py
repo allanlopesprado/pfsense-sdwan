@@ -109,6 +109,39 @@ def renew_wan2(ce, qemu, cleanup, provider):
     print("SHARED_TARGET_DNS_HTTPS_DHCP_OK", flush=True)
 
 
+def activation_mismatch_evidence(ce, qemu, worker):
+    details = ce.command(qemu, f"""printf '%s\\n' 'Active PF trackers and native generation'
+pfctl -P -sr 2>/dev/null | grep -E 'ridentifier (41001|41003)$|descr=Default deny rule IPv[46]' | head -12
+printf '%s\\n' 'Observer and reload processes'
+ps -ax -o pid= -o ppid= -o stat= -o command= | awk '$1 == {int(worker)} || $0 ~ /sdwand\\.php|check_reload_status/' | head -12
+for entry in sdwan-observer.json sdwan-observer.json.forwarded sdwan-filter-commit.json sdwan-expiry.heartbeat; do
+    printf '%s\\n' "$entry"
+    if [ -r "/var/run/$entry" ]; then head -c 4096 "/var/run/$entry"; printf '\\n'; else printf '%s\\n' absent; fi
+done
+printf '%s\\n' 'Bindings read from persisted configuration'
+/usr/local/bin/php -r '
+    $xml = simplexml_load_file("/cf/conf/config.xml", "SimpleXMLElement", LIBXML_NONET);
+    if ($xml === false) {{ exit(1); }}
+    $rows = [];
+    foreach ($xml->gateways->sdwan_bindings->item ?? [] as $binding) {{
+        $trackers = [];
+        foreach ($binding->trackers->item ?? [] as $tracker) {{ $trackers[] = (string)$tracker; }}
+        $rows[] = ["group" => (string)$binding->group, "policy" => (string)$binding->policy,
+            "trackers" => $trackers, "rules_revision" => (string)$binding->rules_revision,
+            "policy_revision" => (string)$binding->policy_revision];
+    }}
+    echo json_encode(["time" => time(), "monotonic_ns" => hrtime(true), "bindings" => $rows], JSON_THROW_ON_ERROR), PHP_EOL;
+' || printf '%s\\n' 'Unable to read acceptance bindings'
+printf '%s\\n' 'PF counters and matching ERP states'
+pfctl -P -vvsr 2>/dev/null | grep -A2 -E 'on vtnet1|ridentifier 41001$' | head -90
+pfctl -vvss 2>/dev/null | grep -A3 -F '192.0.2.162:7' | head -35
+if [ -r /var/log/system.log ]; then
+    printf '%s\\n' 'Recent SD-WAN and native reload messages'
+    tail -n 100 /var/log/system.log | grep -Ei 'SD-WAN|filter reload|check_reload_status' | tail -15
+fi""", timeout=15)
+    print(details, flush=True)
+
+
 def verify_activation_guard(ce, qemu):
     native = ce.loaded(qemu)
     ce.assert_rules(native, NATIVE_PATHS)
@@ -137,8 +170,10 @@ def verify_activation_guard(ce, qemu):
             ce.tcp_pair("only the new ERP binding is guarded", (None, ce.A))
         except AssertionError:
             print("PF after mismatched activation traffic", flush=True)
-            print(ce.command(qemu, """pfctl -P -vvsr 2>/dev/null | grep -A2 -E 'on vtnet1|ridentifier 41001$' | head -100
-pfctl -vvss 2>/dev/null | grep -A3 -F '192.0.2.162:7' | head -35"""), flush=True)
+            try:
+                activation_mismatch_evidence(ce, qemu, worker)
+            except Exception as error:
+                print(f"Could not collect all activation evidence: {type(error).__name__}", flush=True)
             raise
         ce.management("waiting for first bound observation", certificate)
         assert_native_routing(ce, qemu, routing)

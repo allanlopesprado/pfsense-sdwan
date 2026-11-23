@@ -225,6 +225,21 @@ jobs:
     with:
       ce_version: ${{ matrix.version }}
       artifact_suffix: -${{ matrix.version }}
+  release-activation:
+    needs: release-appliance
+    permissions:
+      contents: read
+      actions: read
+    strategy:
+      fail-fast: false
+      matrix:
+        version: ['2.9.1', '2.9.2']
+    uses: ./.github/workflows/ce291-appliance.yml
+    with:
+      ce_version: ${{ matrix.version }}
+      scenario: activation-guard
+      artifact_suffix: -${{ matrix.version }}
+      reuse_package: true
   extended-package:
     if: github.event_name == 'workflow_dispatch' && inputs.extended
     uses: ./.github/workflows/build-package.yml
@@ -252,7 +267,7 @@ jobs:
       reuse_package: true
   publish:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main' && startsWith(github.event.head_commit.message, 'Release ')
-    needs: [divergence-audit, offline, freebsd, ikev2, homologation, release-appliance]
+    needs: [divergence-audit, offline, freebsd, ikev2, homologation, release-appliance, release-activation]
     runs-on: ubuntu-24.04
     concurrency:
       group: sdwan-publish
