@@ -16,6 +16,12 @@ on:
       - 'tools/build-lab-pkg.py'
       - 'tools/previous-dist-package.sh'
       - 'dist/pfSense-pkg-SDWAN-*.pkg*'
+  workflow_call:
+    inputs:
+      ce_version:
+        description: pfSense CE release for the isolated appliance
+        type: string
+        required: true
   workflow_dispatch:
     inputs:
       ce_version:
@@ -67,7 +73,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: ${{ inputs.scenario == 'benchmark' && 300 || 45 }}
     env:
-      CE_VERSION: ${{ inputs.ce_version == '2.9.2' && '2.9.2' || '2.9.1' }}
+      CE_VERSION: ${{ inputs.ce_version || '2.9.1' }}
       CE_LAB: ${{ inputs.ce_version == '2.9.2' && 'ce292' || 'ce291' }}
       CE_SCENARIO: ${{ inputs.scenario || 'acceptance' }}
       CE_PAIRS: ${{ inputs.pairs }}
@@ -77,7 +83,7 @@ jobs:
       CE_RECOVERY_HOLD: ${{ inputs.recovery_hold_seconds }}
       CE_SECURITY_PROFILE: ${{ inputs.security_profile || 'base' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Configure Ubuntu package mirror
@@ -85,6 +91,7 @@ jobs:
       - name: Validate scenario inputs
         run: |
           set -eu
+          case "$CE_VERSION" in 2.9.1|2.9.2) ;; *) exit 1 ;; esac
           if [ "$CE_SCENARIO" = recovery ]; then
             test "$CE_VERSION" = 2.9.1
           elif [ "$CE_SCENARIO" = benchmark ]; then
@@ -93,11 +100,11 @@ jobs:
       - name: Recover the disposable disk for this pinned input
         if: env.CE_SCENARIO != 'security'
         id: disk
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ env.CE_LAB }}.raw.gz
           key: ${{ env.CE_LAB }}-candidate-disk-v6-${{ (env.CE_SCENARIO == 'recovery' || env.CE_SCENARIO == 'inspection') && env.CE_SCENARIO || 'base' }}-${{ hashFiles('.github/workflows/ce291-appliance.yml', '.github/workflows/build-package.yml', 'tests/lab/ce291-disk.sh', 'tests/lab/ce291-guest.php', 'tests/lab/ce291-source.py', 'core/**', 'tools/prepare-core.py', 'tools/build-lab-pkg.py', 'tools/previous-dist-package.sh', 'tools/verify-appliance.sh', 'files/**', 'Makefile', 'pkg-descr', 'pkg-plist', 'dist/pfSense-pkg-SDWAN-*.pkg*') }}
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         if: steps.disk.outputs.cache-hit != 'true'
         with:
           name: sdwan-package
@@ -117,7 +124,7 @@ jobs:
           python3 tools/prepare-core.py --ce-292-lab --source lab-source --out lab-overlay
       - name: Prepare and verify signed Netgate packages
         if: steps.disk.outputs.cache-hit != 'true'
-        uses: vmactions/freebsd-vm@4441bea20b31bfa77329a5af583199362489567e # v1.4.9
+        uses: vmactions/freebsd-vm@811efaaac0668df8bfb8308c3ec997b5ab50037b # v1.6.0
         with:
           release: "15.1"
           usesh: true
@@ -128,7 +135,7 @@ jobs:
             sh tests/lab/ce291-disk.sh "$PWD" '${{ env.CE_VERSION }}' '${{ env.CE_SCENARIO }}' '${{ env.CE_SECURITY_PROFILE }}'
       - name: Cache the unbooted disk
         if: env.CE_SCENARIO != 'security' && steps.disk.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ env.CE_LAB }}.raw.gz
           key: ${{ steps.disk.outputs.cache-primary-key }}
@@ -164,7 +171,7 @@ jobs:
               sudo /usr/bin/python3 tests/lab/ce291-appliance.py "$CE_LAB.raw" "$CE_VERSION" "$CE_SCENARIO" | tee -a "$CE_LAB-result.log"
               ;;
           esac
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: ${{ env.CE_LAB }}-${{ env.CE_SCENARIO }}-result

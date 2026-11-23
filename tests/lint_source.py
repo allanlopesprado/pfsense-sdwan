@@ -3,6 +3,7 @@
 
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 
@@ -19,6 +20,12 @@ def main():
     for path in (os.fsdecode(raw) for raw in paths if raw):
         if path.startswith("dist/"):
             continue
+        if path.startswith(".github/workflows/"):
+            for number, line in enumerate((ROOT / path).read_text(encoding="utf-8").splitlines(), 1):
+                use = re.match(r"^\s*(?:-\s*)?uses:\s*['\"]?([^\s'\"#]+)", line)
+                if use and not use[1].startswith("./") and not re.fullmatch(r"[^@]+@[0-9a-f]{40}", use[1]):
+                    print(f"{path}:{number}: external Actions must use a full commit SHA", file=sys.stderr)
+                    failures += 1
         extension = Path(path).suffix
         if extension in (".php", ".inc"):
             commands = [[sys.argv[1], "-l"]]

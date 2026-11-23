@@ -28,7 +28,7 @@ A development build can advance `PORTVERSION` and the changelog before the distr
    ```
 
    To refresh only the README after committing the package, run [`sh tools/update-install-line.sh`](../tools/update-install-line.sh) in a full Git checkout on `FreeBSD:16:amd64`.
-4. Include the generated files in the publishing commit and use the subject `Release X.Y.Z` or `Release X.Y.Z <description>`. Push to `main`. The workflow checks the WebGUI, FreeBSD, IPsec, and the validation matrix, requires a version newer than published releases, then creates the tag and release.
+4. Include the generated files in the publishing commit and use the subject `Release X.Y.Z` or `Release X.Y.Z <description>`. Push to `main`. The workflow checks the WebGUI, FreeBSD, IPsec, and acceptance on both supported CE releases. Once these jobs pass, it verifies the published versions and creates the new tag and release.
 5. After publication, verify the version, package, and SHA-256 on the release page. On an upgraded appliance, run [`verify-appliance.sh`](../tools/verify-appliance.sh) with the expected version.
 
 The tag and assets identify the published package. To distribute a package change, increment the version and repeat the publishing process. For documentation and presentation changes, update the README or the GitHub release notes. [Managing releases](https://docs.github.com/en/repositories/releasing-projects-on-github/managing-releases-in-a-repository)

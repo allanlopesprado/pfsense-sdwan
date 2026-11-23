@@ -6,6 +6,11 @@ on:
   schedule:
     - cron: '23 5 * * *'
   workflow_dispatch:
+    inputs:
+      appliance:
+        description: Also run the two CE appliance acceptance jobs
+        type: boolean
+        default: false
 permissions:
   contents: read
 jobs:
@@ -13,7 +18,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 8
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Run divergence checks with a recorded seed
@@ -29,7 +34,7 @@ jobs:
               echo "::warning title=Known SD-WAN discrepancies::$known still reproduced. See the run summary."
             fi
           fi
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: sdwan-divergence-audit
@@ -43,7 +48,7 @@ jobs:
   offline:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
           fetch-depth: 0
@@ -62,7 +67,7 @@ jobs:
             sh tests/run.sh
           fi
       - name: Check out native pfSense XML, privilege and form implementations
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: pfsense/pfsense
           ref: 9363ac5b8651a1c7a333180425ce7719070f95f9
@@ -101,31 +106,31 @@ jobs:
           php tests/pfsense_core.php "$GITHUB_WORKSPACE/pfsense-core-fixture"
           php tests/lab/native-group-removal.php "$GITHUB_WORKSPACE/pfsense-core-fixture"
           python3 tests/webgui.py --classes "$GITHUB_WORKSPACE/pfsense-core-fixture/src/usr/local/www/classes" --screenshots-dir "$RUNNER_TEMP/sdwan-pages"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: sdwan-pages
           path: ${{ runner.temp }}/sdwan-pages/
           if-no-files-found: error
       - name: Render native dashboard in the light and dark themes
         run: python3 -B tests/widget.py php --visual-core "$GITHUB_WORKSPACE/pfsense-core-fixture" --screenshots "$RUNNER_TEMP/sdwan-dashboard"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: sdwan-dashboard
           path: ${{ runner.temp }}/sdwan-dashboard/
           if-no-files-found: error
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: native-syslog
           path: pfsense-core-fixture/src/etc/inc/syslog.inc
           if-no-files-found: error
       - name: Generate native PF rules from the daemon's gateway samples
         run: python3 -B tests/core_adapter.py --core pfsense-core-fixture --emit-dir "$RUNNER_TEMP/sdwan-rules"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: native-filter-rules
           path: ${{ runner.temp }}/sdwan-rules/*.pf
           if-no-files-found: error
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: native-filter-source
           path: |
@@ -138,26 +143,26 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
           fetch-depth: 0
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: native-filter-rules
           path: lab-rendered
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: native-syslog
           path: lab-syslog
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: native-filter-source
           path: lab-core/src/etc/inc
       - name: Configure the Ubuntu dependency mirror
         run: bash .github/scripts/ubuntu-archive.sh
       - name: Test the pinned installer and native forwarding rules in FreeBSD
-        uses: vmactions/freebsd-vm@4441bea20b31bfa77329a5af583199362489567e # v1.4.9
+        uses: vmactions/freebsd-vm@811efaaac0668df8bfb8308c3ec997b5ab50037b # v1.6.0
         with:
           release: "15.1"
           usesh: true
@@ -192,27 +197,35 @@ jobs:
             sh tests/lab/freebsd-carp.sh
             SDWAN_REAL_DPINGER=1 SDWAN_RENDERED_RULES="$PWD/lab-rendered" sh tests/lab/freebsd-dataplane.sh
             SDWAN_ERP_ONLY=1 SDWAN_NATIVE_CORE="$PWD/lab-core" sh tests/lab/freebsd-dataplane.sh
+  release-appliance:
+    if: (github.event_name == 'push' && github.ref == 'refs/heads/main' && startsWith(github.event.head_commit.message, 'Release ')) || (github.event_name == 'workflow_dispatch' && inputs.appliance)
+    strategy:
+      fail-fast: false
+      matrix:
+        version: ['2.9.1', '2.9.2']
+    uses: ./.github/workflows/ce291-appliance.yml
+    with:
+      ce_version: ${{ matrix.version }}
   publish:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main' && startsWith(github.event.head_commit.message, 'Release ')
-    needs: [divergence-audit, offline, freebsd, ikev2, homologation]
+    needs: [divergence-audit, offline, freebsd, ikev2, homologation, release-appliance]
     runs-on: ubuntu-24.04
     concurrency:
       group: sdwan-publish
       cancel-in-progress: false
     permissions:
       contents: write
+      actions: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/download-artifact@v4
-        with:
-          name: sdwan-dashboard
-          path: release-previews
-      - uses: actions/download-artifact@v4
-        with:
-          name: sdwan-pages
-          path: release-pages
+      - name: Retrieve preview assets from this verified run
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh run download "$GITHUB_RUN_ID" -n sdwan-dashboard -D release-previews
+          gh run download "$GITHUB_RUN_ID" -n sdwan-pages -D release-pages
       - name: Publish verified laboratory distribution
         env:
           GH_TOKEN: ${{ github.token }}
