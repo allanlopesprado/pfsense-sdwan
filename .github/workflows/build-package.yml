@@ -27,6 +27,8 @@ jobs:
           php tests/behavior.php
           php tests/steering_preflight.php
           php tests/steering.php
+      - name: Verify the native source checkout destination
+        run: test ! -e pfsense-core-fixture && test ! -L pfsense-core-fixture
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: pfsense/pfsense
@@ -47,6 +49,8 @@ jobs:
           name: sdwan-dashboard-build${{ inputs.artifact_suffix }}
           path: ${{ runner.temp }}/sdwan-dashboard/
           if-no-files-found: error
+      - name: Verify the package builder checkout destination
+        run: test ! -e freebsd-pkg && test ! -L freebsd-pkg
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: freebsd/pkg

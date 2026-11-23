@@ -75,6 +75,9 @@ jobs:
       artifact_suffix: ${{ inputs.artifact_suffix || '' }}
   appliance:
     needs: package
+    permissions:
+      contents: read
+      actions: read
     runs-on: ubuntu-24.04
     timeout-minutes: ${{ inputs.scenario == 'benchmark' && 300 || 45 }}
     env:
@@ -109,11 +112,12 @@ jobs:
         with:
           path: ${{ env.CE_LAB }}.raw.gz
           key: ${{ env.CE_LAB }}-candidate-disk-v6-${{ (env.CE_SCENARIO == 'recovery' || env.CE_SCENARIO == 'inspection') && env.CE_SCENARIO || 'base' }}-${{ hashFiles('.github/workflows/ce291-appliance.yml', '.github/workflows/build-package.yml', 'tests/lab/ce291-disk.sh', 'tests/lab/ce291-guest.php', 'tests/lab/ce291-source.py', 'core/**', 'tools/prepare-core.py', 'tools/build-lab-pkg.py', 'tools/previous-dist-package.sh', 'tools/verify-appliance.sh', 'files/**', 'Makefile', 'pkg-descr', 'pkg-plist', 'dist/pfSense-pkg-SDWAN-*.pkg*') }}
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+      - name: Retrieve the candidate from this run
         if: steps.disk.outputs.cache-hit != 'true'
-        with:
-          name: sdwan-package${{ inputs.artifact_suffix }}
-          path: ce-candidate-package
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SDWAN_ARTIFACT: sdwan-package${{ inputs.artifact_suffix }}
+        run: gh run download "$GITHUB_RUN_ID" -n "$SDWAN_ARTIFACT" -D ce-candidate-package
       - name: Prepare the audited CE adapter
         if: env.CE_SCENARIO != 'security' && steps.disk.outputs.cache-hit != 'true'
         run: |
