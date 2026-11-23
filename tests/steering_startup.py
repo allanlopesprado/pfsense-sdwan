@@ -24,7 +24,7 @@ def stage(work):
         install(f"pkg/{name}")
     engine = (ROOT / "pkg/sdwan_engine.inc").read_text()
     install("sdwan_engine.inc", engine.replace("'/var/run/sdwan-observer.json'", "__DIR__ . '/snapshot.json'"))
-    install("gwlb.inc", "<?php\n")
+    install("gwlb.inc", "<?php\nfunction return_gateways_array() { return []; }\n")
     install("functions.inc", "<?php\n")
     install("shaper.inc", "<?php\n")
     install("config.inc", """<?php
@@ -57,12 +57,27 @@ def stage(work):
     install("filter.inc", """<?php
         function filter_sdwan_binding_api(): int { return $GLOBALS['fixture']['abi']; }
         function is_platform_booting(): bool { return $GLOBALS['fixture']['booting']; }
+        function filter_sdwan_withdrawal_proof_api(): int { return 1; }
+        function filter_sdwan_ruleset_hash(array $rules): string {
+            return hash('sha256', json_encode($rules, JSON_THROW_ON_ERROR));
+        }
+        function g_get($key, $default) { return $key === 'varrun_path' ? __DIR__ : $default; }
         function filter_configure_sync($delete_states = true): void {
             if ($delete_states || !empty($GLOBALS['queued']) || !is_file(SDWAN_SNAPSHOT_PATH)) {
                 exit(79);
             }
             echo 'native compiler; ';
             $GLOBALS['direct_reload'] = true;
+            $fixture = $GLOBALS['fixture'];
+            if (isset($fixture['after_snapshot'])) {
+                file_put_contents(SDWAN_SNAPSHOT_PATH, json_encode($fixture['after_snapshot'], JSON_THROW_ON_ERROR));
+            }
+            if (isset($fixture['native_tracker_rules'])) {
+                file_put_contents(__DIR__ . '/sdwan-filter-commit.json', json_encode([
+                    'started_ns' => hrtime(true), 'trackers' => $fixture['proof_trackers'] ?? [],
+                    'ruleset' => filter_sdwan_ruleset_hash($fixture['native_tracker_rules']),
+                ], JSON_THROW_ON_ERROR));
+            }
         }
     """)
     steering = (ROOT / "pkg/sdwan_steering.inc").read_text()
@@ -77,6 +92,9 @@ def stage(work):
             return $GLOBALS['queued'];
         """,
         "sdwan_steering_pf_rules(): ?array": """
+            if (!empty($GLOBALS['direct_reload']) && isset($GLOBALS['fixture']['native_tracker_rules'])) {
+                return $GLOBALS['fixture']['native_tracker_rules'];
+            }
             if (!empty($GLOBALS['direct_reload']) && !empty($GLOBALS['fixture']['native_applies'])) {
                 echo 'verified direct withdrawal';
                 return ['block drop in quick on igb0 inet all ridentifier 301',
@@ -162,7 +180,8 @@ def run(php):
             assert (result.returncode, result.stdout) == (77, "initial observation"), result
             assert state.exists() and receipt.exists()
 
-        expiry = {"expiry": True, "native_applies": True, "ack": False}
+        receipt.unlink(missing_ok=True)
+        expiry = {"expiry": True, "native_applies": True, "ack": False, "retirement_reads": 2}
         expired = {"generated_at": int(time.time()) - 31, "config_revision": "a" * 64,
                    "members": [], "policies": []}
         for settings, expected in [
@@ -180,11 +199,40 @@ def run(php):
             result = launch(existing | expiry | settings, mode="--expiry-reload", reset=False)
             assert (result.returncode, result.stdout) == expected, (settings, result)
             assert json.loads(state.read_text(encoding="utf-8")) == expired
-        state.write_text(json.dumps(expired | {"generated_at": int(time.time())}), encoding="utf-8")
-        result = launch(existing | expiry, mode="--expiry-reload", reset=False)
+        recent = expired | {"generated_at": int(time.time())}
+        for before, settings, expected in [
+            (recent, {}, (0, "native compiler; verified direct withdrawal")),
+            (expired, {"after_snapshot": recent, "native_applies": False}, (1, "native compiler; ")),
+        ]:
+            state.write_text(json.dumps(before), encoding="utf-8")
+            result = launch(existing | expiry | settings, mode="--expiry-reload", reset=False)
+            assert (result.returncode, result.stdout) == expected, (settings, result)
+
+        # The native rule after withdrawal may retain the previous tracker.
+        # The fixture has no PF commands or traffic, only rule readback and proof.
+        state.write_text(json.dumps(recent), encoding="utf-8")
+        ledger = {"signature": "a" * 64, "attempts": 0, "requested_at": 0,
+                  "accepted": False, "confirmed": False, "trackers": ["301"]}
+        withdrawal = {"trackers": ["301"], "unknown": False, "since_ns": 2}
+        proof = work / "sdwan-filter-commit.json"
+        for saved in (ledger, ledger | {"withdrawal": withdrawal}):
+            for options, expected in [
+                ({"native_tracker_rules": old_pass}, (0, "native compiler; ")),
+                ({"native_tracker_rules": old_pass, "proof_trackers": ["301"]}, (1, "native compiler; ")),
+                ({"native_applies": False}, (1, "native compiler; ")),
+                ({"rules": None}, (1, "")),
+            ]:
+                proof.unlink(missing_ok=True)
+                receipt.write_text(json.dumps(saved), encoding="utf-8")
+                result = launch(existing | expiry | {"bound": False} | options, mode="--expiry-reload", reset=False)
+                assert (result.returncode, result.stdout) == expected, (options, result)
+                assert json.loads(receipt.read_text(encoding="utf-8")) == saved
+        # Valid readback with no removed tracker already confirms withdrawal.
+        proof.unlink(missing_ok=True)
+        result = launch(existing | expiry | {"bound": False, "rules": []}, mode="--expiry-reload", reset=False)
         assert (result.returncode, result.stdout) == (0, ""), result
     print("ok - supervised startup withdraws stale bound passes and waits for PF before observing")
-    print("ok - independent expiry reload verifies native PF withdrawal without the queue, a global state flush or snapshot removal")
+    print("ok - watchdog verifies current authority and native withdrawal without the observer lock or state flush")
 
 
 if __name__ == "__main__":

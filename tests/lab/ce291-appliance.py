@@ -290,13 +290,13 @@ def observations(qemu):
     return json.loads(next(line for line in reversed(raw.splitlines()) if line.startswith("{")))
 
 
-def withdrawal_proven(state, started):
+def withdrawal_proven(state, started, trackers=("41003",)):
     proof = state["withdrawal_proof"]
     if not isinstance(proof, dict):
         return False
     generated = proof.get("started_ns")
     return (type(generated) is int and started <= generated <= state["monotonic_ns"]
-            and proof.get("trackers") == ["41003"] and not state["receipt"].get("withdrawal")
+            and proof.get("trackers") == list(trackers) and not state["receipt"].get("withdrawal")
             and state["active_ruleset"] is not None and proof.get("ruleset") == state["active_ruleset"])
 
 
@@ -570,7 +570,7 @@ def verify_expired_sample(qemu, primary, certificate):
         command(qemu, f"kill -STOP {processes}")
         wait_receipt(qemu, lambda s: not s["snapshot"], 48)
         command(qemu, """i=0
-            until grep -Fq 'Active PF rules confirmed withdrawal of the expired forwarding passes.' /var/log/system.log; do
+            until grep -Fq 'Active PF rules confirmed reconciliation of stale forwarding.' /var/log/system.log; do
                 i=$((i+1)); test "$i" -le 45; sleep 1
             done
             test -s /var/run/sdwan-observer.json""", timeout=52)
@@ -782,7 +782,18 @@ def acceptance(qemu, cleanup, provider, *, cold_restart):
     rollback_sessions = [held_connection(target, cleanup) for target in (ERP, BACKUP)]
     for stream in rollback_sessions:
         assert established(stream, "before rollback") == f"{A} before rollback"
-    command(qemu, f"php {LAB}/ce291-guest.php unbind B")
+    request = command(qemu, f"php {LAB}/ce291-guest.php unbind B")
+    timestamps = re.findall(r"^WITHDRAWAL_START_NS=([0-9]+)$", request, re.M)
+    assert len(timestamps) == 1, request
+    started = int(timestamps[0])
+    last = wait_receipt(qemu, lambda state: state["snapshot"] and not state["snapshot"].get("steering")
+                        and not state["receipt"] and withdrawal_proven(state, started, ()), 45)
+    assert loaded(qemu) == native_rules
+    assert route_and_nat(qemu) == reference
+    tcp_pair("after final withdrawal", (A, A))
+    for stream in rollback_sessions:
+        assert established(stream, "after final withdrawal") == f"{A} after final withdrawal"
+    print(f"FINAL_BINDING_RESTORED_NATIVE_RULES_OK native_proof={last['withdrawal_proof']}", flush=True)
     command(qemu, f"cp -p {LAB}/filter.stock /etc/inc/filter.inc; rm /etc/inc/filter-sdwan.inc")
     command(qemu, "/usr/local/etc/rc.d/sdwand.sh restart; /etc/rc.filter_configure_sync")
     assert "ABI=0" in command(qemu, f"php {LAB}/ce291-guest.php mode")

@@ -263,24 +263,27 @@ function sdwan_observe_once(): void {
 function sdwan_expiry_watchdog(): never {
 	sdwan_load_steering();
 	$previous = [];
+	$withdrawal = null;
 	$attempts = 0;
 	$retry_at = 0;
 	for (;;) {
 		try {
 			clearstatcache();
-			$stale = sdwan_steering_expired_passes();
-			if ($stale === null) {
+			$pending = sdwan_steering_watchdog_pending($withdrawal);
+			if ($pending === null) {
 				sdwan_log_event('filter_expiry_unconfirmed');
-			} elseif (!$stale) {
+			} elseif (!$pending) {
 				$previous = [];
 				$attempts = 0;
 				$retry_at = 0;
 			} else {
-				if ($stale !== $previous) {
-					$previous = $stale;
+				if ($pending !== $previous) {
+					$previous = $pending;
 					$attempts = 0;
 				}
-				if ($attempts < SDWAN_RELOAD_MAX_ATTEMPTS && hrtime(true) >= $retry_at) {
+				if ($attempts >= SDWAN_RELOAD_MAX_ATTEMPTS) {
+					sdwan_log_event('filter_expiry_divergent');
+				} elseif (hrtime(true) >= $retry_at) {
 					$attempts++;
 					sdwan_log_event('filter_expiry_requested');
 					// A fresh PHP process rechecks the on-disk native adapter.

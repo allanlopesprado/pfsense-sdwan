@@ -771,28 +771,78 @@ function sdwan_steering_rule_tracker(string $rule): ?string {
 	    ? $match[1] : null;
 }
 
-/* An empty result means no verified stale passes. Null means the watchdog
- * could not verify the current rules or their approved scope. */
-function sdwan_steering_expired_passes(): ?array {
+/* An empty result means no reconciliation is needed. Keep inferred withdrawal
+ * evidence across reads so a later native proof can confirm the same removal. */
+function sdwan_steering_watchdog_pending(?array &$seen_withdrawal, array $verify = []): ?array {
 	if (!config_read_file(false, true)) {
 		return null;
 	}
-	if (!config_get_path(SDWAN_BINDINGS_PATH . '/item', []) || sdwan_read_snapshot() !== null) {
+	$path = SDWAN_SNAPSHOT_PATH . '.forwarded';
+	clearstatcache(true, $path);
+	$receipt = sdwan_steering_read_receipt($path);
+	$has_receipt = $receipt || is_file($path);
+	if (!config_get_path(SDWAN_BINDINGS_PATH . '/item', []) && !$has_receipt) {
+		$seen_withdrawal = null;
 		return [];
 	}
 	if (!sdwan_steering_supported()) {
 		return null;
 	}
 	if (is_platform_booting() || config_path_enabled('system', 'disablefilter')) {
+		$seen_withdrawal = null;
 		return [];
 	}
 	try {
-		$trackers = sdwan_steering_trackers(sdwan_steering_bindings());
+		$bindings = sdwan_steering_bindings();
 	} catch (UnexpectedValueException) {
 		return null;
 	}
+	$trackers = sdwan_steering_trackers($bindings);
+	$recorded = $receipt['withdrawal'] ?? null;
+	$withdrawal = sdwan_steering_withdrawal($receipt, $trackers);
+	if ($has_receipt && !$receipt) {
+		$withdrawal = ['trackers' => [], 'unknown' => true, 'since_ns' => hrtime(true)];
+	}
+	if ($withdrawal !== null && $withdrawal !== $recorded && $seen_withdrawal !== null &&
+	    $withdrawal['trackers'] === $seen_withdrawal['trackers'] && $withdrawal['unknown'] === $seen_withdrawal['unknown']) {
+		$withdrawal['since_ns'] = max($seen_withdrawal['since_ns'], $recorded['since_ns'] ?? 0);
+	}
+	$seen_withdrawal = $withdrawal;
+	if (!$trackers && $withdrawal === null) {
+		return [];
+	}
 	$rules = sdwan_steering_pf_rules();
-	return $rules === null ? null : sdwan_steering_pass_trackers($trackers, $rules);
+	if ($rules === null) {
+		return null;
+	}
+	$passes = sdwan_steering_pass_trackers($trackers, $rules);
+	$stale = $passes ? sdwan_steering_watchdog_stale_passes($passes, $bindings, $rules, $verify) : [];
+	$pending = $withdrawal !== null && !sdwan_steering_withdrawal_confirmed($withdrawal, $trackers, $rules);
+	return $stale || $pending ? ['passes' => $stale, 'withdrawal' => $pending ? $withdrawal : null] : [];
+}
+
+function sdwan_steering_watchdog_stale_passes(array $passes, array $bindings, array $rules, array $verify): array {
+	$config = sdwan_get_config();
+	$inventory = sdwan_gateways();
+	$snapshot = sdwan_current_snapshot($config, $inventory);
+	if ($snapshot === null) {
+		return $passes;
+	}
+	$native = sdwan_steering_native($inventory);
+	$stale = [];
+	foreach ($bindings as $group => $binding) {
+		$loaded = array_intersect($passes, $binding['trackers']);
+		if (!$loaded) {
+			continue;
+		}
+		$chosen = sdwan_steering_binding_gateways($binding, $config, $snapshot, $native, $rule_pairs);
+		if (!$chosen || (array_intersect($loaded, $verify) &&
+		    sdwan_steering_pf_status($binding, $snapshot['steering'][$group], $inventory, $rules, $rule_pairs) !== 'applied')) {
+			$stale = [...$stale, ...$loaded];
+		}
+	}
+	sort($stale, SORT_STRING);
+	return $stale;
 }
 
 function sdwan_steering_pass_trackers(array $trackers, array $rules): array {
@@ -812,24 +862,28 @@ function sdwan_steering_pass_trackers(array $trackers, array $rules): array {
 /* Require the running native adapter on every attempt. Never edit rules or
  * states directly, and skip the native global down-gateway state flush. */
 function sdwan_steering_reconcile_expiry(): bool {
-	$stale = sdwan_steering_expired_passes();
-	if ($stale === null) {
+	$withdrawal = null;
+	$pending = sdwan_steering_watchdog_pending($withdrawal);
+	if ($pending === null) {
 		return false;
 	}
-	if (!$stale) {
+	if (!$pending) {
 		return true;
 	}
 	if (!function_exists('filter_configure_sync')) {
 		return false;
 	}
 	filter_configure_sync(false);
-	$rules = sdwan_steering_pf_rules();
-	if ($rules !== null && !sdwan_steering_pass_trackers($stale, $rules)) {
-		sdwan_log_event('filter_expiry_applied');
-		return true;
+	if (sdwan_steering_watchdog_pending($withdrawal, $pending['passes']) !== []) {
+		return false;
 	}
-	// The observer may have recovered while the native filter was compiling.
-	return sdwan_read_snapshot() !== null;
+	if ($pending['passes']) {
+		sdwan_log_event('filter_expiry_applied');
+	}
+	if ($pending['withdrawal'] !== null) {
+		sdwan_log_event('filter_withdrawal_confirmed');
+	}
+	return true;
 }
 
 /* A restarted observer withdraws the interrupted decision before sampling. A
@@ -1293,15 +1347,22 @@ function sdwan_steering_gateways_for_rule(array $raw, array $rule): array {
 	$config = sdwan_get_config();
 	$inventory = sdwan_gateways();
 	$snapshot = sdwan_current_snapshot($config, $inventory);
-	if ($snapshot === null || $binding['policy_revision'] !== sdwan_steering_policy_revision($config, $binding['policy'])) {
+	return $snapshot === null ? [] : sdwan_steering_binding_gateways($binding, $config, $snapshot,
+	    sdwan_steering_native($inventory));
+}
+
+/* The compiler and watchdog use the same approval and decision checks. */
+function sdwan_steering_binding_gateways(array $binding, array $config, array $snapshot, array $native,
+    ?array &$rule_pairs = null): array {
+	$rule_pairs = null;
+	if ($binding['policy_revision'] !== sdwan_steering_policy_revision($config, $binding['policy'])) {
 		return [];
 	}
-	$preflight = sdwan_steering_preflight($config, $binding['policy'], $binding['group'], sdwan_steering_native($inventory));
-	if ($preflight['errors'] || $preflight['binding']['rules_revision'] !== $binding['rules_revision'] ||
-	    $preflight['binding']['gateways'] !== $binding['gateways'] ||
-	    $preflight['binding']['trackers'] !== $binding['trackers']) {
+	$preflight = sdwan_steering_preflight($config, $binding['policy'], $binding['group'], $native);
+	if (!sdwan_steering_preflight_matches($binding, $preflight)) {
 		return [];
 	}
+	$rule_pairs = $preflight['rule_pairs'];
 	$state = $snapshot['steering'][$binding['group']] ?? [];
 	if (($state['revision'] ?? null) !== sdwan_config_revision($binding)) {
 		return [];

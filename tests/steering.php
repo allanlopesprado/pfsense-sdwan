@@ -123,8 +123,21 @@ $snapshot['gateway_inventory_revision'] = sdwan_gateway_inventory_revision($conf
 $snapshot['steering'] = sdwan_steering_observations($config, $snapshot, []);
 file_put_contents(SDWAN_SNAPSHOT_PATH, json_encode($snapshot));
 verify(sdwan_steering_gateway_for_rule($raw, $rule) === 'A', 'fresh matching snapshot returns only the selected native gateway');
+$watched_rules = [
+	'pass in quick on igb2 route-to (igb0 192.0.2.1) inet from 10.23.0.0/24 to any ' .
+	    'keep state (if-bound) label "gw=1:G" ridentifier 301',
+	'block drop in quick on igb2 inet from 10.23.0.0/24 to any ridentifier 302',
+];
+verify(sdwan_steering_watchdog_stale_passes(['301'], $bindings, $watched_rules, []) === [] &&
+    sdwan_steering_watchdog_stale_passes(['301'], $bindings, $watched_rules, ['301']) === [],
+    'watchdog leaves a current and confirmed native forwarding decision in place');
+$wrong_hop = [str_replace('192.0.2.1', '192.0.2.2', $watched_rules[0]), $watched_rules[1]];
+verify(sdwan_steering_watchdog_stale_passes(['301'], $bindings, $wrong_hop, ['301']) === ['301'],
+    'watchdog readback requires the confirmed next hop for a recovered observation');
 $current['gateways/gateway_item'][0]['interval'] = '1000';
-verify(sdwan_steering_gateway_for_rule($raw, $rule) === null, 'a change to probing parameters requires a current observation');
+verify(sdwan_steering_gateway_for_rule($raw, $rule) === null &&
+    sdwan_steering_watchdog_stale_passes(['301'], $bindings, $watched_rules, []) === ['301'],
+    'native monitor changes invalidate a still-recent decision');
 unset($current['gateways/gateway_item'][0]['interval']);
 $current['gateways/gateway_item'][] = ['name' => 'other', 'interface' => 'opt1', 'gateway' => '192.0.2.1'];
 verify(sdwan_steering_gateway_for_rule($raw, $rule) === null &&
@@ -142,6 +155,7 @@ verify(sdwan_steering_gateway_for_rule($raw, array_replace($rule, ['tracker' => 
 $before = $current;
 $current['filter/rule'][0]['source'] = ['any' => ''];
 verify(sdwan_steering_gateway_for_rule($raw, $current['filter/rule'][0]) === null &&
+    sdwan_steering_watchdog_stale_passes(['301'], $bindings, $watched_rules, []) === ['301'] &&
     sdwan_steering_observations($config, $snapshot, [])['G']['gateway'] === null, 'enlarged native match under an unchanged tracker requires new consent');
 $current = $before;
 $changed = $config;
