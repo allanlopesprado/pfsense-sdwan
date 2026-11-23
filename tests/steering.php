@@ -465,6 +465,54 @@ $states = [
 ];
 verify(sdwan_steering_state_ids($states, ['301'], 'igb0', '192.0.2.1') === ['000000010000000a/12345678'],
     'state recovery matches the stable tracker, exact interface, next hop and unique state identity');
+$bounded_states = [];
+for ($index = 1; $index <= SDWAN_AUTO_RECONNECT_STATES + 2; $index++) {
+	$bounded_states = [...$bounded_states, 'all tcp first -> second ESTABLISHED:ESTABLISHED',
+	    sprintf('   id: %016x creatorid: 12345678', $index), '   route-to: 192.0.2.1@igb0', '   ridentifier 301'];
+}
+verify(count(sdwan_steering_state_ids($bounded_states, ['301'], 'igb0', '192.0.2.1', SDWAN_AUTO_RECONNECT_STATES)) === 8 &&
+    count(sdwan_steering_state_ids($bounded_states, ['301'], 'igb0', '192.0.2.1')) === 10,
+    'automatic restoration uses the same exact state selector with a smaller bound');
+verify(sdwan_steering_reconnect_timeout(1_000_000_000) === '0.500' &&
+    sdwan_steering_reconnect_timeout(251_999_999) === '0.251' &&
+    sdwan_steering_reconnect_timeout(1_000_000) === '0.001' &&
+    sdwan_steering_reconnect_timeout(999_999) === null &&
+    sdwan_steering_reconnect_timeout(0) === null && sdwan_steering_reconnect_timeout(-1_000_000) === null,
+    'each automatic state action is bounded by both the batch deadline and a positive subsecond limit');
+$recovery_config = [
+	'policies' => [['name' => 'ERP', 'strategy' => 'latency', 'auto_reconnect' => 'enabled']],
+	'members' => [['name' => 'primary', 'gateway' => 'A'], ['name' => 'backup', 'gateway' => 'B']],
+];
+$recovery_sample = ['policies' => ['ERP' => ['candidates' => ['primary' => 'Required service check failed', 'backup' => 'Eligible']]]];
+$recovery_binding = ['policy' => 'ERP', 'gateways' => ['A', 'B']];
+$recovery_before = ['revision' => 'scope', 'seen' => 10, 'gateway' => 'A', 'path' => ['device' => 'igb0']];
+$recovery_after = ['revision' => 'scope', 'seen' => 20, 'gateway' => 'B', 'path' => ['device' => 'igb1']];
+verify(sdwan_steering_auto_reconnect_transition($recovery_before, $recovery_after, $recovery_config, $recovery_sample, $recovery_binding),
+    'verified service failure permits selective recovery when the first confirmation applies a different path');
+foreach (['Gateway is down' => true, 'Eligible' => false, 'No verified required service measurement' => false,
+    'RTT exceeds the SLA' => false] as $reason => $expected) {
+	$sample = ['policies' => ['ERP' => ['candidates' => ['primary' => $reason, 'backup' => 'Eligible']]]];
+	verify(sdwan_steering_auto_reconnect_transition($recovery_before, $recovery_after, $recovery_config, $sample,
+	    $recovery_binding) === $expected, "automatic session action distinguishes {$reason}");
+}
+$disabled_recovery = $recovery_config;
+unset($disabled_recovery['policies'][0]['auto_reconnect']);
+verify(!sdwan_steering_auto_reconnect_transition(null, $recovery_after, $recovery_config, $recovery_sample, $recovery_binding) &&
+    !sdwan_steering_auto_reconnect_transition($recovery_after, $recovery_after, $recovery_config, $recovery_sample, $recovery_binding) &&
+    !sdwan_steering_auto_reconnect_transition($recovery_before, $recovery_after, $disabled_recovery, $recovery_sample, $recovery_binding),
+    'restart, duplicate observation and the legacy default preserve sessions');
+foreach ([['revision' => 'changed'], ['seen' => 9], ['seen' => SDWAN_AUTO_RECONNECT_WINDOW_NS + 11],
+    ['path' => ['device' => 'igb0']]] as $drift) {
+	verify(!sdwan_steering_auto_reconnect_transition($recovery_before, array_replace($recovery_after, $drift),
+	    $recovery_config, $recovery_sample, $recovery_binding), 'automatic reconnection ignores stale or unproven route identity');
+}
+verify(sdwan_steering_reconnect_retained('keep', false, '', '') &&
+    sdwan_steering_reconnect_retained('', true, 'down', 'down') &&
+    sdwan_steering_reconnect_retained('kill', false, 'none', 'down') &&
+    sdwan_steering_reconnect_retained('kill', false, '', 'none') &&
+    !sdwan_steering_reconnect_retained('kill', true, 'down', 'none') &&
+    !sdwan_steering_reconnect_retained('', false, '', ''),
+    'automatic reconnection obeys effective native group, gateway and global state retention');
 $before_unbind = $disk;
 $receipt_path = SDWAN_SNAPSHOT_PATH . '.forwarded';
 $before_requests = $pending;

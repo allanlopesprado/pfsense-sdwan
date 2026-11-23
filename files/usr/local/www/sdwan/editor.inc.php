@@ -201,6 +201,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 			$previous = $saved['probe_requirements'] ?? [];
 			$overrides = array_column($previous, null, 'member');
 			$requirements = [];
+			if (array_key_exists('auto_reconnect', $_POST)) {
+				$mode = $_POST['auto_reconnect'];
+				if (!in_array($mode, ['', 'enabled'], true)) {
+					$errors[] = gettext('Select a valid session reconnection mode.');
+				} elseif ($mode === '') {
+					$cleared['auto_reconnect'] = true;
+				} else {
+					$sdwan_record['auto_reconnect'] = $mode;
+				}
+			}
 			foreach (array_keys($service_fields) as $field) {
 				if (!array_key_exists($field, $_POST)) {
 					continue;
@@ -281,7 +291,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 	} elseif (!$errors && !$confirm_deletion) {
 		$candidate = $sdwan;
 		$candidate[$collection] = array_values($rows);
-		$errors = sdwan_save_config($candidate, $expected_revision, sdwan_can_edit_forwarding());
+		$errors = sdwan_save_config($candidate, $expected_revision, sdwan_can_edit_forwarding(),
+		    isAllowedPage('/diag_dump_states.php'));
 		if (!$errors) {
 			header('Location: ' . $url . '?saved=1', true, 303);
 			exit;
@@ -472,6 +483,12 @@ elseif (!$display_form): ?>
 		$section->addInput(new Form_Input('recover_seconds', gettext('Path recovery hold (seconds)'), 'number',
 		    $sdwan_record['recover_seconds'] ?? '', ['min' => 0, 'max' => 300]))
 		    ->setHelp(gettext('Lowest cost and lowest RTT wait before replacing a healthy path. The default is 30 seconds. Weighted balancing waits before rejoining a path when another healthy path remains in the pool. The default for balancing is immediate.'));
+		if (sdwan_can_edit_forwarding() && isAllowedPage('/diag_dump_states.php')) {
+			$section->addInput(new Form_Select('auto_reconnect', gettext('Sessions on a failed path'),
+			    $sdwan_record['auto_reconnect'] ?? '', ['' => gettext('Keep existing sessions'),
+			        'enabled' => gettext('Reconnect a limited batch')]))
+			    ->setHelp(gettext('For a direct WAN policy, allow one limited attempt after PF confirms a healthy replacement. The firewall state retention settings still apply.'));
+		}
 	}
 	$form->add($section);
 	if ($collection === 'policies' && (array_column($sdwan['members'], 'probe_primary') ||

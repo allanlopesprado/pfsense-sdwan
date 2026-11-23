@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Verify DNS and HTTPS for one target IP through both appliance WANs."""
 import argparse
+from contextlib import ExitStack
 import importlib.util
 import json
 import re
@@ -300,11 +301,15 @@ php {script}""")
 
 def verify_erp_host_alias(ce, qemu):
     guest = f"php {ce.LAB}/ce291-guest.php"
-    result = ce.command(qemu, f"{guest} unbind G")
-    withdrawal = re.findall(r"^WITHDRAWAL_START_NS=(\d+)$", result, re.MULTILINE)
-    assert len(withdrawal) == 1, result
-    ce.wait_paths(qemu, "before approving the alias", {"B": "GW_A"}, native_choices={"G": "GW_A"},
-                  withdrawal_after=int(withdrawal[0]))
+
+    def withdraw_erp():
+        result = ce.command(qemu, f"{guest} unbind G")
+        withdrawal = re.findall(r"^WITHDRAWAL_START_NS=(\d+)$", result, re.MULTILINE)
+        assert len(withdrawal) == 1, result
+        ce.wait_paths(qemu, "after withdrawing the ERP policy", {"B": "GW_A"}, native_choices={"G": "GW_A"},
+                      withdrawal_after=int(withdrawal[0]))
+
+    withdraw_erp()
     ce.command(qemu, f"{guest} erp_host_alias; {guest} bind G")
     ce.wait_paths(qemu, "native host alias approved", NATIVE_PATHS)
 
@@ -320,12 +325,41 @@ def verify_erp_host_alias(ce, qemu):
         assert result.stdout.strip() == f"{expected} {label}", result.stdout
         print(f"{label}: {extra} replied from {expected}", flush=True)
 
+    targets = (ce.ERP, ce.BACKUP)
+    active = {"G": "GW_B", "B": "GW_A"}
+
+    def hold_flows(sessions):
+        sockets = [ce.held_connection(target, sessions) for target in targets]
+        for peer in sockets:
+            assert ce.established(peer, "before-service-failure") == f"{ce.A} before-service-failure"
+        states = ce.ingress_tcp_states(qemu, targets)
+        ids = {}
+        for target in targets:
+            existing = [key for key, row in states[target].items()
+                        if row["status"] == "ESTABLISHED:ESTABLISHED" and row["next_hop"] == "198.51.100.2@vtnet0"]
+            assert len(existing) == 1, states
+            ids[target] = existing[0]
+        return sockets, ids
+
+    def service_failure(label):
+        ce.fault(f'iifname "sw-wire0" ip saddr {ce.A} ip daddr 192.0.2.164 tcp dport 7 drop')
+        observed = ce.wait_paths(qemu, label, active)
+        assert all(observed["snapshot"]["members"][name]["status"] == "online" for name in ("a", "b")), observed
+        assert observed["snapshot"]["policies"]["ERP"]["candidates"] == {
+            "a": "Required service check failed", "b": "Eligible",
+        }, observed
+        return observed
+
     assert members() == {ce.ERP}
     backup = ce.loaded(qemu)["41003"]
-    try:
-        ce.fault(f'iifname "sw-wire0" ip saddr {ce.A} ip daddr 192.0.2.164 tcp dport 7 drop')
-        active = {"G": "GW_B", "B": "GW_A"}
-        before = ce.wait_paths(qemu, "alias ERP failover", active)
+    with ExitStack() as sessions:
+        held, ids = hold_flows(sessions)
+        sessions.callback(ce.fault)
+        before = service_failure("alias ERP failover")
+        states = ce.ingress_tcp_states(qemu, targets)
+        for target, peer in zip(targets, held):
+            assert ids[target] in states[target], states
+            assert ce.established(peer, "default-state-retained") == f"{ce.A} default-state-retained"
         rules = ce.command(qemu, "pfctl -P -sr 2>/dev/null | awk '/ridentifier (41001|41002)$/'").splitlines()
         assert len(rules) == 2 and rules[0].startswith("pass ") and rules[1].startswith("block "), rules
         assert all(re.search(rf"\bto <{table}(?::[0-9]+)?> port = 7\b", rule) for rule in rules), rules
@@ -339,9 +373,29 @@ def verify_erp_host_alias(ce, qemu):
         assert after["signature"] == before["signature"], (before, after)
         assert members() == {ce.ERP, extra}
         ce.tcp_pair("existing alias destination and backup after table refresh", (ce.B, ce.A))
-    finally:
-        ce.fault()
     print("NATIVE_HOST_ALIAS_TABLE_AND_REFRESH_STEERING_OK", flush=True)
+
+    withdraw_erp()
+    ce.command(qemu, f"{guest} enable_erp_auto_reconnect; {guest} bind G")
+    ce.wait_paths(qemu, "ERP opt-in with both services healthy", NATIVE_PATHS)
+    with ExitStack() as sessions:
+        held, ids = hold_flows(sessions)
+        sessions.callback(ce.fault)
+        service_failure("ERP opt-in reconnected to WAN2")
+        deadline = time.monotonic() + 10
+        while True:
+            states = ce.ingress_tcp_states(qemu, targets)
+            assert ids[ce.BACKUP] in states[ce.BACKUP], states
+            if ids[ce.ERP] not in states[ce.ERP]:
+                break
+            assert time.monotonic() < deadline, states
+            time.sleep(0.5)
+        assert ce.established(held[1], "backup-state-retained") == f"{ce.A} backup-state-retained"
+        ce.tcp_pair("new ERP connection and unchanged backup", (ce.B, ce.A))
+        log = ce.command(qemu, "grep -F 'state(s) for group G' /var/log/system.log | tail -5")
+        assert any(re.search(r"Automatic reconnection retired [1-8] state\(s\) for group G$", line)
+                   for line in log.splitlines()), log
+    print("NATIVE_AUTO_RECONNECT_OPT_IN_AND_BACKUP_STATE_PRESERVED_OK", flush=True)
 
 
 def exercise(ce, benchmark, qemu, cleanup, provider):

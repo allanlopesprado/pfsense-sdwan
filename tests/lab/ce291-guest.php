@@ -158,10 +158,36 @@ if ($action === 'erp_host_alias') {
         }
     }
     unset($rule);
+    // Use the same native state settings for the default and opt-in trials.
+    $gateways = array_values(config_get_path('gateways/gateway_item', []));
+    $primary = array_search('GW_A', array_column($gateways, 'name'), true);
+    $groups = array_values(config_get_path('gateways/gateway_group', []));
+    $erp = array_search('G', array_column($groups, 'name'), true);
+    if ($primary === false || $erp === false) {
+        throw new RuntimeException('Cannot locate the disposable ERP gateway settings');
+    }
+    $gateways[$primary]['gw_down_kill_states'] = 'down';
+    $groups[$erp]['keep_failover_states'] = 'kill';
     if ($edited !== 2 || !is_array(config_set_path('aliases/alias', $aliases)) ||
         !is_array(config_set_path('filter/rule', $rules)) ||
+        !is_array(config_set_path('gateways/gateway_item', $gateways)) ||
+        !is_array(config_set_path('gateways/gateway_group', $groups)) ||
         !is_array(write_config('Set the disposable ERP host alias on the paired LAN rules'))) {
         throw new RuntimeException('Cannot set the disposable ERP host alias');
+    }
+    exit;
+}
+if ($action === 'enable_erp_auto_reconnect') {
+    $current = sdwan_get_config();
+    $candidate = $current;
+    $erp = array_search('ERP', array_column($candidate['policies'], 'name'), true);
+    if ($erp === false || isset($candidate['policies'][$erp]['auto_reconnect'])) {
+        throw new RuntimeException('The disposable ERP policy must start with the default reconnection mode');
+    }
+    $candidate['policies'][$erp]['auto_reconnect'] = 'enabled';
+    $errors = sdwan_save_config($candidate, sdwan_config_revision($current), true, true);
+    if ($errors) {
+        throw new RuntimeException(implode('; ', $errors));
     }
     exit;
 }

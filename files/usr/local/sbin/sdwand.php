@@ -304,6 +304,11 @@ function sdwan_observe_once(): void {
 		if ($action !== null) {
 			sdwan_log_event($action);
 		}
+		static $reconnect_baseline = [];
+		if (function_exists('sdwan_steering_auto_reconnect')) {
+			sdwan_steering_auto_reconnect($reconnect_baseline, $config, $inventory, $bindings ?? [],
+			    $confirmed_bindings ?? [], $snapshot, $action === 'filter_applied');
+		}
 		if ($invalid_bindings) {
 			sdwan_log_event('error', [], 'bindings');
 		} else {

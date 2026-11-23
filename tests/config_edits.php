@@ -58,7 +58,29 @@ verify(sdwan_save_config($edited, $revision) === [] && $writes === $prior_writes
     count($disk['filter']['rule']) === 2 && sdwan_get_config() === $edited,
     'retrying after the native edit only changes SD-WAN settings');
 
+$auto = $edited;
+$auto['members'][] = ['name' => 'other', 'gateway' => 'GW2', 'cost' => '20'];
+$auto['slas'][] = ['name' => 'SLA', 'latency_ms' => '100', 'loss_pct' => '5'];
+$auto['policies'][] = ['name' => 'ERP', 'sla' => 'SLA', 'members' => ['link', 'other'],
+    'strategy' => 'cost', 'auto_reconnect' => 'enabled'];
+$disk['interfaces']['opt1'] = ['enable' => ''];
+$disk['gateways/gateway_item'][] = ['name' => 'GW2', 'interface' => 'opt1', 'gateway' => '198.51.100.2'];
+$current = $disk;
+$edited_revision = sdwan_config_revision($edited);
+verify(sdwan_save_config($auto, $edited_revision, true) !== [] && sdwan_get_config() === $edited,
+    'native rule edit permissions alone cannot enable automatic state removal');
+verify(sdwan_save_config($auto, $edited_revision, false, true) !== [] && sdwan_get_config() === $edited,
+    'state management access alone cannot enable automatic state removal');
+verify(sdwan_save_config($auto, $edited_revision, true, true) === [] && sdwan_get_config() === $auto,
+    'both native edit and state management privileges allow explicit opt in');
+$changed = $auto;
+$changed['slas'][0]['latency_ms'] = '120';
+verify(sdwan_save_config($changed, sdwan_config_revision($auto), true) !== [] && sdwan_get_config() === $auto,
+    'a dependent SLA edit cannot change automatic recovery without state management privileges');
+$balanced = $auto;
+$balanced['policies'][0]['strategy'] = 'balance';
+verify(sdwan_validate_config($balanced, null) !== [], 'weighted pools cannot opt into automatic reconnection');
 $disk[SDWAN_CONFIG_PATH] = ['version' => 'future'];
-$errors = sdwan_save_config($initial, sdwan_config_revision($edited));
-verify($errors !== [] && $writes === $prior_writes + 1 && $disk[SDWAN_CONFIG_PATH] === ['version' => 'future'],
+$errors = sdwan_save_config($initial, sdwan_config_revision($auto));
+verify($errors !== [] && $writes === $prior_writes + 2 && $disk[SDWAN_CONFIG_PATH] === ['version' => 'future'],
     'an incompatible restore after the form opened returns a save error and is kept intact');

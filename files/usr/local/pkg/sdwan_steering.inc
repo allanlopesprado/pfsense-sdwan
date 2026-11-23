@@ -1273,11 +1273,11 @@ function sdwan_steering_pf_status(array $binding, array $state, array $inventory
 
 /* The native state dump includes the originating rule identifier as well as
  * the next hop. Rule ordinals are transient across filter reloads. */
-function sdwan_steering_state_ids(iterable $lines, array $trackers, string $device, string $address): array {
+function sdwan_steering_state_ids(iterable $lines, array $trackers, string $device, string $address, int $limit = 64): array {
 	$ids = [];
 	$record = [];
-	$finish = static function (array $state) use ($trackers, $device, $address, &$ids): void {
-		if (count($ids) < 64 && isset($state['tracker'], $state['id'], $state['hop']) &&
+	$finish = static function (array $state) use ($trackers, $device, $address, $limit, &$ids): void {
+		if (count($ids) < $limit && isset($state['tracker'], $state['id'], $state['hop']) &&
 		    in_array($state['tracker'], $trackers, true) && $state['hop'][1] === $device &&
 		    sdwan_next_hop_matches($state['hop'][0], $address, $device)) {
 			$ids[$state['id']] = true;
@@ -1303,14 +1303,120 @@ function sdwan_steering_state_ids(iterable $lines, array $trackers, string $devi
 	return array_keys($ids);
 }
 
-function sdwan_steering_reconnect(string $group, string $gateway, string $revision): array {
-	$lock = sdwan_lock('sdwan-settings', 5);
+const SDWAN_AUTO_RECONNECT_STATES = 8;
+const SDWAN_AUTO_RECONNECT_WINDOW_NS = 45_000_000_000;
+const SDWAN_AUTO_RECONNECT_KILL_BUDGET_NS = 2_000_000_000;
+
+function sdwan_steering_reconnect_timeout(int $remaining_ns): ?string {
+	$milliseconds = intdiv(min($remaining_ns, 500_000_000), 1_000_000);
+	// A zero FreeBSD timeout duration means no deadline.
+	return $milliseconds > 0 ? sprintf('0.%03d', $milliseconds) : null;
+}
+
+function sdwan_steering_reconnect_retained(string $group_mode, bool $keep_failover, string $gateway_mode,
+    string $failure_mode): bool {
+	return ($group_mode !== 'kill' && ($group_mode !== '' || $keep_failover)) ||
+	    ($gateway_mode !== 'down' && ($gateway_mode !== '' || ($failure_mode !== '' && $failure_mode !== 'down' &&
+	        $failure_mode !== 'all')));
+}
+
+function sdwan_steering_auto_reconnect_path(array $gateway): ?array {
+	$path = sdwan_steering_resolve_path($gateway);
+	return $path !== null &&
+	    !preg_match('/^(?:ipsec|ovpn|wg|tun|tap|gre|gif|vxlan|ipip|enc|lo[0-9]|pflog|pfsync)/', $path['device']) &&
+	    sdwan_monitor_address($path['address'], $gateway['family'], $path['device'], true) !== null ? $path : null;
+}
+
+function sdwan_steering_auto_reconnect_failed(array $config, array $snapshot, array $binding, string $retired,
+    string $replacement): bool {
+	$policy = array_column($config['policies'], null, 'name')[$binding['policy']] ?? [];
+	$members = array_column($config['members'], 'name', 'gateway');
+	$candidates = $snapshot['policies'][$binding['policy']]['candidates'] ?? [];
+	return ($policy['auto_reconnect'] ?? null) === 'enabled' &&
+	    in_array($policy['strategy'] ?? null, ['cost', 'latency'], true) &&
+	    $retired !== $replacement &&
+	    in_array($retired, $binding['gateways'], true) && in_array($replacement, $binding['gateways'], true) &&
+	    in_array($candidates[$members[$retired] ?? ''] ?? null, ['Gateway is down', 'Required service check failed'], true) &&
+	    ($candidates[$members[$replacement] ?? ''] ?? null) === 'Eligible';
+}
+
+function sdwan_steering_auto_reconnect_transition(?array $before, array $after, array $config, array $snapshot,
+    array $binding): bool {
+	return $before !== null && $before['revision'] === $after['revision'] &&
+	    $after['seen'] >= $before['seen'] && $after['seen'] - $before['seen'] <= SDWAN_AUTO_RECONNECT_WINDOW_NS &&
+	    $before['path']['device'] !== $after['path']['device'] &&
+	    sdwan_steering_auto_reconnect_failed($config, $snapshot, $binding, $before['gateway'], $after['gateway']);
+}
+
+/* A worker retains the most recent applied route while a replacement reload
+ * is pending. Only a live PF readback can advance that baseline. */
+function sdwan_steering_auto_reconnect(array &$baseline, array $config, array $inventory, array $bindings,
+    array $confirmed, array $snapshot, bool $first_confirmation): void {
+	$policies = array_column($config['policies'], null, 'name');
+	$transition = null;
+	$next = [];
+	$now = hrtime(true);
+	foreach ($bindings as $group => $binding) {
+		if (($policies[$binding['policy']]['auto_reconnect'] ?? null) !== 'enabled') {
+			continue;
+		}
+		$revision = sdwan_config_revision($binding);
+		$before = $baseline[$group] ?? null;
+		if (($before['revision'] ?? null) !== $revision || $now - $before['seen'] > SDWAN_AUTO_RECONNECT_WINDOW_NS) {
+			$before = null;
+		}
+		if (!isset($confirmed[$group])) {
+			if ($before !== null) {
+				$next[$group] = $before;
+			}
+			continue;
+		}
+		$state = $confirmed[$group]['state'];
+		$gateway = $state['gateway'] ?? null;
+		if ($confirmed[$group]['status'] !== 'applied' || !is_string($gateway) || isset($state['pool']) ||
+		    !isset($inventory[$gateway]) || ($path = sdwan_steering_auto_reconnect_path($inventory[$gateway])) === null) {
+			continue;
+		}
+		$after = ['gateway' => $gateway, 'path' => $path, 'revision' => $revision, 'seen' => $now];
+		$next[$group] = $after;
+		if ($first_confirmation && $transition === null &&
+		    sdwan_steering_auto_reconnect_transition($before, $after, $config, $snapshot, $binding)) {
+			$transition = [$group, $before, $after];
+		}
+	}
+	// Consume all observed transitions before attempting a single bounded batch.
+	$baseline = $next;
+	if ($transition !== null) {
+		[$group, $before, $after] = $transition;
+		$result = sdwan_steering_reconnect($group, $before['gateway'], sdwan_steering_revision(),
+		    ['before' => $before, 'after' => $after]);
+		if ($result['errors']) {
+			sdwan_log_emit(LOG_WARNING, 'Automatic reconnection skipped or incomplete for group ' . sdwan_log_label($group) .
+			    '. Confirmed state removals: ' . ($result['count'] ?? 0));
+		} elseif ($result['count'] > 0) {
+			sdwan_log_emit(LOG_NOTICE, 'Automatic reconnection retired ' . $result['count'] .
+			    ' state(s) for group ' . sdwan_log_label($group));
+		}
+	}
+}
+
+function sdwan_steering_reconnect(string $group, string $gateway, string $revision, ?array $transition = null): array {
+	$lock = sdwan_lock('sdwan-settings', $transition === null ? 5 : 0);
 	if (!is_resource($lock)) {
 		return ['errors' => ['SD-WAN settings are busy. Review the current policy and try again.']];
 	}
+	$filter_lock = null;
 	try {
+		if ($transition !== null && (!function_exists('try_lock') || !function_exists('unlock') ||
+		    !is_resource($filter_lock = try_lock('filter', 0)))) {
+			return ['errors' => ['The native filter is busy. Automatic reconnection was skipped.']];
+		}
 		if (!config_read_file(false, false) || !hash_equals(sdwan_steering_revision(), $revision)) {
 			return ['errors' => ['Settings changed. Review the current policy before reconnecting sessions.']];
+		}
+		$before_config = $transition === null ? null : config_get_path('');
+		if ($transition !== null && !is_array($before_config)) {
+			return ['errors' => ['The native settings could not be identified.']];
 		}
 		$binding = sdwan_steering_bindings()[$group] ?? null;
 		if ($binding === null || !in_array($gateway, $binding['gateways'], true)) {
@@ -1318,7 +1424,8 @@ function sdwan_steering_reconnect(string $group, string $gateway, string $revisi
 		}
 		$config = sdwan_get_config();
 		$inventory = sdwan_gateways();
-		$preview = sdwan_steering_preflight($config, $binding['policy'], $group, sdwan_steering_native($inventory));
+		$native = sdwan_steering_native($inventory);
+		$preview = sdwan_steering_preflight($config, $binding['policy'], $group, $native);
 		if ($preview['errors'] || $preview['binding']['rules_revision'] !== $binding['rules_revision'] ||
 		    $binding['policy_revision'] !== sdwan_steering_policy_revision($config, $binding['policy'])) {
 			return ['errors' => ['The native rules or policy changed. Review the binding before reconnecting sessions.']];
@@ -1339,6 +1446,24 @@ function sdwan_steering_reconnect(string $group, string $gateway, string $revisi
 		    !function_exists('popen') || !function_exists('pclose') || !function_exists('exec')) {
 			return ['errors' => ['The previous native next hop cannot be identified.']];
 		}
+		if ($transition !== null) {
+			$before = $transition['before'];
+			$after = $transition['after'];
+			$group_mode = array_column($native['groups'], 'keep_failover_states', 'name')[$group] ?? '';
+			$gateway_mode = array_column(config_get_path('gateways/gateway_item', []), 'gw_down_kill_states', 'name')[$gateway] ?? '';
+			$replacement = $inventory[$after['gateway']] ?? [];
+			if ($snapshot === null || !isset($snapshot['observed_at_ns']) || isset($state['pool']) ||
+			    hrtime(true) - $after['seen'] > 2_000_000_000 ||
+			    $state['gateway'] !== $after['gateway'] || $before['gateway'] !== $gateway ||
+			    $after['revision'] !== sdwan_config_revision($binding) ||
+			    $before['path'] !== sdwan_steering_auto_reconnect_path($metadata) ||
+			    $after['path'] !== sdwan_steering_auto_reconnect_path($replacement) ||
+			    !sdwan_steering_auto_reconnect_transition($before, $after, $config, $snapshot, $binding) ||
+			    sdwan_steering_reconnect_retained((string)$group_mode, config_path_enabled('system', 'keep_failover_states'),
+			        (string)$gateway_mode, (string)config_get_path('system/gw_down_kill_states', ''))) {
+				return ['errors' => ['The transition or native state policy does not permit automatic reconnection.']];
+			}
+		}
 		$stream = @popen('/bin/timeout 3 /sbin/pfctl -vvss 2>/dev/null', 'r');
 		if (!is_resource($stream)) {
 			return ['errors' => ['Unable to inspect the active state table.']];
@@ -1348,16 +1473,30 @@ function sdwan_steering_reconnect(string $group, string $gateway, string $revisi
 				yield $line;
 			}
 		};
-		$ids = sdwan_steering_state_ids($lines(), $binding['trackers'], $path['device'], $path['address']);
+		$ids = sdwan_steering_state_ids($lines(), $binding['trackers'], $path['device'], $path['address'],
+		    $transition === null ? 64 : SDWAN_AUTO_RECONNECT_STATES);
 		if (pclose($stream) !== 0) {
 			return ['errors' => ['Unable to read the full state table. No states were removed.']];
+		}
+		$deadline = $transition === null ? null : hrtime(true) + SDWAN_AUTO_RECONNECT_KILL_BUDGET_NS;
+		if ($ids && $before_config !== null && sdwan_config_changed_since($before_config)) {
+			return ['errors' => ['Native settings changed during the state scan. Automatic reconnection was skipped.']];
 		}
 		$count = 0;
 		foreach ($ids as $id) {
 			$lines = [];
-			exec('/bin/timeout 1 /sbin/pfctl -k id -k ' . escapeshellarg($id) . ' 2>&1', $lines, $status);
+			$command = '/bin/timeout 1';
+			if ($deadline !== null) {
+				$duration = sdwan_steering_reconnect_timeout($deadline - hrtime(true));
+				if ($duration === null) {
+					return ['errors' => ['Automatic reconnection reached its time limit.'], 'count' => $count];
+				}
+				$command = '/bin/timeout -s KILL ' . $duration;
+			}
+			exec($command . ' /sbin/pfctl -k id -k ' . escapeshellarg($id) . ' 2>&1', $lines, $status);
 			if ($status !== 0 || !preg_match('/\bkilled\s+([01])\s+states?\b/i', implode("\n", $lines), $match)) {
-				return ['errors' => ['State recovery could not finish. Review the active states before retrying.']];
+				$error = ['errors' => ['State recovery could not finish. Review the active states before retrying.']];
+				return $deadline === null ? $error : $error + ['count' => $count];
 			}
 			$count += (int)$match[1];
 		}
@@ -1365,6 +1504,9 @@ function sdwan_steering_reconnect(string $group, string $gateway, string $revisi
 	} catch (UnexpectedValueException $error) {
 		return ['errors' => [$error->getMessage()]];
 	} finally {
+		if (is_resource($filter_lock)) {
+			unlock($filter_lock);
+		}
 		sdwan_unlock($lock);
 	}
 }

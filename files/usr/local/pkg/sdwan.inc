@@ -390,7 +390,8 @@ function sdwan_validate_config(array $config, ?array $gateways, array $previous 
 	$probe_fields = ['primary_check' => 'probe_primary', 'secondary_check' => 'probe_secondary'];
 	$probe_modes = ['ignored', 'optional', 'required'];
 	$optional = ['slas' => ['rttsd_ms'], 'members' => ['probe_primary', 'probe_secondary'],
-	    'policies' => [...array_keys($probe_fields), 'probe_requirements', 'degrade_samples', 'recover_seconds']];
+	    'policies' => [...array_keys($probe_fields), 'probe_requirements', 'degrade_samples', 'recover_seconds',
+	        'auto_reconnect']];
 	if (($config['version'] ?? null) !== SDWAN_CONFIG_VERSION ||
 	    array_diff_key($config, sdwan_empty_config())) {
 		return ['Unsupported SD-WAN configuration format.'];
@@ -481,6 +482,10 @@ function sdwan_validate_config(array $config, ?array $gateways, array $previous 
 				if (!is_array($row['members']) || !array_is_list($row['members']) || !$row['members']) {
 					return ["Select at least one member for {$name}."];
 				}
+				if (array_key_exists('auto_reconnect', $row) &&
+				    ($row['auto_reconnect'] !== 'enabled' || $row['strategy'] === 'balance' || count($row['members']) < 2)) {
+					return ["Automatic session reconnection requires a single-path strategy with at least two members for {$name}."];
+				}
 				foreach (['degrade_samples' => [1, 6], 'recover_seconds' => [0, 300]] as $field => [$min, $max]) {
 					if (array_key_exists($field, $row) &&
 					    (!is_string($row[$field]) || !preg_match('/\A[0-9]{1,3}\z/', $row[$field]) ||
@@ -555,7 +560,8 @@ function sdwan_config_changed_since(array $before): bool {
 	return !config_read_file(false, false) || config_get_path('') !== $before;
 }
 
-function sdwan_save_config(array $candidate, string $expected_revision, bool $allow_forwarding_changes = false): array {
+function sdwan_save_config(array $candidate, string $expected_revision, bool $allow_forwarding_changes = false,
+    bool $allow_reconnect_changes = false): array {
 	require_once('config.inc');
 	/* Serialize competing WebGUI package edits; write_config() owns the XML lock. */
 	$lock = sdwan_lock('sdwan-settings', 5);
@@ -581,6 +587,24 @@ function sdwan_save_config(array $candidate, string $expected_revision, bool $al
 		}
 		if ($current === $candidate) {
 			return [];
+		}
+		if ((!$allow_forwarding_changes || !$allow_reconnect_changes) &&
+		    (array_column($current['policies'], 'auto_reconnect') || array_column($candidate['policies'], 'auto_reconnect'))) {
+			require_once(__DIR__ . '/sdwan_steering.inc');
+			$recovery = static function (array $config): array {
+				$revisions = [];
+				foreach ($config['policies'] as $policy) {
+					if (isset($policy['auto_reconnect'])) {
+						$name = $policy['name'];
+						$revisions[$name] = sdwan_steering_policy_revision($config, $name);
+					}
+				}
+				ksort($revisions);
+				return $revisions;
+			};
+			if ($recovery($current) !== $recovery($candidate)) {
+				return ['Changing an automatic reconnection policy requires access to edit firewall rules, edit gateway groups, and manage states.'];
+			}
 		}
 		if (!$allow_forwarding_changes) {
 			$checks = static fn($config) => array_filter(array_map(
