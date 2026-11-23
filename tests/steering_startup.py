@@ -30,7 +30,7 @@ def stage(work):
     install("config.inc", """<?php
         $fixture = json_decode(file_get_contents(__DIR__ . '/fixture.json'), true, 512, JSON_THROW_ON_ERROR);
         function config_get_path($path, $default = null) {
-            if (!$GLOBALS['fixture']['bound']) {
+            if (!$GLOBALS['fixture']['bound'] || (!empty($GLOBALS['direct_reload']) && !empty($GLOBALS['fixture']['unbind_after']))) {
                 return $default;
             }
             $row = ['trackers' => ['item' => ['301']]];
@@ -52,7 +52,10 @@ def stage(work):
             }
             return true;
         }
-        function config_path_enabled($section, $key) { return !empty($GLOBALS['fixture']['filter_disabled']); }
+        function config_path_enabled($section, $key) {
+            return !empty($GLOBALS['fixture']['filter_disabled']) ||
+                (!empty($GLOBALS['direct_reload']) && !empty($GLOBALS['fixture']['disable_after']));
+        }
     """)
     install("filter.inc", """<?php
         function filter_sdwan_binding_api(): int { return $GLOBALS['fixture']['abi']; }
@@ -203,7 +206,11 @@ def run(php):
         for before, settings, expected in [
             (recent, {}, (0, "native compiler; verified direct withdrawal")),
             (expired, {"after_snapshot": recent, "native_applies": False}, (1, "native compiler; ")),
+            (expired, {"disable_after": True}, (1, "native compiler; ")),
+            (expired, {"unbind_after": True, "native_applies": False}, (1, "native compiler; ")),
+            (expired, {"unbind_after": True, "native_tracker_rules": old_pass}, (0, "native compiler; ")),
         ]:
+            (work / "sdwan-filter-commit.json").unlink(missing_ok=True)
             state.write_text(json.dumps(before), encoding="utf-8")
             result = launch(existing | expiry | settings, mode="--expiry-reload", reset=False)
             assert (result.returncode, result.stdout) == expected, (settings, result)

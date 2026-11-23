@@ -773,7 +773,7 @@ function sdwan_steering_rule_tracker(string $rule): ?string {
 
 /* An empty result means no reconciliation is needed. Keep inferred withdrawal
  * evidence across reads so a later native proof can confirm the same removal. */
-function sdwan_steering_watchdog_pending(?array &$seen_withdrawal, array $verify = []): ?array {
+function sdwan_steering_watchdog_pending(?array &$seen_withdrawal, array $verify = [], int $verify_after = 0): ?array {
 	if (!config_read_file(false, true)) {
 		return null;
 	}
@@ -781,7 +781,7 @@ function sdwan_steering_watchdog_pending(?array &$seen_withdrawal, array $verify
 	clearstatcache(true, $path);
 	$receipt = sdwan_steering_read_receipt($path);
 	$has_receipt = $receipt || is_file($path);
-	if (!config_get_path(SDWAN_BINDINGS_PATH . '/item', []) && !$has_receipt) {
+	if (!config_get_path(SDWAN_BINDINGS_PATH . '/item', []) && !$has_receipt && !$verify_after) {
 		$seen_withdrawal = null;
 		return [];
 	}
@@ -790,7 +790,7 @@ function sdwan_steering_watchdog_pending(?array &$seen_withdrawal, array $verify
 	}
 	if (is_platform_booting() || config_path_enabled('system', 'disablefilter')) {
 		$seen_withdrawal = null;
-		return [];
+		return $verify_after ? null : [];
 	}
 	try {
 		$bindings = sdwan_steering_bindings();
@@ -798,47 +798,61 @@ function sdwan_steering_watchdog_pending(?array &$seen_withdrawal, array $verify
 		return null;
 	}
 	$trackers = sdwan_steering_trackers($bindings);
+	$invalid_receipt = $has_receipt && !$receipt;
+	if ($verify_after) {
+		/* Config and receipt may change while the native filter lock is busy. */
+		$receipt['trackers'] = [...($receipt['trackers'] ?? []), ...$verify, ...($seen_withdrawal['trackers'] ?? [])];
+		$receipt['withdrawal'] ??= $seen_withdrawal;
+	}
 	$recorded = $receipt['withdrawal'] ?? null;
 	$withdrawal = sdwan_steering_withdrawal($receipt, $trackers);
-	if ($has_receipt && !$receipt) {
-		$withdrawal = ['trackers' => [], 'unknown' => true, 'since_ns' => hrtime(true)];
+	if ($invalid_receipt || ($verify_after && !empty($seen_withdrawal['unknown']))) {
+		$withdrawal = ['trackers' => $withdrawal['trackers'] ?? [], 'unknown' => true,
+		    'since_ns' => $withdrawal['since_ns'] ?? hrtime(true)];
 	}
-	if ($withdrawal !== null && $withdrawal !== $recorded && $seen_withdrawal !== null &&
-	    $withdrawal['trackers'] === $seen_withdrawal['trackers'] && $withdrawal['unknown'] === $seen_withdrawal['unknown']) {
-		$withdrawal['since_ns'] = max($seen_withdrawal['since_ns'], $recorded['since_ns'] ?? 0);
+	if ($withdrawal !== null && $withdrawal !== $recorded) {
+		if ($verify_after) {
+			$withdrawal['since_ns'] = max($verify_after, $recorded['since_ns'] ?? 0, $seen_withdrawal['since_ns'] ?? 0);
+		} elseif ($seen_withdrawal !== null && $withdrawal['trackers'] === $seen_withdrawal['trackers'] &&
+		    $withdrawal['unknown'] === $seen_withdrawal['unknown']) {
+			$withdrawal['since_ns'] = max($seen_withdrawal['since_ns'], $recorded['since_ns'] ?? 0);
+		}
 	}
 	$seen_withdrawal = $withdrawal;
-	if (!$trackers && $withdrawal === null) {
-		return [];
+	$rules = null;
+	if ($withdrawal !== null || $verify_after) {
+		$rules = sdwan_steering_pf_rules();
+		if ($rules === null) {
+			return null;
+		}
 	}
-	$rules = sdwan_steering_pf_rules();
-	if ($rules === null) {
-		return null;
+	$candidates = $bindings ? sdwan_steering_watchdog_stale_trackers($bindings, $rules, $verify) : [];
+	if ($rules === null && $candidates) {
+		$rules = sdwan_steering_pf_rules();
+		if ($rules === null) {
+			return null;
+		}
 	}
-	$passes = sdwan_steering_pass_trackers($trackers, $rules);
-	$stale = $passes ? sdwan_steering_watchdog_stale_passes($passes, $bindings, $rules, $verify) : [];
+	$stale = $candidates ? sdwan_steering_pass_trackers($candidates, $rules) : [];
 	$pending = $withdrawal !== null && !sdwan_steering_withdrawal_confirmed($withdrawal, $trackers, $rules);
 	return $stale || $pending ? ['passes' => $stale, 'withdrawal' => $pending ? $withdrawal : null] : [];
 }
 
-function sdwan_steering_watchdog_stale_passes(array $passes, array $bindings, array $rules, array $verify): array {
+/* Evaluate authorization first so the healthy poll does not dump the PF ruleset. */
+function sdwan_steering_watchdog_stale_trackers(array $bindings, ?array $rules, array $verify): array {
 	$config = sdwan_get_config();
 	$inventory = sdwan_gateways();
 	$snapshot = sdwan_current_snapshot($config, $inventory);
 	if ($snapshot === null) {
-		return $passes;
+		return sdwan_steering_trackers($bindings);
 	}
 	$native = sdwan_steering_native($inventory);
 	$stale = [];
 	foreach ($bindings as $group => $binding) {
-		$loaded = array_intersect($passes, $binding['trackers']);
-		if (!$loaded) {
-			continue;
-		}
 		$chosen = sdwan_steering_binding_gateways($binding, $config, $snapshot, $native, $rule_pairs);
-		if (!$chosen || (array_intersect($loaded, $verify) &&
+		if (!$chosen || (array_intersect($binding['trackers'], $verify) &&
 		    sdwan_steering_pf_status($binding, $snapshot['steering'][$group], $inventory, $rules, $rule_pairs) !== 'applied')) {
-			$stale = [...$stale, ...$loaded];
+			$stale = [...$stale, ...$binding['trackers']];
 		}
 	}
 	sort($stale, SORT_STRING);
@@ -862,6 +876,7 @@ function sdwan_steering_pass_trackers(array $trackers, array $rules): array {
 /* Require the running native adapter on every attempt. Never edit rules or
  * states directly, and skip the native global down-gateway state flush. */
 function sdwan_steering_reconcile_expiry(): bool {
+	$started = hrtime(true);
 	$withdrawal = null;
 	$pending = sdwan_steering_watchdog_pending($withdrawal);
 	if ($pending === null) {
@@ -874,7 +889,7 @@ function sdwan_steering_reconcile_expiry(): bool {
 		return false;
 	}
 	filter_configure_sync(false);
-	if (sdwan_steering_watchdog_pending($withdrawal, $pending['passes']) !== []) {
+	if (sdwan_steering_watchdog_pending($withdrawal, $pending['passes'], $started) !== []) {
 		return false;
 	}
 	if ($pending['passes']) {
