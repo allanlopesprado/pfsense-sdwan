@@ -206,6 +206,7 @@ jobs:
     uses: ./.github/workflows/ce291-appliance.yml
     with:
       ce_version: ${{ matrix.version }}
+      artifact_suffix: -${{ matrix.version }}
   publish:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main' && startsWith(github.event.head_commit.message, 'Release ')
     needs: [divergence-audit, offline, freebsd, ikev2, homologation, release-appliance]
