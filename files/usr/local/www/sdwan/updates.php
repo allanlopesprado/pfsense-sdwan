@@ -108,6 +108,7 @@ if ($message !== null) {
 }
 $form = new Form(false);
 $form->setAction('/sdwan/updates.php');
+$form->setAttribute('tabindex', '-1');
 $section = new Form_Section(gettext('Package Version'));
 $section->addInput(new Form_StaticText(gettext('Installed Version'), sdwan_ui_escape($installed ?? gettext('Unknown'))));
 if ($release !== null) {
@@ -133,6 +134,23 @@ if ($available) {
 	    null, 'fa-solid fa-check'))->addClass('btn-primary');
 }
 print $form;
+?>
+<style>
+#check_release:focus:not(:focus-visible) { outline: none; }
+#check_release .icon-embed-btn { color: inherit; }
+</style>
+<script>
+events.push(function () {
+	// pfSense focuses the first visible input before running these callbacks.
+	const check = document.getElementById('check_release');
+	if (check && document.activeElement === check) {
+		// Reset the tab sequence to the form so Tab still reaches Check before Upgrade.
+		check.form.focus({preventScroll: true});
+		check.form.blur();
+	}
+});
+</script>
+<?php
 if ($available): ?>
 	<p id="sdwan-upgrade-progress" role="status" class="text-info hidden"><?=gettext('Installing the SD-WAN update. Please wait.')?></p>
 	<script>

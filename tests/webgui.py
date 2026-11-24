@@ -92,6 +92,30 @@ def screenshots(directory, www, pages):
             try:
                 native_scripts = ("/vendor/jquery/jquery-3.7.1.min.js", "/vendor/jquery-ui/jquery-ui-1.13.2.min.js",
                                   "/vendor/bootstrap/js/bootstrap.min.js", "/js/pfSense.js")
+                native_footer = "".join(f'<script src="{url}"></script>' for url in native_scripts)
+                # pfSense.js focuses the first visible input before running the page callbacks.
+                focus_probe = """
+                    <script>
+                    const button = document.querySelector('button[form="sdwan-system-logs"], #check_release');
+                    let automaticFocus = 0;
+                    button.addEventListener('focus', function () { automaticFocus++; });
+                    events.push(function () {
+                        const filter = document.querySelector('select[name="policy"]');
+                        const correctInitialFocus = filter ? document.activeElement === filter && automaticFocus === 0 :
+                            document.activeElement !== button && automaticFocus === 1;
+                        const style = getComputedStyle(button);
+                        const noOutline = style.outlineStyle === 'none';
+                        const iconMatches = button.id !== 'check_release' ||
+                            getComputedStyle(button.querySelector('i')).color === style.color;
+                        button.focus({preventScroll: true});
+                        const focusStillWorks = document.activeElement === button && button.tabIndex === 0 &&
+                            getComputedStyle(button).outlineStyle !== 'none';
+                        button.blur();
+                        document.body.dataset.sdwanFocus =
+                            correctInitialFocus && noOutline && iconMatches && focusStillWorks ? 'pass' : 'fail';
+                    });
+                    </script>
+                """
                 row_actions_probe = """
                     <script>
                     events.push(function () {
@@ -142,7 +166,10 @@ def screenshots(directory, www, pages):
                                           ("members", "pfSense", "1440,900"), ("members", "pfSense-dark", "1440,900"),
                                           ("members-edit", "pfSense", "1440,900"),
                                           ("members-edit", "pfSense-dark", "1440,900"), ("updates", "pfSense", "1440,900"),
-                                          ("updates", "pfSense-dark", "390,844"), ("forwarding", "pfSense", "1440,900"),
+                                          ("updates", "pfSense-dark", "390,844"),
+                                          ("updates-initial", "pfSense", "1440,900"),
+                                          ("updates-initial", "pfSense-dark", "390,844"),
+                                          ("forwarding", "pfSense", "1440,900"),
                                           ("forwarding", "pfSense-dark", "390,844"),
                                           ("forwarding-bindings", "pfSense", "1440,1200"),
                                           ("forwarding-bindings", "pfSense-dark", "1440,1200")]:
@@ -155,9 +182,11 @@ def screenshots(directory, www, pages):
                         html = html.replace("</body>", cancel_icon_probe + "</body>")
                         proof = b'data-sdwan-cancel-icon="pass"'
                     elif name in ("members", "forwarding-bindings"):
-                        footer = row_actions_probe + "".join(f'<script src="{url}"></script>' for url in native_scripts)
-                        html = html.replace("</body>", footer + "</body>")
+                        html = html.replace("</body>", row_actions_probe + native_footer + "</body>")
                         proof = b'data-sdwan-row-actions="pass"'
+                    elif name in ("updates", "updates-initial"):
+                        html = html.replace("</body>", focus_probe + native_footer + "</body>")
+                        proof = b'data-sdwan-focus="pass"'
                     checks = ["--virtual-time-budget=1000", "--dump-dom"] if proof else []
                     (site / (preview + ".html")).write_text(html)
                     out = directory / (preview + ".png")
@@ -169,28 +198,9 @@ def screenshots(directory, www, pages):
                     assert out.read_bytes().startswith(b"\x89PNG"), out
                     if proof:
                         assert proof in result.stdout, preview
-                # pfSense.js focuses the first visible input before running the page callbacks.
-                focus_probe = """
-                    <script>
-                    const logs = document.querySelector('button[form="sdwan-system-logs"]');
-                    let automaticFocus = 0;
-                    logs.addEventListener('focus', function () { automaticFocus++; });
-                    events.push(function () {
-                        const filter = document.querySelector('select[name="policy"]');
-                        const correctInitialFocus = filter ? document.activeElement === filter && automaticFocus === 0 :
-                            document.activeElement !== logs && automaticFocus === 1;
-                        const noOutline = getComputedStyle(logs).outlineStyle === 'none';
-                        logs.focus({preventScroll: true});
-                        const focusStillWorks = document.activeElement === logs && logs.tabIndex === 0 &&
-                            getComputedStyle(logs).outlineStyle !== 'none';
-                        document.body.dataset.sdwanFocus = correctInitialFocus && noOutline && focusStillWorks ? 'pass' : 'fail';
-                    });
-                    </script>
-                """
                 for name, theme in (("status", "pfSense"), ("status", "pfSense-dark"), ("diagnostics", "pfSense")):
                     focus_page = pages[name].replace("</head>", f'<link rel="stylesheet" href="/css/{theme}.css"></head>')
-                    footer = focus_probe + "".join(f'<script src="{url}"></script>' for url in native_scripts)
-                    focus_page = focus_page.replace("</body>", footer + "</body>")
+                    focus_page = focus_page.replace("</body>", focus_probe + native_footer + "</body>")
                     filename = f"{name}-{theme}-focus.html"
                     (site / filename).write_text(focus_page)
                     output = subprocess.run([chrome, "--headless", "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage",
@@ -899,6 +909,7 @@ def run(php, classes, screenshot_dir=None):
             pages["members-edit"] = request("members", get={"edit": "1"})
             pages["large-policy"] = large_html
             pages["updates"] = offered.split("</html>", 1)[0] + "</html>"
+            pages["updates-initial"] = updates.split("</html>", 1)[0] + "</html>"
             pages["status-stopped"] = request("status", config=demo, native=demo_native, snapshot=demo_snapshot,
                                               service_state="stopped")
 
