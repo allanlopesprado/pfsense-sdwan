@@ -24,12 +24,12 @@ def configuration(site, peer, staged=False):
     routes = ""
     if staged:
         ipsec = (f"<phase1><ikeid>{site['ikeid']}</ikeid><interface>wan</interface>"
-                 f"<iketype>ikev2</iketype><remote-gateway>{peer['outer']}</remote-gateway>"
+                 f"<iketype>ikev2</iketype><protocol>inet</protocol><remote-gateway>{peer['outer']}</remote-gateway>"
                  f"<authentication_method>pre_shared_key</authentication_method>"
                  f"<pre-shared-key>FIXTURE_ONLY</pre-shared-key></phase1>"
-                 f"<phase2><ikeid>{site['ikeid']}</ikeid><reqid>{site['reqid']}</reqid><mode>vti</mode>"
-                 f"<localid><address>{site['inner'].split('/')[0]}</address></localid>"
-                 f"<remoteid><address>{peer['inner'].split('/')[0]}</address></remoteid></phase2>")
+                 f"<phase2><ikeid>{site['ikeid']}</ikeid><reqid>{site['reqid']}</reqid><mode>vti</mode><protocol>esp</protocol>"
+                 f"<localid><type>address</type><address>{site['inner'].split('/')[0]}</address></localid>"
+                 f"<remoteid><type>address</type><address>{peer['inner'].split('/')[0]}</address></remoteid></phase2>")
         interface = f"<{site['vti']}><if>ipsec{site['reqid']}</if><enable/></{site['vti']}>"
         routes = (f"<gateways><gateway_item><name>{site['gateway']}</name><interface>{site['vti']}</interface>"
                   f"<ipprotocol>inet</ipprotocol><gateway>{peer['inner'].split('/')[0]}</gateway></gateway_item></gateways>"
@@ -39,6 +39,7 @@ def configuration(site, peer, staged=False):
             f"<ipsec><enable/>{ipsec}</ipsec><nat><outbound><mode>automatic</mode></outbound></nat>"
             f"<filter><rule><type>block</type><floating>yes</floating><direction>out</direction>"
             f"<quick>yes</quick><ipprotocol>inet</ipprotocol><interface>wan</interface><source><any/></source>"
+            f"<id/><tagged/><max-src-states/><statetype>keep state</statetype>"
             f"<destination><address>{peer['lan']}</address></destination></rule></filter>{routes}</pfsense>").encode()
 
 
@@ -68,7 +69,19 @@ with tempfile.TemporaryDirectory(prefix="paired-vti-") as temporary:
 
     assert "FIXTURE_ONLY" not in json.dumps(pilot.execute(root, plan, "preview"))
     assert all(current.read_bytes() == before for current, _, before, _ in changes)
+    reject(lambda: pilot.parse('<?xml version="1.0"?><!DOCTYPE pfsense><pfsense/>'.encode("utf-16")), "utf-8")
+    first, first_staged, first_before, _ = changes[0]
+    first.write_bytes(first_before.replace(b"<destination>", b"<destination><not/>"))
+    reject(lambda: pilot.execute(root, plan, "preview"), "first enabled outbound Floating quick")
+    first.write_bytes(first_before.replace(b"<filter>", b"<filter><rule><floating>yes</floating>"
+                                          b"<direction>out</direction><quick>yes</quick><type>pass</type></rule>"))
+    reject(lambda: pilot.execute(root, plan, "preview"), "first enabled outbound Floating quick")
+    first.write_bytes(first_before)
     endpoint, staged, _, after = changes[1]
+    staged.write_bytes(after.replace(b"<mode>vti</mode>", b"<mode>vti</mode><mode>tunnel</mode>"))
+    reject(lambda: pilot.execute(root, plan, "apply"), "differs from the pair plan")
+    staged.write_bytes(after.replace(b"<type>address</type>", b"<type>network</type>"))
+    reject(lambda: pilot.execute(root, plan, "apply"), "differs from the pair plan")
     staged.write_bytes(after.replace(b"FIXTURE_ONLY", b"DIFFERENT_FIXTURE_ONLY"))
     reject(lambda: pilot.execute(root, plan, "apply"), "keys differ")
     staged.write_bytes(after.replace(b"automatic", b"disabled"))
@@ -90,6 +103,8 @@ with tempfile.TemporaryDirectory(prefix="paired-vti-") as temporary:
     reject(lambda: pilot.execute(root, plan, "rollback"), "differs from both saved revisions")
     assert endpoint.read_bytes() == b"operator change"
     endpoint.write_bytes(after)
+    first_staged.write_bytes(b"new staging file")
+    staged.unlink()
     pilot.execute(root, plan, "rollback")
     assert all(current.read_bytes() == before for current, _, before, _ in changes)
     plan.write_text(json.dumps({"schema": 1, "sites": [a, {**b, "lan": a["lan"]}]}), encoding="utf-8")

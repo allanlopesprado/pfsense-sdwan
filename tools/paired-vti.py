@@ -29,15 +29,18 @@ def digest(data):
 
 
 def parse(data):
-    if re.search(rb"<!\s*(?:DOCTYPE|ENTITY)", data, re.I):
+    document = data.decode("utf-8-sig")
+    if re.search(r"<!\s*(?:DOCTYPE|ENTITY)", document, re.I):
         raise ValueError("XML doctype and entity declarations are outside the lab profile.")
-    config = ET.fromstring(data)
+    config = ET.fromstring(document)
     if config.tag != "pfsense":
         raise ValueError("Expected a pfSense configuration copy.")
     return config
 
 
 def shape(node):
+    if node is None:
+        return None
     return (node.tag, node.attrib, node.text if node.text and node.text.strip() else None,
             tuple(shape(child) for child in node))
 
@@ -65,8 +68,8 @@ def site_profile(profile):
     return {**profile, "outer": str(outer), "inner": inner, "lan": lan}
 
 
-def profiles(path):
-    manifest = json.loads(read(path, 8192))
+def profiles(data):
+    manifest = json.loads(data)
     if not isinstance(manifest, dict) or manifest.get("schema") != 1 or len(manifest.get("sites", [])) != 2:
         raise ValueError("Expected a two-site VTI plan.")
     a, b = map(site_profile, manifest["sites"])
@@ -90,7 +93,35 @@ def remove_addition(before, after, parent, tag, match):
 
 
 def fields(entry, expected):
-    return all(entry.findtext(key) == value for key, value in expected.items())
+    for key, value in expected.items():
+        node = entry
+        for part in key.split("/"):
+            children = node.findall(part)
+            if len(children) != 1:
+                return False
+            node = children[0]
+        if node.text != value or len(node):
+            return False
+    return True
+
+
+def check_guard(config, site, peer):
+    rule = next((entry for entry in config.findall("filter/rule")
+                 if entry.find("disabled") is None and entry.findtext("floating") == "yes" and
+                 entry.findtext("quick") == "yes" and entry.findtext("direction") != "in"), None)
+    expected = {"floating": "yes", "direction": "out", "interface": site["wan"], "type": "block",
+                "ipprotocol": "inet", "destination/address": str(peer["lan"])}
+    allowed = {"floating", "direction", "interface", "type", "ipprotocol", "quick", "source", "destination",
+               "protocol", "id", "tracker", "descr", "created", "updated", "log", "statetype"}
+    native_empty = {"tag", "tagged", "max", "max-src-nodes", "max-src-conn", "max-src-states", "statetimeout",
+                    "statepolicy", "os"}
+    if (rule is None or not fields(rule, expected) or rule.attrib or
+            any(child.tag not in allowed and (child.tag not in native_empty or child.text or child.attrib or len(child))
+                for child in rule) or rule.findtext("protocol", "") not in ("", "any") or
+            rule.findtext("statetype", "") not in ("", "keep state", "none") or
+            shape(rule.find("source")) != ("source", {}, None, (("any", {}, None, ()),)) or
+            shape(rule.find("destination")) != ("destination", {}, None, (("address", {}, str(peer["lan"]), ()),))):
+        raise ValueError("The first enabled outbound Floating quick rule must block the private prefix on the WAN.")
 
 
 def check_change(before_bytes, after_bytes, site, peer):
@@ -102,12 +133,7 @@ def check_change(before_bytes, after_bytes, site, peer):
             ipaddress.IPv4Interface(own_lan + "/" + before.findtext("interfaces/lan/subnet", "32")).network != site["lan"] or
             before.find("ipsec/enable") is None):
         raise ValueError("The original config must have the declared WAN, LAN and enabled IPsec.")
-    guard = {"floating": "yes", "direction": "out", "interface": site["wan"], "type": "block",
-             "ipprotocol": "inet", "destination/address": str(peer["lan"])}
-    if not any(fields(rule, guard) and rule.findtext("quick") == "yes" and rule.find("source/any") is not None and
-               rule.find("disabled") is None and rule.find("gateway") is None
-               for rule in before.findall("filter/rule")):
-        raise ValueError("Prepare a native quick WAN egress block for the private remote prefix before staging.")
+    check_guard(before, site, peer)
     if (before.find(f"ipsec/phase1[ikeid='{ikeid}']") is not None or
             before.find(f"ipsec/phase2[reqid='{reqid}']") is not None or
             before.find("interfaces/" + site["vti"]) is not None or
@@ -119,13 +145,16 @@ def check_change(before_bytes, after_bytes, site, peer):
     iface = remove_addition(before, after, "interfaces", site["vti"], lambda _: True)
     gateway = remove_addition(before, after, "gateways", "gateway_item", lambda e: e.findtext("name") == site["gateway"])
     route = remove_addition(before, after, "staticroutes", "route", lambda e: e.findtext("network") == str(peer["lan"]))
-    if (not fields(p1, {"interface": site["wan"], "remote-gateway": peer["outer"], "iketype": "ikev2",
-                        "authentication_method": "pre_shared_key"}) or
-            not fields(p2, {"ikeid": ikeid, "mode": "vti", "localid/address": str(site["inner"].ip),
-                            "remoteid/address": str(peer["inner"].ip)}) or
-            not fields(iface, {"if": "ipsec" + reqid}) or iface.find("enable") is None or
-            not fields(gateway, {"interface": site["vti"], "gateway": str(peer["inner"].ip), "ipprotocol": "inet"}) or
-            route.findtext("gateway") != site["gateway"] or any(e.find("disabled") is not None for e in (p1, p2, gateway, route))):
+    if (not fields(p1, {"ikeid": ikeid, "interface": site["wan"], "remote-gateway": peer["outer"], "iketype": "ikev2",
+                        "protocol": "inet", "authentication_method": "pre_shared_key"}) or
+            not fields(p2, {"ikeid": ikeid, "reqid": reqid, "mode": "vti", "protocol": "esp",
+                            "localid/type": "address", "remoteid/type": "address",
+                            "localid/address": str(site["inner"].ip), "remoteid/address": str(peer["inner"].ip)}) or
+            not fields(iface, {"if": "ipsec" + reqid}) or len(iface.findall("enable")) != 1 or
+            not fields(gateway, {"name": site["gateway"], "interface": site["vti"],
+                                 "gateway": str(peer["inner"].ip), "ipprotocol": "inet"}) or
+            not fields(route, {"network": str(peer["lan"]), "gateway": site["gateway"]}) or
+            any(e.find("disabled") is not None for e in (p1, p2, gateway, route))):
         raise ValueError("The staged IPsec, VTI, gateway or private route differs from the pair plan.")
     for config in (before, after):
         for revision in config.findall("revision"):
@@ -133,7 +162,7 @@ def check_change(before_bytes, after_bytes, site, peer):
     if shape(before) != shape(after):
         raise ValueError("The staged copy changes configuration outside the new VTI objects.")
     secret = p1.findtext("pre-shared-key")
-    if not secret:
+    if not secret or len(p1.findall("pre-shared-key")) != 1:
         raise ValueError("Configure the IKEv2 key in both native consoles before exporting the private copies.")
     return secret.encode()
 
@@ -167,9 +196,11 @@ def compensation(changes):
     for target, before, after in reversed(changes):
         try:
             current = read(target)
+            if current == before:
+                continue
             if current == after:
                 atomic_write(target, before)
-            elif current != before:
+            else:
                 ambiguous = True
         except (OSError, ValueError):
             ambiguous = True
@@ -178,8 +209,15 @@ def compensation(changes):
 
 
 def execute(root, plan, action):
-    a, b = profiles(plan)
+    data = read(plan, 8192)
+    a, b = profiles(data)
     with transaction_lock(root):
+        receipt_file = root / ".paired-vti-receipt.json"
+        receipt = json.loads(read(receipt_file, 8192)) if receipt_file.exists() else None
+        identity = digest(data)
+        if receipt is not None and (not isinstance(receipt, dict) or receipt.get("schema") != 1 or
+                                    receipt.get("plan_sha256") != identity):
+            raise ValueError("The private rollback receipt belongs to another pair plan.")
         changes = []
         preview = []
         secrets = []
@@ -189,6 +227,16 @@ def execute(root, plan, action):
                 raise ValueError("Use regular site directories under the offline lab root.")
             live = folder / "current.xml"
             backup = folder / "before-vti.xml"
+            if action == "rollback":
+                if receipt is None:
+                    raise ValueError("A paired apply must save its rollback receipt first.")
+                expected = next((row for row in receipt["sites"] if row["site"] == site["name"]), None)
+                before, current = read(backup), read(live)
+                if (expected is None or digest(before) != expected["before_sha256"] or
+                        digest(current) not in (expected["before_sha256"], expected["staged_sha256"])):
+                    raise ValueError("An offline copy differs from both saved revisions. Review before restoring.")
+                changes.append((live, before, current))
+                continue
             original = read(backup if backup.exists() else live)
             staged = read(folder / "staged.xml")
             secrets.append(check_change(original, staged, site, peer))
@@ -196,19 +244,23 @@ def execute(root, plan, action):
             preview.append({"site": site["name"], "vti": site["vti"], "peer": peer["outer"],
                             "private_route": str(peer["lan"]), "before_sha256": digest(original),
                             "staged_sha256": digest(staged)})
+        if action == "rollback":
+            compensation(changes)
+            return {"action": action, "sites": receipt["sites"]}
         if not hmac.compare_digest(*secrets):
             raise ValueError("The staged IKEv2 keys differ.")
-        if action == "rollback":
-            if any(read(target) not in (before, after) for target, before, after in changes):
-                raise ValueError("An offline copy differs from both saved revisions. Review before restoring.")
-            compensation(changes)
         if action == "apply":
+            if receipt is not None and receipt["sites"] != preview:
+                raise ValueError("The offline copies differ from the saved apply receipt. Use a new lab directory.")
             if any(read(target) != before for target, before, _ in changes):
                 raise ValueError("The offline copies changed after preparation. Review both sites.")
             for target, before, _ in changes:
                 backup = target.with_name("before-vti.xml")
                 if not backup.exists():
                     atomic_write(backup, before)
+            if receipt is None:
+                receipt = {"schema": 1, "plan_sha256": identity, "sites": preview}
+                atomic_write(receipt_file, json.dumps(receipt).encode())
             modified = []
             try:
                 for target, before, after in changes:

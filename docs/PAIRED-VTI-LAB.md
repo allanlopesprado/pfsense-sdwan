@@ -5,7 +5,7 @@ This pilot prepares and reconciles **offline configuration copies** for an IPv4,
 ## Prepare both views in pfSense
 
 1. On each clone, record `cat /etc/version` and `pkg config ABI`, the current WAN and LAN assignments and the applicable native rules. Leave the default route and NAT settings under their original configuration.
-2. Enable native IPsec and create a quick IPv4 egress block on the WAN for the peer's private LAN prefix, ahead of any applicable pass. Keep management access on the independent console and management network. Export this baseline as `current.xml` for each site.
+2. Enable native IPsec and create a quick IPv4 egress block on the WAN for the peer's private LAN prefix. Use **Any** for source and protocol with the exact destination prefix. Place the block first among enabled outbound Floating quick rules for this pilot. Keep management access on the independent console and management network. Verify the block with a new connection while the tunnel is unavailable, inspect existing states for the prefix, and export this baseline as `current.xml` for each site.
 3. In separate working snapshots, save a Phase 1 bound to the declared WAN and peer with matching IKEv2 proposals and PSK. Enter the key in each native console. Save a VTI Phase 2 with reversed inner addresses and matching ESP proposals. Assign and enable the new VTI interface, define its gateway using the peer VTI address, and add a route only for the peer LAN. Export the staged copy as `staged.xml`. The plan uses the saved Phase 1 ID, Phase 2 request ID and assigned interface names.
 
 Use a private working directory named `lab` containing `hub/current.xml`, `hub/staged.xml`, `branch/current.xml` and `branch/staged.xml`. Use a separate directory per rollout. This example plan contains synthetic addresses:
@@ -33,7 +33,7 @@ python3 tools/paired-vti.py ./lab ./plan.json preview
 python3 tools/paired-vti.py ./lab ./plan.json apply
 ```
 
-Compare the preview with both consoles. The tool checks both configurations before updating either offline copy. It checks the native objects, WAN block, LAN prefixes, reciprocal tunnel addresses and matching keys. The preview prints scoped identifiers and hashes. A failure during the second write restores the first copy if it still matches the applied fingerprint. The original files are saved as `before-vti.xml`. For a complete or interrupted operation, check both fingerprints and use `python3 tools/paired-vti.py ./lab ./plan.json rollback`. If another operation changed either configuration, review both copies before compensating.
+Compare the preview with both consoles. The tool checks both configurations before updating either offline copy. It checks the native objects, WAN block, LAN prefixes, reciprocal tunnel addresses and matching keys. The preview prints scoped identifiers and hashes. A failure during the second write restores the first copy if it still matches the applied fingerprint. The original files are saved as `before-vti.xml` and the private receipt records the exact pair of applied fingerprints. For a complete or interrupted operation, check both fingerprints and use `python3 tools/paired-vti.py ./lab ./plan.json rollback`. The receipt and backups suffice even if the staging files are deleted. If another operation changed either configuration, review both copies before compensating. If the process was forcibly stopped, verify that it exited and move the stale `.paired-vti-lock` aside before recovery.
 
 ## Validate on two clones
 
