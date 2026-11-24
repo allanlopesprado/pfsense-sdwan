@@ -75,14 +75,21 @@ class ApplicationBenchmarkTest(unittest.TestCase):
 
     def test_timeout_is_recorded(self):
         with patch.object(benchmark.socket, "create_connection", side_effect=TimeoutError):
-            self.assertEqual(benchmark.transaction("192.0.2.162", b"marker", .1),
+            self.assertEqual(benchmark.transaction("192.0.2.162", b"marker", .1, 20000),
                              {"status": "timeout", "stage": "connect"})
         with patch.object(benchmark.socket, "create_connection") as connect:
             conn = connect.return_value.__enter__.return_value
             peer = conn.makefile.return_value.__enter__.return_value
             peer.readline.side_effect = TimeoutError
-            self.assertEqual(benchmark.transaction("192.0.2.162", b"marker", .1),
+            self.assertEqual(benchmark.transaction("192.0.2.162", b"marker", .1, 20000),
                              {"status": "timeout", "stage": "reply"})
+            connect.assert_called_once_with(("192.0.2.162", 7), timeout=.1, source_address=("", 20000))
+
+    def test_application_flows_use_disjoint_source_ports(self):
+        ports = {name: {benchmark.connection_port(name, seq) for seq in range(1, 6001)}
+                 for name in ("erp", "backup")}
+        self.assertEqual(len(ports["erp"] | ports["backup"]), 12000)
+        self.assertEqual(benchmark.connection_port("erp", 6001), benchmark.connection_port("erp", 1))
 
     def test_binding_activation_errors_are_reported_outside_steady_scoring(self):
         with TemporaryDirectory() as path:

@@ -132,10 +132,10 @@ def activation_stats(rows, end_ns):
             "excluded_boundary_attempts": boundary, "errors": dict(errors)}
 
 
-def transaction(target, marker, timeout):
+def transaction(target, marker, timeout, source_port):
     stage = "connect"
     try:
-        with socket.create_connection((target, 7), timeout=timeout) as conn:
+        with socket.create_connection((target, 7), timeout=timeout, source_address=("", source_port)) as conn:
             stage = "send"
             conn.settimeout(timeout)
             conn.sendall(marker + b"\n")
@@ -156,6 +156,12 @@ def transaction(target, marker, timeout):
         return {"status": "socket_error", "stage": stage, "errno": error.errno}
 
 
+def connection_port(flow, sequence):
+    # Use separate ports for each flow, below Linux's default ephemeral range.
+    # At the shortest test interval, a port can only recur after 25 minutes.
+    return 20_000 + 2 * ((sequence - 1) % 6_000) + int(flow == "backup")
+
+
 def client(flow, interval, output):
     step = int(interval * NS)
     next_start = time.monotonic_ns()
@@ -167,10 +173,11 @@ def client(flow, interval, output):
             wall_start = time.time_ns()
             sequence += 1
             marker = f"{flow}-{start}-{sequence}".encode("ascii")
-            reply = transaction(TARGETS[flow], marker, min(.9, interval * .8))
+            source_port = connection_port(flow, sequence)
+            reply = transaction(TARGETS[flow], marker, min(.9, interval * .8), source_port)
             end = time.monotonic_ns()
             stream.write(json.dumps({"start_ns": start, "end_ns": end, "wall_start_ns": wall_start,
-                                     "sequence": sequence, **reply}) + "\n")
+                                     "sequence": sequence, "source_port": source_port, **reply}) + "\n")
             next_start = max(next_start + step, end)
 
 
