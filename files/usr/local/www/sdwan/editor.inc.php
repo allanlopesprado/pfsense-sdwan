@@ -523,6 +523,11 @@ elseif (!$display_form): ?>
 		$form->addGlobal($review_button->setAttribute('value', '1'));
 	}
 	$form->addGlobal(new Form_Button('cancel', gettext('Cancel'), $url, 'fa-solid fa-undo'));
+	?>
+	<style>
+	#cancel .icon-embed-btn { color: inherit; }
+	</style>
+	<?php
 	print($form);
 if ($probe_reviews): ?>
 	<div class="panel panel-default">

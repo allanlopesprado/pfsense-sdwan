@@ -90,9 +90,24 @@ def screenshots(directory, www, pages):
             worker = Thread(target=server.serve_forever, daemon=True)
             worker.start()
             try:
+                cancel_icon_probe = """
+                    <script>
+                    window.addEventListener('load', async () => {
+                        const cancel = document.querySelector('#cancel');
+                        const icon = cancel.querySelector('i');
+                        const glyph = getComputedStyle(icon, '::before');
+                        const button = getComputedStyle(cancel);
+                        const undo = String.fromCodePoint(0xf0e2);
+                        const fonts = await document.fonts.load(glyph.fontWeight + ' ' + glyph.fontSize + ' ' + glyph.fontFamily, undo);
+                        document.body.dataset.sdwanCancelIcon = fonts.length && glyph.content.includes(undo) &&
+                            glyph.color === button.color && glyph.color !== button.backgroundColor ? 'pass' : 'fail';
+                    });
+                    </script>
+                """
                 for name, theme, size in [("status", "pfSense", "1440,900"), ("status", "pfSense-dark", "390,844"),
                                           ("diagnostics", "pfSense", "1440,900"), ("diagnostics", "pfSense-dark", "390,844"),
                                           ("members", "pfSense", "1440,900"),
+                                          ("members-edit", "pfSense", "1440,900"),
                                           ("members-edit", "pfSense-dark", "1440,900"), ("updates", "pfSense", "1440,900"),
                                           ("updates", "pfSense-dark", "390,844"), ("forwarding", "pfSense", "1440,900"),
                                           ("forwarding", "pfSense-dark", "390,844")]:
@@ -100,13 +115,20 @@ def screenshots(directory, www, pages):
                     styles = ('<link rel="stylesheet" href="/vendor/font-awesome/css/all.min.css">'
                               f'<link rel="stylesheet" href="/css/{theme}.css">')
                     html = pages[name].replace("</head>", styles + "</head>")
+                    checks = []
+                    if name == "members-edit":
+                        html = html.replace("</body>", cancel_icon_probe + "</body>")
+                        checks = ["--virtual-time-budget=1000", "--dump-dom"]
                     (site / (preview + ".html")).write_text(html)
                     out = directory / (preview + ".png")
-                    subprocess.run([chrome, "--headless", "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage",
-                                    f"--user-data-dir={folder}/chrome", f"--window-size={size}",
-                                    f"--screenshot={out.resolve()}", f"http://127.0.0.1:{server.server_port}/{preview}.html"],
-                                   capture_output=True, check=True, timeout=35)
+                    result = subprocess.run(
+                        [chrome, "--headless", "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage",
+                         f"--user-data-dir={folder}/chrome", f"--window-size={size}", *checks,
+                         f"--screenshot={out.resolve()}", f"http://127.0.0.1:{server.server_port}/{preview}.html"],
+                        capture_output=True, check=True, timeout=35)
                     assert out.read_bytes().startswith(b"\x89PNG"), out
+                    if checks:
+                        assert b'data-sdwan-cancel-icon="pass"' in result.stdout, preview
                 # pfSense.js focuses the first visible input before running the page callbacks.
                 native_scripts = ("/vendor/jquery/jquery-3.7.1.min.js", "/vendor/jquery-ui/jquery-ui-1.13.2.min.js",
                                   "/vendor/bootstrap/js/bootstrap.min.js", "/js/pfSense.js")
