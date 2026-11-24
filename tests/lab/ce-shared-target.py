@@ -1,11 +1,20 @@
 #!/usr/bin/env python3
 """Verify DNS and HTTPS for one target IP through both appliance WANs."""
 import argparse
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack
+import http.server
 import importlib.util
 import json
 import re
+import select
+import socket
+import socketserver
+import ssl
+import subprocess
 import sys
+import tempfile
+import threading
 import time
 from pathlib import Path
 
@@ -16,6 +25,8 @@ PROTOCOLS = {"dns": "udp dport 53", "https": "tcp dport 443 tcp flags & (syn | a
 PATH_CHECKS = ("dns", "dns_aaaa", "https")
 MONITOR = {"GW_A": ("sw-wire0", "a"), "GW_B": ("sw-wire2", "b")}
 NATIVE_PATHS = {"G": "GW_A", "B": "GW_A"}
+HTTPS_NAMES = ("erp.sdwan.test", "backup.sdwan.test", "shared-a.sdwan.test", "shared-b.sdwan.test")
+HTTPS_TARGETS = ("192.0.2.162", "192.0.2.163", "192.0.2.169", "192.0.2.169")
 
 
 def load_benchmark():
@@ -494,12 +505,176 @@ def exercise(ce, benchmark, qemu, cleanup, provider):
     assert_native_routing(ce, qemu, reference)
 
 
+class ClassificationHttps(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.path == "/healthz":
+            body = b"ok"
+        elif re.fullmatch(r"/transaction/[a-z0-9-]{1,64}", self.path):
+            body = f"{self.client_address[0]} {self.path.split('/')[-1]}".encode("ascii")
+        else:
+            self.send_error(404)
+            return
+        self.send_response(200)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, *_args):
+        pass
+
+
+class ClassificationUdp(socketserver.BaseRequestHandler):
+    def handle(self):
+        data, server = self.request
+        server.sendto(self.client_address[0].encode() + b" " + data, self.client_address)
+
+
+def serve_classification(cert, key):
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    context.load_cert_chain(cert, key)
+    with ExitStack() as stack:
+        servers = [stack.enter_context(socketserver.UDPServer((HTTPS_TARGETS[0], 443), ClassificationUdp))]
+        for suffix in (162, 163, 164, 165, 166, 167, 169):
+            server = stack.enter_context(http.server.ThreadingHTTPServer((f"192.0.2.{suffix}", 443), ClassificationHttps))
+            server.socket = context.wrap_socket(server.socket, server_side=True)
+            servers.append(server)
+        for server in servers:
+            threading.Thread(target=server.serve_forever, daemon=True).start()
+        print("ready", flush=True)
+        threading.Event().wait()
+
+
+def verify_https_classification(ce, benchmark, qemu, cleanup):
+    temp = Path(cleanup.enter_context(tempfile.TemporaryDirectory(prefix="sdwan-https-classification-")))
+    ca, leaf, key = benchmark.lab_tls_certificates(temp, HTTPS_NAMES)
+    peer = subprocess.Popen(ce.in_ns("sdwan-peer", sys.executable, str(Path(__file__).resolve()),
+                                    "serve-classification", leaf, key), stdout=subprocess.PIPE, text=True)
+    cleanup.callback(peer.stdout.close)
+    cleanup.callback(ce.stop, peer)
+    if not select.select([peer.stdout], [], [], 8)[0] or peer.stdout.readline().strip() != "ready":
+        raise RuntimeError("The isolated HTTPS and UDP endpoints did not start.")
+
+    ce.install_candidate(qemu)
+    benchmark.install_probe_ca(ce, qemu, ca)
+    ce.reboot_with_overlay(qemu)
+    baseline = ce.route_and_nat(qemu)
+    management = ce.management("before HTTPS classification")
+    guest = f"php {ce.LAB}/ce291-guest.php"
+    ce.command(qemu, f"{guest} https_classification")
+    checker = f"php {ce.LAB}/check-https-destinations.php"
+    print(ce.command(qemu, f"{checker} SDWAN_LAB_ERP_TLS SDWAN_LAB_BACKUP_TLS"), flush=True)
+    refused = ce.command(qemu, f"if {checker} SDWAN_LAB_ERP_TLS SDWAN_LAB_COLLISION_TLS; then exit 1; fi")
+    assert "aliases overlap" in refused, refused
+    print("HTTPS_OVERLAPPING_DESTINATIONS_REFUSED", flush=True)
+    ce.command(qemu, f"{guest} bind")
+
+    counters = []
+    for protocol, target in (("tcp", HTTPS_TARGETS[0]), ("tcp", HTTPS_TARGETS[1]),
+                             ("tcp", HTTPS_TARGETS[2]), ("udp", HTTPS_TARGETS[0])):
+        for wire in (0, 2):
+            label = f"classification-{protocol}-{target.split('.')[-1]}-{wire}"
+            prefix = f'add rule inet test evidence iifname "sw-wire{wire}" ip daddr {target} {protocol} dport 443'
+            counters.append(f'{prefix} counter comment "{label}"')
+    ce.run(*ce.in_ns("sdwan-peer", "nft", "-f", "-"), input="\n".join(counters) + "\n")
+
+    def counters_for(protocol, target):
+        return [ce.evidence_count(f"classification-{protocol}-{target.split('.')[-1]}-{wire}") for wire in (0, 2)]
+
+    def request(name, target, marker):
+        args = ("curl", "--noproxy", "*", "--silent", "--show-error", "--fail", "--max-time", "4",
+                "--cacert", ca, "--resolve", f"{name}:443:{target}",
+                f"https://{name}/transaction/{marker}")
+        return ce.run(*ce.in_ns("sdwan-client", *args), capture_output=True).stdout
+
+    def fallback_packets(protocol):
+        counters = ce.command(qemu, "pfctl -P -vvsr 2>/dev/null | awk '/ridentifier 41007$/ {print; getline; print}'")
+        match = re.search(rf"^.*\bproto {protocol}\b.*ridentifier 41007\s*\n"
+                          r"\s*\[\s*Evaluations:\s*\d+\s+Packets:\s*(\d+)", counters, re.MULTILINE)
+        assert match, counters
+        return int(match[1])
+
+    def assert_request(index, marker, expected):
+        name, target = HTTPS_NAMES[index], HTTPS_TARGETS[index]
+        before = counters_for("tcp", target)
+        reply = request(name, target, marker)
+        observed = [end > start for start, end in zip(before, counters_for("tcp", target))]
+        assert reply == f"{expected} {marker}" and observed == [expected == ce.A, expected == ce.B], (reply, observed)
+        print(f"HTTPS_CLIENT_REPLY {name} {target}: {reply}", flush=True)
+
+    def check_pair(phase, erp):
+        with ThreadPoolExecutor(max_workers=2) as workers:
+            futures = [workers.submit(assert_request, index, f"{phase}-{index}", expected)
+                       for index, expected in enumerate((erp, ce.A))]
+            for result in futures:
+                result.result()
+
+    ce.wait_paths(qemu, "HTTPS destinations healthy", NATIVE_PATHS)
+    for table, target in zip(("SDWAN_LAB_ERP_TLS", "SDWAN_LAB_BACKUP_TLS"), HTTPS_TARGETS):
+        assert ce.command(qemu, f"pfctl -t {table} -T show") == target
+    rules = ce.command(qemu, "pfctl -P -sr 2>/dev/null | awk '/ridentifier (4100[1-4]|41007)$/'")
+    for table in ("SDWAN_LAB_ERP_TLS", "SDWAN_LAB_BACKUP_TLS"):
+        assert len(re.findall(rf"\bto <{table}(?::[0-9]+)?> port = 443\b", rules)) == 2, rules
+    assert len(re.findall(r"ridentifier 41007$", rules, re.MULTILINE)) == 2, rules
+    print(rules, flush=True)
+    check_pair("healthy", ce.A)
+    try:
+        request("wrong-sni.sdwan.test", ce.ERP, "untrusted-name")
+    except subprocess.CalledProcessError as error:
+        assert error.returncode == 60, error.stderr
+    else:
+        raise AssertionError("HTTPS accepted a certificate for a different name")
+    cleanup.callback(ce.fault)
+    ce.fault(f'iifname "sw-wire0" ip saddr {ce.A} ip daddr {{ {ce.ERP}, 192.0.2.164 }} tcp dport 443 drop')
+    state = ce.wait_paths(qemu, "ERP HTTPS service failure", {"G": "GW_B", "B": "GW_A"})["snapshot"]
+    assert state["members"]["a"]["status"] == "online", state
+    assert state["policies"]["ERP"]["candidates"]["a"] == "Required service check failed", state
+    assert state["policies"]["Backup"]["candidates"]["a"] == "Eligible", state
+    assert "192.0.2.42" in ce.command(qemu, "drill @198.51.100.2 health.test A")
+    print("WAN1 gateway and DNS stayed healthy", flush=True)
+    check_pair("erp-failure", ce.B)
+
+    # Different TLS names on one unclassified IP must use the same native rule.
+    before_fallback = fallback_packets("tcp")
+    for index in (2, 3):
+        assert_request(index, f"unknown-{index}", ce.A)
+    assert fallback_packets("tcp") > before_fallback
+    udp_marker = "explicit-udp-fallback"
+    before = counters_for("udp", ce.ERP)
+    before_fallback = fallback_packets("udp")
+    udp = ce.run(*ce.in_ns("sdwan-client", sys.executable, str(Path(__file__).resolve()), "udp-classification",
+                           ce.ERP, udp_marker), capture_output=True).stdout.strip()
+    observed = [end > start for start, end in zip(before, counters_for("udp", ce.ERP))]
+    assert udp == f"{ce.A} {udp_marker}" and observed == [True, False], (udp, observed)
+    assert fallback_packets("udp") > before_fallback
+    print(f"UDP/443_NATIVE_FALLBACK {udp}", flush=True)
+
+    ce.fault()
+    ce.wait_paths(qemu, "HTTPS destinations recovered", NATIVE_PATHS)
+    check_pair("recovered", ce.A)
+    assert ce.route_and_nat(qemu) == baseline
+    ce.management("after HTTPS classification", management)
+    print("CE_HTTPS_DESTINATION_CLASSIFICATION_OK", flush=True)
+
+
 def main():
+    if sys.argv[1:2] == ["serve-classification"]:
+        serve_classification(Path(sys.argv[2]), Path(sys.argv[3]))
+        return
+    if sys.argv[1:2] == ["udp-classification"]:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as client:
+            client.settimeout(4)
+            client.connect((sys.argv[2], 443))
+            client.send(sys.argv[3].encode("ascii"))
+            print(client.recv(256).decode("ascii"))
+        return
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("image", type=Path)
     parser.add_argument("ce_version", choices=("2.9.1", "2.9.2"))
-    parser.add_argument("--activation-guard", action="store_true",
-                        help="isolate first binding activation with the observer suspended")
+    modes = parser.add_mutually_exclusive_group()
+    modes.add_argument("--activation-guard", action="store_true",
+                       help="isolate first binding activation with the observer suspended")
+    modes.add_argument("--https-classification", action="store_true",
+                       help="verify LAN HTTPS classification by disjoint destination aliases")
     args = parser.parse_args()
     benchmark = load_benchmark()
     ce = benchmark.appliance_module()
@@ -507,11 +682,13 @@ def main():
     def scenario(qemu, cleanup, provider):
         if args.activation_guard:
             verify_binding_after_overlay_install(ce, qemu)
+        elif args.https_classification:
+            verify_https_classification(ce, benchmark, qemu, cleanup)
         else:
             exercise(ce, benchmark, qemu, cleanup, provider)
 
     ce.appliance(args.image.resolve(), args.ce_version, scenario=scenario)
-    if not args.activation_guard:
+    if not (args.activation_guard or args.https_classification):
         print(f"CE_{args.ce_version.replace('.', '')}_READINESS_OK", flush=True)
 
 

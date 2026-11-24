@@ -238,28 +238,24 @@ def serve_probes(cert, key, dns_hosts=("192.0.2.164", "192.0.2.165"),
         threading.Event().wait()
 
 
-def setup_probes(ce, qemu, cleanup, *, shared_host=None):
-    temp = Path(cleanup.enter_context(tempfile.TemporaryDirectory(prefix="sdwan-ab-")))
-    unready_source = temp / "unready-source"
+def lab_tls_certificates(temp, hostnames):
     ca, ca_key, req, leaf, key, ext = [temp / name for name in ("ca.pem", "ca.key", "tls.csr", "tls.pem", "tls.key", "tls.ext")]
-    ext.write_text(f"subjectAltName=DNS:{TLS_NAME}\nextendedKeyUsage=serverAuth\n", encoding="ascii")
+    alt_names = ",".join(f"DNS:{name}" for name in hostnames)
+    ext.write_text(f"subjectAltName={alt_names}\nextendedKeyUsage=serverAuth\n"
+                   "basicConstraints=critical,CA:FALSE\nkeyUsage=critical,digitalSignature,keyEncipherment\n", encoding="ascii")
     for args in (
         ("req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "8", "-subj", "/CN=Isolated SDWAN benchmark CA",
-         "-addext", "basicConstraints=critical,CA:TRUE", "-keyout", ca_key, "-out", ca),
-        ("req", "-newkey", "rsa:2048", "-nodes", "-subj", f"/CN={TLS_NAME}", "-keyout", key, "-out", req),
+         "-addext", "basicConstraints=critical,CA:TRUE", "-addext", "keyUsage=critical,keyCertSign,cRLSign",
+         "-keyout", ca_key, "-out", ca),
+        ("req", "-newkey", "rsa:2048", "-nodes", "-subj", f"/CN={hostnames[0]}", "-keyout", key, "-out", req),
         ("x509", "-req", "-in", req, "-CA", ca, "-CAkey", ca_key, "-CAcreateserial", "-extfile", ext,
          "-days", "8", "-out", leaf),
     ):
         subprocess.run(["openssl", *args], check=True, timeout=15, capture_output=True)
-    command = [sys.executable, SCRIPT, "serve-probes", leaf, key]
-    if shared_host is not None:
-        command.extend([shared_host, unready_source])
-    server = subprocess.Popen(ce.in_ns("sdwan-peer", *command),
-                              stdout=subprocess.PIPE, text=True)
-    cleanup.callback(server.stdout.close)
-    cleanup.callback(ce.stop, server)
-    if not select.select([server.stdout], [], [], 8)[0] or server.stdout.readline().strip() != "ready":
-        raise RuntimeError("Benchmark DNS and TLS endpoints failed to start.")
+    return ca, leaf, key
+
+
+def install_probe_ca(ce, qemu, ca):
     cert_path = f"{ce.LAB}/benchmark-ca.pem"
     ce.command(qemu, f"""umask 077
 cat >{cert_path} <<'CERT_END'
@@ -269,6 +265,22 @@ scan=$(/usr/local/bin/php -r 'echo PHP_CONFIG_FILE_SCAN_DIR;')
 test -d "$scan"
 printf '%s\\n' 'curl.cainfo={cert_path}' >"$scan/99-sdwan-benchmark.ini"
 /usr/local/bin/php -r 'exit(ini_get("curl.cainfo") === "{cert_path}" ? 0 : 1);'""")
+
+
+def setup_probes(ce, qemu, cleanup, *, shared_host=None):
+    temp = Path(cleanup.enter_context(tempfile.TemporaryDirectory(prefix="sdwan-ab-")))
+    unready_source = temp / "unready-source"
+    ca, leaf, key = lab_tls_certificates(temp, (TLS_NAME,))
+    command = [sys.executable, SCRIPT, "serve-probes", leaf, key]
+    if shared_host is not None:
+        command.extend([shared_host, unready_source])
+    server = subprocess.Popen(ce.in_ns("sdwan-peer", *command),
+                              stdout=subprocess.PIPE, text=True)
+    cleanup.callback(server.stdout.close)
+    cleanup.callback(ce.stop, server)
+    if not select.select([server.stdout], [], [], 8)[0] or server.stdout.readline().strip() != "ready":
+        raise RuntimeError("Benchmark DNS and TLS endpoints failed to start.")
+    install_probe_ca(ce, qemu, ca)
     return unready_source
 
 

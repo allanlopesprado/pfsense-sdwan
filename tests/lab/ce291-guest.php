@@ -140,6 +140,53 @@ if ($action === 'floating_erp_block') {
     write_config('Toggle the disposable Floating ERP block');
     exit;
 }
+if ($action === 'https_classification') {
+    $aliases = config_get_path('aliases/alias', []);
+    $rules = config_get_path('filter/rule', []);
+    $services = ['41001' => ['SDWAN_LAB_ERP_TLS', '192.0.2.162'], '41003' => ['SDWAN_LAB_BACKUP_TLS', '192.0.2.163']];
+    foreach ($services as $tracker => [$alias, $target]) {
+        $aliases[] = ['name' => $alias, 'type' => 'host', 'address' => $target,
+            'descr' => 'Disposable HTTPS destination', 'detail' => 'Lab service'];
+        $paired = 0;
+        foreach ($rules as &$rule) {
+            if (in_array((int)($rule['tracker'] ?? 0), [(int)$tracker, (int)$tracker + 1], true) &&
+                ($rule['destination']['address'] ?? null) === $target && $rule['protocol'] === 'tcp') {
+                $rule['destination'] = ['address' => $alias, 'port' => '443'];
+                $paired++;
+            }
+        }
+        unset($rule);
+        if ($paired !== 2) {
+            throw new RuntimeException('Expected both original rules of the disposable service.');
+        }
+    }
+    $aliases[] = ['name' => 'SDWAN_LAB_COLLISION_TLS', 'type' => 'host', 'address' => '192.0.2.162',
+        'descr' => 'Disposable conflicting destination', 'detail' => 'Lab overlap check'];
+    $position = array_search('41005', array_map('strval', array_column($rules, 'tracker')), true);
+    if ($position === false) {
+        throw new RuntimeException('Expected an independent native LAN rule.');
+    }
+    array_splice($rules, $position, 0, [[
+        'type' => 'pass', 'ipprotocol' => 'inet', 'interface' => 'lan', 'protocol' => 'tcp/udp', 'tracker' => '41007',
+        'descr' => 'Native HTTPS and UDP fallback', 'source' => ['address' => '192.0.2.11'],
+        'destination' => ['any' => '', 'port' => '443'],
+    ]]);
+    if (!is_array(config_set_path('aliases/alias', $aliases)) || !is_array(config_set_path('filter/rule', $rules)) ||
+        !is_array(write_config('Set isolated HTTPS destination and native fallback rules'))) {
+        throw new RuntimeException('Cannot save the disposable classification rules.');
+    }
+    $current = sdwan_get_config();
+    $candidate = $current;
+    foreach ($candidate['members'] as $index => &$member) {
+        $member['probe_primary'] = 'https://erp.sdwan.test/healthz 192.0.2.' . (164 + $index) . ' expect=ok';
+        $member['probe_secondary'] = 'https://backup.sdwan.test/healthz 192.0.2.' . (166 + $index) . ' expect=ok';
+    }
+    unset($member);
+    if ($errors = sdwan_save_config($candidate, sdwan_config_revision($current), true)) {
+        throw new RuntimeException(implode('; ', $errors));
+    }
+    exit;
+}
 if ($action === 'erp_host_alias') {
     $name = 'SDWAN_LAB_ERP';
     $aliases = config_get_path('aliases/alias', []);

@@ -43,7 +43,7 @@ on:
         description: Appliance acceptance, diagnostics, recovery, or package security inventory
         type: choice
         default: acceptance
-        options: [acceptance, paths, benchmark, recovery, shared-target, inspection, activation-guard, security]
+        options: [acceptance, paths, benchmark, recovery, shared-target, https-classification, inspection, activation-guard, security]
       pairs:
         description: Number of native versus SD-WAN pairs for the benchmark
         type: number
@@ -109,7 +109,7 @@ jobs:
         run: |
           set -eu
           case "$CE_VERSION" in 2.9.1|2.9.2) ;; *) exit 1 ;; esac
-          case "$CE_SCENARIO" in acceptance|paths|benchmark|recovery|shared-target|inspection|activation-guard|security) ;; *) exit 1 ;; esac
+          case "$CE_SCENARIO" in acceptance|paths|benchmark|recovery|shared-target|https-classification|inspection|activation-guard|security) ;; *) exit 1 ;; esac
           if [ "$CE_SCENARIO" = recovery ]; then
             test "$CE_VERSION" = 2.9.1
           elif [ "$CE_SCENARIO" = benchmark ]; then
@@ -128,7 +128,7 @@ jobs:
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ env.CE_LAB }}.raw.gz
-          key: ${{ env.CE_LAB }}-candidate-disk-v7-${{ (env.CE_SCENARIO == 'recovery' || env.CE_SCENARIO == 'inspection') && env.CE_SCENARIO || 'base' }}-${{ hashFiles('ce-candidate-package/*.pkg', '.github/workflows/ce291-appliance.yml', '.github/workflows/build-package.yml', 'tests/lab/ce291-disk.sh', 'tests/lab/ce291-guest.php', 'tests/lab/ce291-source.py', 'core/**', 'tools/prepare-core.py', 'tools/build-lab-pkg.py', 'tools/previous-dist-package.sh', 'tools/verify-appliance.sh', 'files/**', 'Makefile', 'pkg-descr', 'pkg-plist', 'dist/pfSense-pkg-SDWAN-*.pkg*') }}
+          key: ${{ env.CE_LAB }}-candidate-disk-v7-${{ (env.CE_SCENARIO == 'recovery' || env.CE_SCENARIO == 'inspection') && env.CE_SCENARIO || 'base' }}-${{ hashFiles('ce-candidate-package/*.pkg', '.github/workflows/ce291-appliance.yml', '.github/workflows/build-package.yml', 'tests/lab/ce291-disk.sh', 'tests/lab/ce291-guest.php', 'tests/lab/ce291-source.py', 'core/**', 'tools/prepare-core.py', 'tools/build-lab-pkg.py', 'tools/previous-dist-package.sh', 'tools/verify-appliance.sh', 'tools/check-https-destinations.php', 'files/**', 'Makefile', 'pkg-descr', 'pkg-plist', 'dist/pfSense-pkg-SDWAN-*.pkg*') }}
       - name: Prepare the audited CE adapter
         if: env.CE_SCENARIO != 'security' && steps.disk.outputs.cache-hit != 'true'
         run: |
@@ -187,6 +187,9 @@ jobs:
               ;;
             shared-target)
               ce_python tests/lab/ce-shared-target.py "$CE_LAB.raw" "$CE_VERSION" | tee -a "$CE_LAB-result.log"
+              ;;
+            https-classification)
+              ce_python tests/lab/ce-shared-target.py "$CE_LAB.raw" "$CE_VERSION" --https-classification | tee -a "$CE_LAB-result.log"
               ;;
             activation-guard)
               ce_python tests/lab/ce-shared-target.py "$CE_LAB.raw" "$CE_VERSION" --activation-guard | tee -a "$CE_LAB-result.log"
