@@ -95,17 +95,23 @@ def screenshots(directory, www, pages):
                 row_actions_probe = """
                     <script>
                     events.push(function () {
-                        const remove = document.querySelector('button[value="review-delete"]');
+                        const remove = document.querySelector('button.sdwan-row-action');
                         const edit = remove.form.querySelector('a.fa-pencil');
-                        const editStyle = getComputedStyle(edit, '::before');
                         const removeStyle = getComputedStyle(remove, '::before');
-                        const editBox = edit.getBoundingClientRect();
                         const removeBox = remove.getBoundingClientRect();
-                        const aligned = editBox.y === removeBox.y &&
-                            editBox.width === removeBox.width && editBox.height === removeBox.height;
-                        const nativeSize = editStyle.fontSize === '18px' && removeStyle.fontSize === '18px';
+                        let matchesEdit = true;
+                        if (edit) {
+                            const editStyle = getComputedStyle(edit, '::before');
+                            const editBox = edit.getBoundingClientRect();
+                            matchesEdit = editBox.y === removeBox.y && editBox.width === removeBox.width &&
+                                editBox.height === removeBox.height && editStyle.fontSize === removeStyle.fontSize &&
+                                editStyle.color === removeStyle.color;
+                        }
                         const icon = removeStyle.content.includes(String.fromCodePoint(0xf2ed)) &&
-                            removeStyle.fontWeight === editStyle.fontWeight && removeStyle.color === editStyle.color;
+                            removeStyle.fontSize === '18px' && removeStyle.fontWeight === '900';
+                        const clickTarget = removeBox.width === 24 && removeBox.height === 24;
+                        const protectedPost = remove.form.method === 'post' &&
+                            Boolean(remove.form.elements.__csrf_magic?.value);
                         const initialFocus = document.activeElement !== remove && getComputedStyle(remove).outlineStyle === 'none';
                         remove.focus({preventScroll: true});
                         const focus = getComputedStyle(remove);
@@ -113,7 +119,7 @@ def screenshots(directory, www, pages):
                             focus.outlineColor === focus.color;
                         remove.blur();
                         document.body.dataset.sdwanRowActions =
-                            aligned && nativeSize && icon && initialFocus && keyboardFocus ? 'pass' : 'fail';
+                            matchesEdit && icon && clickTarget && protectedPost && initialFocus && keyboardFocus ? 'pass' : 'fail';
                     });
                     </script>
                 """
@@ -137,7 +143,9 @@ def screenshots(directory, www, pages):
                                           ("members-edit", "pfSense", "1440,900"),
                                           ("members-edit", "pfSense-dark", "1440,900"), ("updates", "pfSense", "1440,900"),
                                           ("updates", "pfSense-dark", "390,844"), ("forwarding", "pfSense", "1440,900"),
-                                          ("forwarding", "pfSense-dark", "390,844")]:
+                                          ("forwarding", "pfSense-dark", "390,844"),
+                                          ("forwarding-bindings", "pfSense", "1440,1200"),
+                                          ("forwarding-bindings", "pfSense-dark", "1440,1200")]:
                     preview = name + "-" + theme
                     styles = ('<link rel="stylesheet" href="/vendor/font-awesome/css/all.min.css">'
                               f'<link rel="stylesheet" href="/css/{theme}.css">')
@@ -146,7 +154,7 @@ def screenshots(directory, www, pages):
                     if name == "members-edit":
                         html = html.replace("</body>", cancel_icon_probe + "</body>")
                         proof = b'data-sdwan-cancel-icon="pass"'
-                    elif name == "members":
+                    elif name in ("members", "forwarding-bindings"):
                         footer = row_actions_probe + "".join(f'<script src="{url}"></script>' for url in native_scripts)
                         html = html.replace("</body>", footer + "</body>")
                         proof = b'data-sdwan-row-actions="pass"'
@@ -917,9 +925,6 @@ def run(php, classes, screenshot_dir=None):
         generated_selection = request("forwarding", native=fixture, get={"policy": ":VOICE", "group": ":PBR"})
         assert "matches the native group" in generated_selection
         assert Choices(generated_selection).fields["group"] == [("", False), (":PBR", True)]
-        if screenshot_dir:
-            pages["forwarding"] = stock
-            screenshots(screenshot_dir, classes.parent, pages)
         tracker_url = next(url for url in Choices(stock).links if "filterlogentries_tracker" in url)
         visible = request("forwarding", native=fixture, get=names, privileges={tracker_url: False})
         assert tracker_url not in Choices(visible).links and "50321" in visible
@@ -962,6 +967,10 @@ def run(php, classes, screenshot_dir=None):
         active_page = request("forwarding", native=active, steering_abi=True)
         assert "Active filter" in active_page and "PBR" in active_page and 'value="unbind"' in active_page
         assert "No current observation" in active_page
+        if screenshot_dir:
+            pages["forwarding"] = stock
+            pages["forwarding-bindings"] = active_page
+            screenshots(screenshot_dir, classes.parent, pages)
         unobserved = {"members": {"1": sample, "01": sample}, "policies": {"VOICE": {
             "selected": "1", "reason": "Lowest configured cost within SLA", "candidates": {"1": "Eligible", "01": "Eligible"},
         }}}
