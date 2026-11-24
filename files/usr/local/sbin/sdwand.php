@@ -142,12 +142,15 @@ function sdwan_observe_once(): void {
 		$members = array_column($config['members'], 'gateway');
 		$observations = sdwan_gateway_observations($members ?: array_keys($inventory), $inventory);
 		$service_checks = [];
+		$timing = [];
 		if (array_column($config['members'], 'probe_primary')) {
 			require_once('/usr/local/pkg/sdwan_probe.inc');
 			$service_checks = sdwan_probe_observe($config['members'], $inventory, $observations,
 			    sdwan_probe_secondary_first($config));
+			$timing['service_checks_complete_ns'] = hrtime(true);
 		}
 		$snapshot = sdwan_evaluate($config, $observations, $started, $inventory, $service_checks);
+		$timing['policy_evaluation_ns'] = hrtime(true);
 		$snapshot['observed_at_ns'] = $observed_at;
 		$snapshot['config_revision'] = sdwan_config_revision($config);
 		// A native or SD-WAN edit can land while the observer waits on probe I/O.
@@ -191,6 +194,7 @@ function sdwan_observe_once(): void {
 						    array_intersect_key($state, ['gateway' => true, 'pool' => true, 'revision' => true]), $prior_steering);
 					}
 					$snapshot['steering'] = sdwan_steering_observations($config, $snapshot, $prior_steering, $rule_pairs);
+					$timing['steering_decision_ns'] = hrtime(true);
 				} catch (UnexpectedValueException $e) {
 					/* Unreadable bindings produce no pass decisions. */
 					$invalid_bindings = true;
@@ -214,6 +218,9 @@ function sdwan_observe_once(): void {
 					];
 					$receipt['trackers'] = $trackers;
 					$rules = ($same && $bindings) || $withdrawal !== null ? sdwan_steering_pf_rules() : null;
+					if ($rules !== null) {
+						$timing['pf_readback_ns'] = hrtime(true);
+					}
 					if ($withdrawal !== null && !$invalid_bindings &&
 					    sdwan_steering_withdrawal_confirmed($withdrawal, $trackers, $rules)) {
 						$withdrawal_verified = true;
@@ -263,6 +270,7 @@ function sdwan_observe_once(): void {
 				}
 			}
 		}
+		$snapshot['timing'] = $timing;
 		$json = json_encode($snapshot, JSON_THROW_ON_ERROR);
 		$temp = tempnam(dirname(SDWAN_SNAPSHOT_PATH), '.sdwan-');
 		if ($temp === false) {

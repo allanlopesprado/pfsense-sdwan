@@ -259,7 +259,8 @@ if ($action === 'renew_wan2') {
     interface_configure('opt1');
     exit;
 }
-if ($action === 'observations') {
+if (in_array($action, ['observations', 'benchmark_observations'], true)) {
+    $benchmark = $action === 'benchmark_observations';
     $package_settings = sdwan_get_config();
     $inventory = sdwan_gateways();
     $snapshot = sdwan_current_snapshot($package_settings, $inventory);
@@ -267,10 +268,14 @@ if ($action === 'observations') {
     $signature = null;
     $filter_status = [];
     $ruleset = null;
+    $rules = null;
+    if ($benchmark || isset($snapshot['steering'])) {
+        $rules = sdwan_steering_pf_rules();
+        $rules_read_ns = hrtime(true);
+    }
     if (isset($snapshot['steering'])) {
         $signature = sdwan_steering_runtime_signature($snapshot, $inventory);
         $native = sdwan_steering_native($inventory);
-        $rules = sdwan_steering_pf_rules();
         if ($rules !== null && function_exists('filter_sdwan_ruleset_hash')) {
             $ruleset = filter_sdwan_ruleset_hash($rules);
         }
@@ -285,9 +290,17 @@ if ($action === 'observations') {
     $path = g_get('varrun_path', '/var/run') . '/sdwan-filter-commit.json';
     $raw = @file_get_contents($path, false, null, 0, 65537);
     $proof = is_string($raw) && strlen($raw) <= 65536 ? json_decode($raw, true, 8) : null;
-    echo json_encode(['snapshot' => $snapshot, 'receipt' => (object)$record,
+    $result = ['snapshot' => $snapshot, 'receipt' => (object)$record,
         'signature' => $signature, 'pf' => (object)$filter_status, 'active_ruleset' => $ruleset,
-        'withdrawal_proof' => $proof, 'monotonic_ns' => hrtime(true)], JSON_THROW_ON_ERROR), PHP_EOL;
+        'withdrawal_proof' => $proof];
+    if ($benchmark) {
+        // A null read is distinct from a successful read with neither tracker loaded.
+        $result['benchmark_pf_rules'] = $rules === null ? null : array_values(array_filter($rules,
+            static fn(string $line): bool => preg_match('/ridentifier (41001|41003)$/', $line) === 1));
+        $result['benchmark_pf_read_ns'] = $rules_read_ns;
+    }
+    $result['monotonic_ns'] = hrtime(true);
+    echo json_encode($result, JSON_THROW_ON_ERROR), PHP_EOL;
     exit;
 }
 if ($action === 'settings') {

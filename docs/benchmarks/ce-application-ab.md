@@ -27,7 +27,7 @@ Each successful transaction includes the return path. The time origin for an int
 
 | Artifact | Contents |
 | --- | --- |
-| `summary.json` | Candidate digest, loss, application reply p95, time to first reply from the expected WAN p95, censored runs, steady-state source anomalies, and observer resource samples. |
+| `summary.json` | Candidate digest, loss, application reply p95, individual times to a reply from the expected WAN, censored runs, source anomalies, and observer resource samples. It reports recovery p95 with at least 20 observed recoveries. |
 | `phases.csv` | Per-phase raw counts, expected source, addresses seen by the peer, first successful reply, and first reply from the expected WAN. |
 | `erp.ndjson` and `backup.ndjson` | Start/end timestamps, observed source, and the connection, send, or reply stage for socket errors. |
 | `phases.ndjson` | Fault and recovery boundaries, loaded PF rules, and the observer snapshot at the end of each phase. |
@@ -35,11 +35,30 @@ Each successful transaction includes the return path. The time origin for an int
 | `resources.ndjson` | Periodic worker PID, `ps` CPU percentage, and resident memory in KiB. |
 | `sw-out*-erp.pcap*` | Optional bounded captures of synthetic ERP TCP on the LAN and both WANs. Use `wall_start_ns` to correlate a socket error with packets. |
 
+### Timing the policy and filter separately
+
+The **CE two-WAN appliance** benchmark offers four profiles. Use the same profile and recovery hold for both modes in each pair.
+
+| Profile | What it measures |
+| --- | --- |
+| `legacy` | Repeats the historical control with ERP and its policy's required DNS probe interrupted on WAN1. |
+| `timed` | Keeps the historical topology, traffic, and fault. Reads the recommendation, steering decision, reload receipt, and loaded PF trackers during transitions. |
+| `erp-https` | Interrupts ERP traffic and its corresponding certificate-verified HTTPS check on WAN1. The required backup DNS check and WAN1 remain available. The benchmark checks that a valid observer sample detects the service fault while that DNS check passes, and that each new backup request replies through WAN1. |
+| `erp-https-loaded` | Repeats the HTTPS profile with a background LAN-to-backup TCP echo workload targeting 1 MiB/s in each direction. Four more ERP outages of 3, 6, 4 and 8 seconds are interspersed with healthy periods. The summary reports the actual echoed bytes, losses, and source changes across the intermittent sequence. Short pulses measure behavior even if no policy switch occurs. |
+
+The timed profiles record the host-monotonic interval in which the isolated loss or restoration command ran. `start_ns` is the command completion, which is also the origin for application recovery times. Each subsequent state read has its own host-monotonic interval. `timing.ndjson` includes the probe results, recommendation, steering intent, matching reload receipt, and live PF rules for ERP and backup. A stage's host bounds cover the interval from the last observed contrary state to the first matching observation. A missing lower bound means the matching state was already present on the first usable read. A missing stage means it was not observed.
+
+The guest also records the exact monotonic clock values when its check batch completes, SLA evaluation finishes, steering is decided, and a PF readback finishes. Subtract these values only within the same guest clock. The check time includes the whole batch. PF readback and the reload acknowledgement bracket parts of the control path, while packets and replies demonstrate forwarding. Polling limits the precision of the instant when the kernel loaded a rule. During activation, native and bound rules may already point to the same next hop. The benchmark records an observed block and the return of the live pass after a steering decision. When it does not observe the rule leave its initial path, the matching confirmation receipt identifies the bound state.
+
+`activations.ndjson` includes the initial binding command interval and first confirmed PF proof. `summary.json` keeps activation losses and the longest gap between successful replies within the activation window separate from stable traffic. `sessions.ndjson` records replies from ERP and backup TCP connections opened before the service fault and tested during loss and after recovery. The new-connection data stays in `erp.ndjson` and `backup.ndjson`.
+
+Use `timed` to investigate the timings reported below on the historical fault. Use the HTTPS profiles to verify service-only failure with DNS still healthy. Timing reads add guest work, so include a same-topology `legacy` control when evaluating any timing difference. Earlier runs did not collect these intermediate timestamps. They establish end-to-end delays and packet locations but cannot apportion those delays between stages.
+
 To run locally, use an unbooted raw disk made by the signed Netgate package lab. Copy the disk before running since the lab writes to it.
 
 ```sh
 sudo /usr/bin/python3 tests/lab/ce-ab-benchmark.py ./ce292-ab.raw 2.9.2 \
-  --pairs 2 --output ./ce-ab-results
+  --pairs 2 --profile erp-https-loaded --capture-erp --output ./ce-ab-results
 ```
 
 For a prolonged run, use a dedicated Linux runner with persistent storage and keep the isolated namespaces active. The following command intersperses WAN loss and recovery with steady application traffic, reports source anomalies outside fault windows, and samples the observer every 60 seconds. The workflow dispatch supports shorter observation windows.

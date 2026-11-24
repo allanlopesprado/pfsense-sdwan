@@ -25,6 +25,9 @@ SCRIPT = Path(__file__).resolve()
 TARGETS = {"erp": "192.0.2.162", "backup": "192.0.2.163"}
 TLS_NAME = "service.sdwan.test"
 NS = 1_000_000_000
+TRACKERS = {"G": "41001", "B": "41003"}
+BENCHMARK_PROFILES = ("legacy", "timed", "erp-https", "erp-https-loaded")
+BACKGROUND_TARGET_BYTES_PER_SECOND = 1024 * 1024
 
 
 def appliance_module():
@@ -44,8 +47,9 @@ def phase_stats(rows, start_ns, end_ns, expected, aggregate_latencies=None):
     first_reply = first_expected = None
     sources = {}
     latencies = []
-    unexpected_runs = 0
+    unexpected_runs = source_switches = 0
     last_source = expected
+    first_source = preceding_reply = None
     for row in rows:
         if not start_ns <= row["start_ns"] < end_ns:
             continue
@@ -63,12 +67,16 @@ def phase_stats(rows, start_ns, end_ns, expected, aggregate_latencies=None):
         elapsed = round((row["end_ns"] - start_ns) / 1e6, 3)
         if first_reply is None:
             first_reply = elapsed
+            first_source = source
         if source == expected and first_expected is None:
             first_expected = elapsed
         latencies.append(round((row["end_ns"] - row["start_ns"]) / 1e6, 3))
         sources[source] = sources.get(source, 0) + 1
         if source != expected and source != last_source:
             unexpected_runs += 1
+        if preceding_reply is not None and source != preceding_reply:
+            source_switches += 1
+        preceding_reply = source
         last_source = source
     if aggregate_latencies is not None:
         aggregate_latencies.extend(latencies)
@@ -86,6 +94,9 @@ def phase_stats(rows, start_ns, end_ns, expected, aggregate_latencies=None):
         "sources": sources,
         "unexpected_source_replies": replies - sources.get(expected, 0),
         "unexpected_source_runs": unexpected_runs,
+        "source_switches": source_switches,
+        "first_source": first_source,
+        "last_source": preceding_reply,
         "tail_attempts": tail_attempts,
         "tail_mismatches": tail_mismatches,
     }
@@ -118,18 +129,118 @@ def by_phase(rows, phases):
 def activation_stats(rows, end_ns):
     replies = boundary = 0
     errors = defaultdict(int)
+    first = previous = longest_gap = None
     for row in rows:
         if row["end_ns"] >= end_ns:
             boundary += 1
         elif row["status"] == "ok":
             replies += 1
+            if first is None:
+                first = row["end_ns"]
+            if previous is not None:
+                gap = row["end_ns"] - previous
+                longest_gap = max(gap, longest_gap or 0)
+            previous = row["end_ns"]
         else:
             kind = row["status"]
             if "stage" in row:
                 kind = f"{row['stage']}_{kind}"
             errors[kind] += 1
     return {"attempts": replies + sum(errors.values()), "successful_replies": replies,
-            "excluded_boundary_attempts": boundary, "errors": dict(errors)}
+            "excluded_boundary_attempts": boundary, "errors": dict(errors),
+            "first_success_ns": first, "last_success_ns": previous,
+            "longest_success_gap_ms": None if longest_gap is None else round(longest_gap / 1e6, 3)}
+
+
+class TransitionTrace:
+    """Measure published and loaded state without treating poll times as event times."""
+
+    def __init__(self, ce, window, expected, stream, check):
+        self.ce, self.window, self.expected, self.stream, self.check = ce, window, expected, stream, check
+        self.previous_false = {}
+        self.stages = {}
+
+    def observe(self, qemu):
+        before = time.monotonic_ns()
+        state = self.ce.observations(qemu, benchmark=True)
+        after = time.monotonic_ns()
+        snapshot = state["snapshot"] or {}
+        member = snapshot.get("members", {}).get("a", {})
+        policy = snapshot.get("policies", {}).get("ERP", {})
+        steering = snapshot.get("steering", {})
+        diagnostics = snapshot.get("timing", {})
+        rules = state["benchmark_pf_rules"]
+        loaded = defaultdict(list)
+        for line in rules or ():
+            loaded[line.split()[-1]].append(line)
+        matches = rules is not None and all(
+            len(loaded[TRACKERS[group]]) == 1 and loaded[TRACKERS[group]][0].startswith("pass ")
+            and f"route-to ({' '.join(self.ce.GATEWAYS[gateway])})" in loaded[TRACKERS[group]][0]
+            for group, gateway in self.expected.items())
+        receipt = state["receipt"]
+        confirmed = bool(state["signature"] and state["signature"] == receipt.get("signature")
+                         and receipt.get("confirmed") and all(state["pf"].get(group) == "applied"
+                                                             for group in self.expected))
+        phase = self.window.get("phase")
+        expected_member = "b" if phase and phase.endswith("_loss") else "a"
+        gateway_state = member.get("status")
+        checks = member.get("checks", {})
+        detection = None
+        if phase in ("wan1_loss", "wan1_return", "soak_wan1_loss", "soak_wan1_return") and gateway_state:
+            detection = gateway_state == ("down" if phase.endswith("_loss") else "online")
+        elif phase in ("erp_only_loss", "erp_intermittent_loss") and "a" in policy.get("candidates", {}):
+            detection = policy["candidates"]["a"] == "Required service check failed"
+            other_check = "probe_secondary" if self.check == "probe_primary" else "probe_primary"
+            backup = snapshot.get("policies", {}).get("Backup", {})
+            self.record("erp_failure_with_healthy_backup",
+                        detection and gateway_state == "online" and checks.get(other_check) == "Passed"
+                        and backup.get("candidates", {}).get("a") == "Eligible", before, after)
+        elif phase in ("erp_only_return", "erp_intermittent_return") and self.check in checks:
+            detection = checks[self.check] == "Passed"
+        self.record("detection_published", detection, before, after, diagnostics.get("service_checks_complete_ns")
+                    if phase and phase.startswith("erp_") else snapshot.get("observed_at_ns"))
+        if phase is not None and policy:
+            self.record("policy_recommended", policy.get("selected") == expected_member, before, after,
+                        diagnostics.get("policy_evaluation_ns"))
+        requested = False
+        if self.window["mode"] == "sdwan":
+            requested = all(steering.get(group, {}).get("gateway") == gateway
+                            for group, gateway in self.expected.items())
+            self.record("forwarding_decided", requested if steering else None, before, after,
+                        diagnostics.get("steering_decision_ns"))
+            if requested:
+                self.record("native_reload_accepted", bool(receipt.get("accepted") and state["signature"] and
+                            state["signature"] == receipt.get("signature")), before, after)
+            self.record("observer_pf_confirmed", confirmed and matches if rules is not None else None, before, after,
+                        diagnostics.get("pf_readback_ns"))
+        if phase is None and rules is not None:
+            blocked = any(line.startswith("block ") for group in self.expected for line in loaded[TRACKERS[group]])
+            self.record("activation_guard_block_observed", blocked, before, after, state["benchmark_pf_read_ns"])
+        # Native passes can already use the intended hop before the bind. An
+        # observed mismatch and a current steering decision distinguish the
+        # restored live pass from that initial stock rule.
+        if (phase is not None or not matches or confirmed
+                or (requested and "live_pf_match" in self.previous_false)):
+            self.record("live_pf_match", matches if rules is not None else None, before, after,
+                        state["benchmark_pf_read_ns"])
+        self.stream.write(json.dumps({
+            "pair": self.window["pair"], "mode": self.window["mode"], "phase": phase or "activation",
+            "start_ns": self.window["start_ns"], "host_read_start_ns": before, "host_read_end_ns": after,
+            "guest_read_end_ns": state["monotonic_ns"], "guest_observation_start_ns": snapshot.get("observed_at_ns"),
+            "guest_timing_ns": diagnostics, "guest_pf_read_ns": state["benchmark_pf_read_ns"],
+            "wan1_status": gateway_state, "wan1_checks": checks, "policy": policy, "steering": steering,
+            "loaded_pf": rules, "pf_status": state["pf"], "signature": state["signature"], "receipt": receipt,
+        }) + "\n")
+        return state
+
+    def record(self, name, match, before, after, guest_ns=None):
+        if name in self.stages or match is None:
+            return
+        if not match:
+            self.previous_false[name] = before
+            return
+        self.stages[name] = {"host_lower_ns": self.previous_false.get(name), "host_upper_ns": after,
+                             "guest_ns": guest_ns}
 
 
 def transaction(target, marker, timeout, source_port):
@@ -179,6 +290,28 @@ def client(flow, interval, output):
             stream.write(json.dumps({"start_ns": start, "end_ns": end, "wall_start_ns": wall_start,
                                      "sequence": sequence, "source_port": source_port, **reply}) + "\n")
             next_start = max(next_start + step, end)
+
+
+def background_client(output):
+    # This fixed workload uses another LAN connection to the synthetic backup
+    # service. Measure successful echo bytes instead of assuming link saturation.
+    payload = b"x" * (32 * 1024 - 1) + b"\n"
+    interval = len(payload) / BACKGROUND_TARGET_BYTES_PER_SECOND
+    with open(output, "x", encoding="utf-8", buffering=1) as stream:
+        while True:
+            start = time.monotonic_ns()
+            echoed = 0
+            try:
+                with socket.create_connection((TARGETS["backup"], 7), timeout=.5) as conn:
+                    conn.sendall(payload)
+                    with conn.makefile("rb") as peer:
+                        if peer.readline(len(payload) + 64).endswith(b" " + payload):
+                            echoed = len(payload)
+            except OSError:
+                pass
+            end = time.monotonic_ns()
+            stream.write(json.dumps({"start_ns": start, "end_ns": end, "echoed_bytes": echoed}) + "\n")
+            time.sleep(max(0, interval - (end - start) / NS))
 
 
 def capture_erp(ce, cleanup, output):
@@ -272,7 +405,7 @@ printf '%s\\n' 'curl.cainfo={cert_path}' >"$scan/99-sdwan-benchmark.ini"
     return unready_source
 
 
-def setup_package(ce, qemu, recovery_hold_seconds):
+def setup_package(ce, qemu, recovery_hold_seconds, erp_https=False):
     package = f"{ce.LAB}/candidate.pkg"
     digest = ce.command(qemu, f"sha256 -q {package}")
     if digest != ce.command(qemu, f"cat {ce.LAB}/candidate.sha256"):
@@ -280,6 +413,9 @@ def setup_package(ce, qemu, recovery_hold_seconds):
     ce.command(qemu, f"pkg add -f {package}", timeout=180)
     ce.command(qemu, f"php {ce.LAB}/ce291-guest.php settings")
     hold = str(recovery_hold_seconds) if recovery_hold_seconds is not None else ""
+    first_scheme, second_scheme = ("https", "dns") if erp_https else ("dns", "https")
+    prefixes = {"dns": f"dns://{TLS_NAME} 192.0.2.", "https": f"https://{TLS_NAME}/healthz 192.0.2."}
+    hosts = {"dns": 164, "https": 166}
     ce.command(qemu, f"""php <<'BENCH_PHP'
 <?php
 require_once('config.inc');
@@ -289,8 +425,8 @@ $candidate = $original;
 $candidate['slas'][0] += ['rttsd_ms' => '30'];
 $candidate['slas'][0]['latency_ms'] = '40';
 foreach ($candidate['members'] as $index => &$member) {{
-    $member['probe_primary'] = 'dns://{TLS_NAME} 192.0.2.' . (164 + $index);
-    $member['probe_secondary'] = 'https://{TLS_NAME}/healthz 192.0.2.' . (166 + $index);
+    $member['probe_primary'] = '{prefixes[first_scheme]}' . ({hosts[first_scheme]} + $index);
+    $member['probe_secondary'] = '{prefixes[second_scheme]}' . ({hosts[second_scheme]} + $index);
 }}
 unset($member);
 if ('{hold}' !== '') {{
@@ -330,13 +466,21 @@ class Experiment:
         self.mode = self.pair = None
         self.phases = []
         self.activations = []
+        self.erp_https = options.profile in ("erp-https", "erp-https-loaded")
+        self.timing = None
+        self.sessions = None
+        if options.profile != "legacy":
+            self.timing = cleanup.enter_context(
+                (self.output / "timing.ndjson").open("x", encoding="utf-8", buffering=1))
+            self.sessions = cleanup.enter_context(
+                (self.output / "sessions.ndjson").open("x", encoding="utf-8", buffering=1))
         self.event_file = cleanup.enter_context((self.output / "phases.ndjson").open("x", encoding="utf-8", buffering=1))
         self.activation_file = cleanup.enter_context(
             (self.output / "activations.ndjson").open("x", encoding="utf-8", buffering=1))
         self.resources = cleanup.enter_context((self.output / "resources.ndjson").open("x", encoding="utf-8", buffering=1))
         self.certificate = ce.management("benchmark baseline")
         setup_probes(ce, qemu, cleanup)
-        self.digest = setup_package(ce, qemu, options.recovery_hold_seconds)
+        self.digest = setup_package(ce, qemu, options.recovery_hold_seconds, self.erp_https)
         self.reference = ce.route_and_nat(qemu)
         self.next_resources = time.monotonic_ns()
         self.clients = {}
@@ -345,6 +489,11 @@ class Experiment:
             child = subprocess.Popen(ce.in_ns("sdwan-client", sys.executable, SCRIPT, "client", flow,
                                               options.interval, output))
             self.clients[flow] = child
+            cleanup.callback(ce.stop, child)
+        if options.profile == "erp-https-loaded":
+            child = subprocess.Popen(ce.in_ns("sdwan-client", sys.executable, SCRIPT, "background-client",
+                                              self.output / "background.ndjson"))
+            self.clients["background"] = child
             cleanup.callback(ce.stop, child)
 
     def activate(self, mode):
@@ -363,8 +512,17 @@ class Experiment:
                 ce.command(qemu, f"php {ce.LAB}/ce291-guest.php unbind B")
                 ce.command(qemu, "/etc/rc.filter_configure_sync")
             if mode == "sdwan" and self.mode != mode:
+                primary = {"G": "GW_A", "B": "GW_A"}
+                if self.timing is not None:
+                    trace = TransitionTrace(ce, window, primary, self.timing, "probe_primary")
+                    window["timing_stages"] = trace.stages
+                    window["bind_command_started_ns"] = time.monotonic_ns()
                 ce.command(qemu, f"php {ce.LAB}/ce291-guest.php bind")
-                ce.wait_paths(qemu, "benchmark bind", {"G": "GW_A", "B": "GW_A"})
+                if self.timing is not None:
+                    window["bind_command_returned_ns"] = time.monotonic_ns()
+                    ce.wait_paths(qemu, "benchmark bind", primary, observe=trace.observe)
+                else:
+                    ce.wait_paths(qemu, "benchmark bind", primary)
             if mode == "native":
                 cmd = "require 'config.inc'; require '/usr/local/pkg/sdwan_steering.inc';"
                 cmd += " exit(sdwan_steering_bindings() ? 1 : 0);"
@@ -386,26 +544,64 @@ class Experiment:
         self.resources.write(json.dumps({"at_ns": time.monotonic_ns(), "mode": self.mode, "pid": int(pid),
                                          "cpu_pct_ps": float(cpu), "rss_kib": int(rss)}) + "\n")
 
-    def phase(self, label, seconds, expected, rules=(), steady=False):
+    def phase(self, label, seconds, expected, rules=(), steady=False, scored=True):
         ce, qemu = self.ce, self.qemu
+        fault_started = None
         if rules is not None:
+            fault_started = time.monotonic_ns()
             ce.fault(*rules)
         started = time.monotonic_ns()
         end = started + round(seconds * NS)
         phase = {"pair": self.pair, "mode": self.mode, "phase": label, "start_ns": started,
-                 "end_ns": end, "expected": dict(zip(TARGETS, expected)), "steady": steady}
+                 "fault_command_start_ns": fault_started, "end_ns": end,
+                 "expected": dict(zip(TARGETS, expected)), "steady": steady, "scored": scored}
+        trace = None
+        if self.timing is not None and (not steady or label == "baseline"):
+            gateway = {ce.A: "GW_A", ce.B: "GW_B", None: "GW_A"}
+            trace = TransitionTrace(ce, phase, dict(zip(TRACKERS, (gateway[source] for source in expected))),
+                                    self.timing, "probe_primary")
+            phase["timing_stages"] = trace.stages
         self.event_file.write(json.dumps({"event": "start", **phase}) + "\n")
         while time.monotonic_ns() < end:
             if any(child.poll() is not None for child in self.clients.values()):
                 raise RuntimeError("An isolated application client stopped unexpectedly.")
+            next_poll = time.monotonic_ns() + NS
+            if trace is not None:
+                trace.observe(qemu)
             if time.monotonic_ns() >= self.next_resources:
                 self.resource_sample()
                 self.next_resources = time.monotonic_ns() + round(self.options.sample_seconds * NS)
-            time.sleep(min(1, max(0, end - time.monotonic_ns()) / NS))
+            remaining = end - time.monotonic_ns()
+            if trace is not None:
+                remaining = min(remaining, next_poll - time.monotonic_ns())
+            time.sleep(max(0, min(NS, remaining)) / NS)
         phase["pf"] = ce.loaded(qemu)
         phase["snapshot"] = (ce.observations(qemu)["snapshot"] or {}).get("members", {})
         self.phases.append(phase)
         self.event_file.write(json.dumps({"event": "end", **phase}) + "\n")
+
+    def erp_fault(self):
+        ce = self.ce
+        probe = "192.0.2.166 tcp dport 443" if self.erp_https else "192.0.2.164 udp dport 53"
+        from_primary = f'iifname "sw-wire0" ip saddr {ce.A} ip daddr'
+        return (f"{from_primary} {ce.ERP} tcp dport 7 drop", f"{from_primary} {probe} drop")
+
+    def session_check(self, sessions, label):
+        if not sessions:
+            return
+        for flow, child in sessions.items():
+            started = time.monotonic_ns()
+            try:
+                reply = self.ce.established(child, label, 1)
+            except OSError:
+                reply = ""
+            source, _, marker = reply.partition(" ")
+            self.sessions.write(json.dumps({"pair": self.pair, "mode": self.mode, "flow": flow,
+                                            "session": "existing", "check": label, "start_ns": started,
+                                            "end_ns": time.monotonic_ns(),
+                                            "status": ("ok" if marker == label else
+                                                       "delayed" if source else "no_reply"),
+                                            "source": source or None, "reply_marker": marker or None}) + "\n")
 
     def cycle(self):
         ce, opts = self.ce, self.options
@@ -413,11 +609,24 @@ class Experiment:
         self.phase("wan1_loss", opts.outage_seconds, (ce.B, ce.B),
                    (f'iifname "sw-wire0" ip saddr {ce.A} drop',))
         self.phase("wan1_return", opts.recovery_seconds, (ce.A, ce.A))
-        self.phase("erp_only_loss", opts.outage_seconds, (ce.B if self.mode == "sdwan" else None, ce.A),
-                   (f'iifname "sw-wire0" ip saddr {ce.A} ip daddr {ce.ERP} tcp dport 7 drop',
-                    f'iifname "sw-wire0" ip saddr {ce.A} ip daddr 192.0.2.164 udp dport 53 drop'))
-        assert "192.0.2.42" in ce.command(self.qemu, "drill @198.51.100.2 health.test A")
-        self.phase("erp_only_return", opts.recovery_seconds, (ce.A, ce.A))
+        outage_sources = (ce.B if self.mode == "sdwan" else None, ce.A)
+        with ExitStack() as sessions_cleanup:
+            held = ({flow: ce.held_connection(target, sessions_cleanup) for flow, target in TARGETS.items()}
+                    if self.sessions is not None else {})
+            self.session_check(held, "before_erp_fault")
+            self.phase("erp_only_loss", opts.outage_seconds, outage_sources, self.erp_fault())
+            assert "192.0.2.42" in ce.command(self.qemu, "drill @198.51.100.2 health.test A")
+            self.session_check(held, "during_erp_fault")
+            self.phase("erp_only_return", opts.recovery_seconds, (ce.A, ce.A))
+            self.session_check(held, "after_erp_recovery")
+            # A pending pre-recovery reply may arrive before the first new
+            # marker on the existing connection. Keep both observations.
+            self.session_check(held, "check_existing_after_delayed_reply")
+        if self.options.profile == "erp-https-loaded":
+            for down, up in ((3, 7), (6, 4), (4, 9), (8, 3)):
+                self.phase("erp_intermittent_loss", down, outage_sources, self.erp_fault(), scored=False)
+                self.phase("erp_intermittent_return", up, (ce.A, ce.A), scored=False)
+            self.phase("erp_intermittent_recovered", opts.recovery_seconds, (ce.A, ce.A))
         ce.management(f"benchmark {self.mode} pair {self.pair}", self.certificate)
         assert ce.route_and_nat(self.qemu) == self.reference
 
@@ -467,15 +676,17 @@ class Experiment:
                       "flows": {flow: activation_observations.get((index, flow), no_attempts) for flow in TARGETS}}
             for index, window in enumerate(self.activations)
         ]
-        headings = ("pair", "mode", "phase", "flow", "expected", "duration_seconds")
+        headings = ("pair", "mode", "phase", "flow", "start_ns", "expected", "duration_seconds", "scored")
         all_metrics = []
         for index, phase in enumerate(self.phases):
             for flow, expected in phase["expected"].items():
                 stats = observations.get((index, flow))
                 if stats is None:
                     stats = phase_stats((), phase["start_ns"], phase["end_ns"], expected)
-                all_metrics.append(dict(zip(headings, (phase["pair"], phase["mode"], phase["phase"], flow, expected,
-                                                       (phase["end_ns"] - phase["start_ns"]) / NS))) | stats)
+                all_metrics.append(dict(zip(headings, (phase["pair"], phase["mode"], phase["phase"], flow,
+                                                       phase["start_ns"], expected,
+                                                       (phase["end_ns"] - phase["start_ns"]) / NS,
+                                                       phase.get("scored", True)))) | stats)
         if not all_metrics:
             raise RuntimeError("No measurement phases completed.")
         with (self.output / "phases.csv").open("x", newline="", encoding="utf-8") as stream:
@@ -493,12 +704,54 @@ class Experiment:
                                "attempts": attempts, "lost_or_invalid": losses,
                                "loss_pct": 100 * losses / attempts if attempts else None,
                                "reply_p95_ms": percentile(latencies[mode, phase, flow], .95),
-                               "first_expected_source_p95_ms": percentile(recoveries, .95),
+                               "first_expected_source_observed_ms": recoveries,
+                               "first_expected_source_p95_ms": percentile(recoveries, .95) if len(recoveries) >= 20 else None,
                                "censored": len(selected) - len(recoveries)})
         steady = [row for row in all_metrics if row["phase"] in ("baseline", "soak_healthy")]
         unexpected = sum(row["unexpected_source_replies"] for row in steady)
-        mismatches = [row for row in all_metrics if not row["tail_attempts"] or row["tail_mismatches"]]
+        mismatches = [row for row in all_metrics if row["scored"] and
+                      (not row["tail_attempts"] or row["tail_mismatches"])]
         backup_violations = backup_continuity_violations(all_metrics)
+        transitions = [
+            {key: phase[key] for key in ("pair", "mode", "phase", "start_ns", "end_ns", "fault_command_start_ns",
+                                          "timing_stages")}
+            | {"first_client_reply_ms": {flow: observations.get((index, flow), {}).get("first_expected_source_ms")
+                                         for flow in TARGETS}}
+            for index, phase in enumerate(self.phases) if "timing_stages" in phase
+        ]
+        erp_isolation_violations = [
+            event for event in transitions if event["phase"] == "erp_only_loss" and
+            "erp_failure_with_healthy_backup" not in event["timing_stages"]
+        ] if self.options.profile in ("erp-https", "erp-https-loaded") else []
+        intermittent_runs = []
+        groups = defaultdict(list)
+        for row in all_metrics:
+            if row["phase"] in ("erp_intermittent_loss", "erp_intermittent_return"):
+                groups[row["pair"], row["mode"], row["flow"]].append(row)
+        for (pair, mode, flow), rows in groups.items():
+            preceding_source = None
+            switches = 0
+            for row in rows:
+                if row["first_source"] is not None:
+                    switches += row["source_switches"]
+                    switches += preceding_source is not None and preceding_source != row["first_source"]
+                    preceding_source = row["last_source"]
+            intermittent_runs.append({"pair": pair, "mode": mode, "flow": flow,
+                                      "attempts": sum(row["attempts"] for row in rows),
+                                      "lost_or_invalid": sum(row["lost_or_invalid"] for row in rows),
+                                      "observed_source_switches": switches})
+        background = []
+        background_path = self.output / "background.ndjson"
+        if background_path.is_file():
+            with background_path.open(encoding="utf-8") as stream:
+                rows = (json.loads(line) for line in stream if line.endswith("\n"))
+                for index, samples in by_phase(rows, self.phases):
+                    phase = self.phases[index]
+                    bytes_received = sum(row["echoed_bytes"] for row in samples if row["end_ns"] < phase["end_ns"])
+                    seconds = (phase["end_ns"] - phase["start_ns"]) / NS
+                    background.append({"pair": phase["pair"], "mode": phase["mode"], "phase": phase["phase"],
+                                       "start_ns": phase["start_ns"], "echoed_bytes": bytes_received,
+                                       "echoed_bytes_per_second": round(bytes_received / seconds, 1)})
         with (self.output / "resources.ndjson").open(encoding="utf-8") as stream:
             samples = [json.loads(line) for line in stream]
         kinds = sorted({sample["mode"] for sample in samples})
@@ -512,7 +765,8 @@ class Experiment:
                 "worker_pid_changes": sum(a["pid"] != b["pid"] for a, b in zip(scoped, scoped[1:])),
             }
         summary = {"ce_version": self.options.ce_version, "package_sha256": self.digest,
-                   "pairs": self.options.pairs, "soak_hours_requested": self.options.soak_hours,
+                   "pairs": self.options.pairs, "profile": self.options.profile,
+                   "soak_hours_requested": self.options.soak_hours,
                    "recovery_hold_seconds": self.options.recovery_hold_seconds,
                    "soak_completed_incidents": sum(1 for p in self.phases if p["phase"] == "soak_wan1_return"),
                    "soak_elapsed_seconds": sum((p["end_ns"] - p["start_ns"]) / NS for p in self.phases
@@ -521,11 +775,16 @@ class Experiment:
                                                if p["phase"] == "soak_healthy"),
                    "unexpected_steady_source_replies": unexpected, "tail_mismatches": mismatches,
                    "backup_continuity_violations": backup_violations,
+                   "erp_isolation_violations": erp_isolation_violations,
                    "unexpected_steady_source_runs": sum(row["unexpected_source_runs"] for row in steady),
-                   "activations": activations, "resources": resources, "aggregates": aggregates}
+                   "activations": activations, "transitions": transitions,
+                   "intermittent_runs": intermittent_runs, "background": background,
+                   "resources": resources, "aggregates": aggregates}
         (self.output / "summary.json").write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
         if backup_violations:
             raise RuntimeError(f"Backup path continuity failed in {len(backup_violations)} ERP-only phases.")
+        if erp_isolation_violations:
+            raise RuntimeError(f"ERP-only failure with healthy WAN and DNS was not observed in {len(erp_isolation_violations)} phases.")
         if unexpected or mismatches:
             raise RuntimeError(f"Application paths did not match the expected steady results: {mismatches!r}")
         print(f"CE_APPLICATION_BENCHMARK_OK phases={len(self.phases)} output={self.output}", flush=True)
@@ -534,6 +793,9 @@ class Experiment:
 def main():
     if sys.argv[1:2] == ["client"]:
         client(sys.argv[2], float(sys.argv[3]), Path(sys.argv[4]))
+        return
+    if sys.argv[1:2] == ["background-client"]:
+        background_client(Path(sys.argv[2]))
         return
     if sys.argv[1:2] == ["serve-probes"]:
         cert, key = Path(sys.argv[2]), Path(sys.argv[3])
@@ -548,6 +810,8 @@ def main():
     parser.add_argument("ce_version", choices=("2.9.1", "2.9.2"))
     parser.add_argument("--output", type=Path, required=True, help="new directory for raw evidence")
     parser.add_argument("--pairs", type=int, default=2)
+    parser.add_argument("--profile", choices=BENCHMARK_PROFILES, default="legacy",
+                        help="enable timing or reproduce the HTTPS-only fault with optional recorded background traffic")
     parser.add_argument("--interval", type=float, default=.5)
     parser.add_argument("--outage-seconds", type=float, default=40)
     parser.add_argument("--recovery-seconds", type=float, default=65)

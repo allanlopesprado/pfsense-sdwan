@@ -30,6 +30,8 @@ class ApplicationBenchmarkTest(unittest.TestCase):
         self.assertEqual(measured["loss_pct"], 25)
         self.assertEqual(measured["unexpected_source_replies"], 1)
         self.assertEqual(measured["unexpected_source_runs"], 1)
+        self.assertEqual(measured["source_switches"], 1)
+        self.assertEqual((measured["first_source"], measured["last_source"]), ("first", "second"))
         self.assertEqual(measured["tail_mismatches"], 0)
 
     def test_crossing_boundaries_is_not_a_failure(self):
@@ -96,9 +98,9 @@ class ApplicationBenchmarkTest(unittest.TestCase):
             output = Path(path)
             ce = SimpleNamespace(LAB="/lab", command=Mock(), wait_paths=Mock(), loaded=Mock(), assert_rules=Mock())
             experiment = SimpleNamespace(ce=ce, qemu=None, pair=1, mode="native", activations=[],
-                                         clients={}, output=output, digest="fixture", activation_file=StringIO(),
+                                         clients={}, output=output, digest="fixture", activation_file=StringIO(), timing=None,
                                          options=SimpleNamespace(ce_version="2.9.2", pairs=1, soak_hours=0,
-                                                                 recovery_hold_seconds=15))
+                                                                 recovery_hold_seconds=15, profile="legacy"))
             with patch.object(benchmark.time, "monotonic_ns", side_effect=(300_000_000, 700_000_000)):
                 benchmark.Experiment.activate(experiment, "sdwan")
             ce.command.assert_called_once_with(None, "php /lab/ce291-guest.php bind")
@@ -123,9 +125,95 @@ class ApplicationBenchmarkTest(unittest.TestCase):
             self.assertEqual(summary["activations"][0]["flows"]["erp"], {
                 "attempts": 3, "successful_replies": 1, "excluded_boundary_attempts": 1,
                 "errors": {"connect_timeout": 1, "reply_timeout": 1},
+                "first_success_ns": 320_000_000, "last_success_ns": 320_000_000,
+                "longest_success_gap_ms": None,
             })
             self.assertEqual(summary["tail_mismatches"], [])
+            self.assertTrue(all(row["first_expected_source_p95_ms"] is None for row in summary["aggregates"]))
             self.assertTrue(all(row["attempts"] == 1 and row["lost_or_invalid"] == 0 for row in summary["aggregates"]))
+
+    def test_approval_trace_requires_matching_receipt_and_exact_live_rule_once(self):
+        stream = StringIO()
+        ce = SimpleNamespace(GATEWAYS={"GW_A": ("first", "192.0.2.1"), "GW_B": ("second", "192.0.2.2")})
+        window = {"pair": 1, "mode": "sdwan", "phase": "erp_only_loss", "start_ns": 100}
+        trace = benchmark.TransitionTrace(ce, window, {"G": "GW_B", "B": "GW_A"}, stream, "probe_primary")
+        erp = "pass in quick route-to (second 192.0.2.2) ridentifier 41001"
+        backup = "pass in quick route-to (first 192.0.2.1) ridentifier 41003"
+        state = {
+            "snapshot": {
+                "observed_at_ns": 30,
+                "timing": {"service_checks_complete_ns": 32, "policy_evaluation_ns": 34,
+                           "steering_decision_ns": 36, "pf_readback_ns": 38},
+                "members": {"a": {"status": "online", "checks": {"probe_primary": "Timed out", "probe_secondary": "Passed"}}},
+                "policies": {"ERP": {"selected": "b", "candidates": {"a": "Required service check failed"}},
+                             "Backup": {"candidates": {"a": "Eligible"}}},
+                "steering": {"G": {"gateway": "GW_B"}, "B": {"gateway": "GW_A"}},
+            },
+            "benchmark_pf_rules": [erp, backup], "benchmark_pf_read_ns": 40,
+            "monotonic_ns": 41, "signature": "current", "pf": {"G": "applied", "B": "applied"},
+            "receipt": {"signature": "old", "accepted": True, "confirmed": True},
+        }
+        receipt = state["receipt"] | {"signature": "current"}
+        ce.observations = Mock(side_effect=[state | {"benchmark_pf_rules": [erp, erp, backup]},
+                                           state, state | {"receipt": receipt}])
+        with patch.object(benchmark.time, "monotonic_ns", side_effect=(110, 120, 210, 220, 310, 320)):
+            for _ in range(3):
+                trace.observe(None)
+        self.assertEqual(trace.stages["detection_published"], {
+            "host_lower_ns": None, "host_upper_ns": 120, "guest_ns": 32})
+        self.assertIn("erp_failure_with_healthy_backup", trace.stages)
+        self.assertEqual(trace.stages["live_pf_match"], {
+            "host_lower_ns": 110, "host_upper_ns": 220, "guest_ns": 40})
+        self.assertEqual(trace.stages["observer_pf_confirmed"], {
+            "host_lower_ns": 210, "host_upper_ns": 320, "guest_ns": 38})
+        self.assertEqual(len(stream.getvalue().splitlines()), 3)
+        ce.observations.assert_called_with(None, benchmark=True)
+
+    def test_https_fault_leaves_dns_traffic_outside_the_drop_rules(self):
+        ce = SimpleNamespace(A="198.51.100.1", ERP="192.0.2.162")
+        scoped = SimpleNamespace(ce=ce, erp_https=True)
+        rules = benchmark.Experiment.erp_fault(scoped)
+        self.assertEqual(rules, (
+            'iifname "sw-wire0" ip saddr 198.51.100.1 ip daddr 192.0.2.162 tcp dport 7 drop',
+            'iifname "sw-wire0" ip saddr 198.51.100.1 ip daddr 192.0.2.166 tcp dport 443 drop',
+        ))
+        scoped.erp_https = False
+        self.assertIn("udp dport 53", benchmark.Experiment.erp_fault(scoped)[1])
+
+    def test_activation_live_pf_recovery_can_precede_daemon_confirmation(self):
+        gateway = "GW_A"
+        ce = SimpleNamespace(GATEWAYS={gateway: ("first", "192.0.2.1")})
+        window = {"pair": 1, "mode": "sdwan", "start_ns": 100}
+        trace = benchmark.TransitionTrace(ce, window, {"G": gateway, "B": gateway}, StringIO(), "probe_primary")
+        passes = [f"pass in quick route-to (first 192.0.2.1) ridentifier {tracker}"
+                  for tracker in benchmark.TRACKERS.values()]
+        blocks = [f"block drop in quick ridentifier {tracker}" for tracker in benchmark.TRACKERS.values()]
+        initial = {"snapshot": None, "benchmark_pf_rules": passes, "benchmark_pf_read_ns": 21,
+                   "monotonic_ns": 25, "signature": None, "pf": {}, "receipt": {}}
+        steered = initial | {
+            "snapshot": {"steering": {"G": {"gateway": gateway}, "B": {"gateway": gateway}}},
+            "signature": "match", "pf": {"G": "applied", "B": "applied"},
+            "receipt": {"signature": "match", "accepted": True, "confirmed": False},
+        }
+        confirmed = steered | {"receipt": steered["receipt"] | {"confirmed": True}}
+        ce.observations = Mock(side_effect=[initial, initial | {"benchmark_pf_rules": blocks}, steered, confirmed])
+        with patch.object(benchmark.time, "monotonic_ns", side_effect=(110, 120, 210, 220, 310, 320, 410, 420)):
+            trace.observe(None)
+            self.assertNotIn("live_pf_match", trace.stages)
+            trace.observe(None)
+            trace.observe(None)
+            self.assertNotIn("observer_pf_confirmed", trace.stages)
+            trace.observe(None)
+        self.assertEqual(trace.stages["activation_guard_block_observed"]["host_upper_ns"], 220)
+        self.assertEqual(trace.stages["live_pf_match"]["host_upper_ns"], 320)
+        self.assertEqual(trace.stages["observer_pf_confirmed"]["host_upper_ns"], 420)
+
+    def test_activation_gap_is_measured_between_successes(self):
+        stats = benchmark.activation_stats([record(0, 5, "peer"), record(10, 20),
+                                            record(800, 820, "peer"), record(1000, 1020, "peer")],
+                                           1001 * 1_000_000)
+        self.assertEqual(stats["longest_success_gap_ms"], 815)
+        self.assertEqual(stats["excluded_boundary_attempts"], 1)
 
     def test_freebsd_resource_query_uses_one_header_assignment_per_option(self):
         class Fixture:
