@@ -346,7 +346,9 @@ if ($errors) {
 	print_info_box(gettext('SD-WAN configuration saved.'), 'success');
 }
 
-if (!$display_form && !$confirm_deletion): ?>
+if (!$display_form && !$confirm_deletion):
+	sdwan_ui_row_actions();
+	?>
 <div class="panel panel-default">
 	<div class="panel-heading"><h2 class="panel-title"><?=sdwan_ui_escape($sections[$collection])?></h2></div>
 	<div class="panel-body">
@@ -366,10 +368,10 @@ if (!$display_form && !$confirm_deletion): ?>
 			?>
 			<td><?=sdwan_ui_escape($value)?></td>
 			<?php endforeach; ?>
-			<td><form method="post" action="<?=$url?>" class="form-inline">
+			<td><form method="post" action="<?=$url?>" class="form-inline sdwan-row-actions">
 				<input type="hidden" name="revision" value="<?=sdwan_ui_escape($revision)?>">
 				<input type="hidden" name="original" value="<?=sdwan_ui_escape($row['name'])?>">
-				<a class="fa-solid fa-pencil" href="<?=$url?>?edit=<?=rawurlencode($row['name'])?>"
+				<a class="fa-solid fa-pencil sdwan-row-action" href="<?=$url?>?edit=<?=rawurlencode($row['name'])?>"
 				    title="<?=gettext('Edit entry')?>" aria-label="<?=gettext('Edit entry')?>"></a>
 				<?php
 				$reason = $binding_error;
@@ -381,9 +383,9 @@ if (!$display_form && !$confirm_deletion): ?>
 				if ($reason !== ''):
 					$in_use = sdwan_ui_escape($reason);
 				?>
-				<i class="fa-solid fa-lock" title="<?=$in_use?>" aria-hidden="true"></i><span class="sr-only"><?=$in_use?></span>
+				<i class="fa-solid fa-lock sdwan-row-action" title="<?=$in_use?>" aria-hidden="true"></i><span class="sr-only"><?=$in_use?></span>
 				<?php else: ?>
-				<button type="submit" name="action" value="review-delete" class="btn btn-link btn-xs fa-solid fa-trash-can"
+				<button type="submit" name="action" value="review-delete" class="btn btn-link fa-solid fa-trash-can sdwan-row-action"
 				    title="<?=gettext('Review deletion')?>" aria-label="<?=gettext('Review deletion')?>"></button>
 				<?php endif; ?>
 			</form></td>

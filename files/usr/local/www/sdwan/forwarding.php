@@ -288,7 +288,9 @@ if ($supported && $native_edit && $binding === null && !$preview['errors'] && $p
 	</form>
 <?php endif;
 endif;
-if ($bindings_by_group): ?>
+if ($bindings_by_group):
+	sdwan_ui_row_actions();
+	?>
 <div class="panel panel-default">
 	<div class="panel-heading"><h2 class="panel-title"><?=gettext('Configured bindings')?></h2></div>
 	<div class="panel-body">
@@ -308,7 +310,7 @@ if ($bindings_by_group): ?>
 			<input type="hidden" name="group" value="<?=sdwan_ui_escape($item['group'])?>">
 			<input type="hidden" name="policy" value="<?=sdwan_ui_escape($item['policy'])?>">
 			<input type="hidden" name="revision" value="<?=sdwan_ui_escape($revision)?>">
-			<button type="submit" class="btn btn-link btn-xs fa-solid fa-trash-can" name="action" value="unbind"
+			<button type="submit" class="btn btn-link fa-solid fa-trash-can sdwan-row-action" name="action" value="unbind"
 			    title="<?=gettext('Remove binding')?>" aria-label="<?=gettext('Remove binding')?>"></button>
 			<?php if (!$supported): ?><span class="help-block"><?=gettext('Clear the saved binding. Verify the active rules in pfSense before assuming native forwarding has resumed.')?></span><?php endif; ?>
 		</form><?php else: ?>—<?php endif; ?></td></tr>

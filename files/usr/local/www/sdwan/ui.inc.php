@@ -154,6 +154,40 @@ function sdwan_ui_gateway_config_issue(string $gateway, array $inventory): ?stri
 	};
 }
 
+function sdwan_ui_row_actions(): void {
+	?>
+	<style>
+	.sdwan-row-actions { white-space: nowrap; }
+	.sdwan-row-action, .sdwan-row-action.btn {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 24px;
+		height: 24px;
+		padding: 0;
+		border: 0;
+		border-radius: 3px;
+		font-size: 18px;
+		line-height: 1;
+		vertical-align: middle;
+	}
+	.sdwan-row-action.fa-solid { font-weight: 900; }
+	.sdwan-row-action.btn:hover, .sdwan-row-action.btn:focus { text-decoration: none; }
+	.sdwan-row-action:focus:not(:focus-visible) { outline: none; }
+	.sdwan-row-action:focus-visible { outline: 2px solid currentColor; outline-offset: 0; }
+	</style>
+	<script>
+	events.push(function () {
+		// The native startup script focuses the first visible input, which may be a row action.
+		const button = document.activeElement;
+		if (button && button.matches('button.sdwan-row-action')) {
+			button.blur();
+		}
+	});
+	</script>
+	<?php
+}
+
 /* Read-only filters use native inputs and the current pfSense theme. */
 function sdwan_ui_filter(string $url, array $fields, string $action, bool $enabled = true): void {
 	?>

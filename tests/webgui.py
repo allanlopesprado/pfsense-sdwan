@@ -90,6 +90,33 @@ def screenshots(directory, www, pages):
             worker = Thread(target=server.serve_forever, daemon=True)
             worker.start()
             try:
+                native_scripts = ("/vendor/jquery/jquery-3.7.1.min.js", "/vendor/jquery-ui/jquery-ui-1.13.2.min.js",
+                                  "/vendor/bootstrap/js/bootstrap.min.js", "/js/pfSense.js")
+                row_actions_probe = """
+                    <script>
+                    events.push(function () {
+                        const remove = document.querySelector('button[value="review-delete"]');
+                        const edit = remove.form.querySelector('a.fa-pencil');
+                        const editStyle = getComputedStyle(edit, '::before');
+                        const removeStyle = getComputedStyle(remove, '::before');
+                        const editBox = edit.getBoundingClientRect();
+                        const removeBox = remove.getBoundingClientRect();
+                        const aligned = editBox.y === removeBox.y &&
+                            editBox.width === removeBox.width && editBox.height === removeBox.height;
+                        const nativeSize = editStyle.fontSize === '18px' && removeStyle.fontSize === '18px';
+                        const icon = removeStyle.content.includes(String.fromCodePoint(0xf2ed)) &&
+                            removeStyle.fontWeight === editStyle.fontWeight;
+                        const initialFocus = document.activeElement !== remove && getComputedStyle(remove).outlineStyle === 'none';
+                        remove.focus({preventScroll: true});
+                        const focus = getComputedStyle(remove);
+                        const keyboardFocus = remove.matches(':focus-visible') && focus.outlineStyle === 'solid' &&
+                            focus.outlineColor === focus.color;
+                        remove.blur();
+                        document.body.dataset.sdwanRowActions =
+                            aligned && nativeSize && icon && initialFocus && keyboardFocus ? 'pass' : 'fail';
+                    });
+                    </script>
+                """
                 cancel_icon_probe = """
                     <script>
                     window.addEventListener('load', async () => {
@@ -106,7 +133,7 @@ def screenshots(directory, www, pages):
                 """
                 for name, theme, size in [("status", "pfSense", "1440,900"), ("status", "pfSense-dark", "390,844"),
                                           ("diagnostics", "pfSense", "1440,900"), ("diagnostics", "pfSense-dark", "390,844"),
-                                          ("members", "pfSense", "1440,900"),
+                                          ("members", "pfSense", "1440,900"), ("members", "pfSense-dark", "1440,900"),
                                           ("members-edit", "pfSense", "1440,900"),
                                           ("members-edit", "pfSense-dark", "1440,900"), ("updates", "pfSense", "1440,900"),
                                           ("updates", "pfSense-dark", "390,844"), ("forwarding", "pfSense", "1440,900"),
@@ -115,10 +142,15 @@ def screenshots(directory, www, pages):
                     styles = ('<link rel="stylesheet" href="/vendor/font-awesome/css/all.min.css">'
                               f'<link rel="stylesheet" href="/css/{theme}.css">')
                     html = pages[name].replace("</head>", styles + "</head>")
-                    checks = []
+                    proof = None
                     if name == "members-edit":
                         html = html.replace("</body>", cancel_icon_probe + "</body>")
-                        checks = ["--virtual-time-budget=1000", "--dump-dom"]
+                        proof = b'data-sdwan-cancel-icon="pass"'
+                    elif name == "members":
+                        footer = row_actions_probe + "".join(f'<script src="{url}"></script>' for url in native_scripts)
+                        html = html.replace("</body>", footer + "</body>")
+                        proof = b'data-sdwan-row-actions="pass"'
+                    checks = ["--virtual-time-budget=1000", "--dump-dom"] if proof else []
                     (site / (preview + ".html")).write_text(html)
                     out = directory / (preview + ".png")
                     result = subprocess.run(
@@ -127,11 +159,9 @@ def screenshots(directory, www, pages):
                          f"--screenshot={out.resolve()}", f"http://127.0.0.1:{server.server_port}/{preview}.html"],
                         capture_output=True, check=True, timeout=35)
                     assert out.read_bytes().startswith(b"\x89PNG"), out
-                    if checks:
-                        assert b'data-sdwan-cancel-icon="pass"' in result.stdout, preview
+                    if proof:
+                        assert proof in result.stdout, preview
                 # pfSense.js focuses the first visible input before running the page callbacks.
-                native_scripts = ("/vendor/jquery/jquery-3.7.1.min.js", "/vendor/jquery-ui/jquery-ui-1.13.2.min.js",
-                                  "/vendor/bootstrap/js/bootstrap.min.js", "/js/pfSense.js")
                 focus_probe = """
                     <script>
                     const logs = document.querySelector('button[form="sdwan-system-logs"]');
@@ -583,7 +613,7 @@ def run(php, classes, screenshot_dir=None):
             assert message in html and 'name="save"' not in html
         print("ok - editor explains prerequisites, preserves unavailable gateways and protects policy references")
         member_list = request("members")
-        assert 'table-rowdblclickedit' in member_list and 'class="fa-solid fa-pencil"' in member_list
+        assert 'table-rowdblclickedit' in member_list and 'class="fa-solid fa-pencil sdwan-row-action"' in member_list
         assert 'class="action-buttons"' in member_list and 'icon-embed-btn' in member_list
         assert Choices(member_list).tokens and 'value="review-delete"' in member_list
 
@@ -853,7 +883,11 @@ def run(php, classes, screenshot_dir=None):
                 {"interface": "wan", "name": member["gateway"]} for member in demo["members"]]}
             pages = {page: request(page, config=demo, native=demo_native, snapshot=demo_snapshot,
                                    **({"interface_counters": {}} if page == "diagnostics" else {}))
-                     for page in ("status", "diagnostics", "members", "updates")}
+                     for page in ("status", "diagnostics", "updates")}
+            spare = {"name": "Spare", "gateway": "SPARE_GW", "cost": "50"}
+            pages["members"] = request("members", config={**demo, "members": [*demo["members"], spare]},
+                                       native={**demo_native, "gateways/gateway_item": [
+                                           *demo_native["gateways/gateway_item"], {"interface": "wan", "name": spare["gateway"]}]})
             pages["members-edit"] = request("members", get={"edit": "1"})
             pages["large-policy"] = large_html
             pages["updates"] = offered.split("</html>", 1)[0] + "</html>"
