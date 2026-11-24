@@ -241,10 +241,12 @@ def serve_probes(cert, key, dns_hosts=("192.0.2.164", "192.0.2.165"),
 def lab_tls_certificates(temp, hostnames):
     ca, ca_key, req, leaf, key, ext = [temp / name for name in ("ca.pem", "ca.key", "tls.csr", "tls.pem", "tls.key", "tls.ext")]
     alt_names = ",".join(f"DNS:{name}" for name in hostnames)
-    ext.write_text(f"subjectAltName={alt_names}\nextendedKeyUsage=serverAuth\n", encoding="ascii")
+    ext.write_text(f"subjectAltName={alt_names}\nextendedKeyUsage=serverAuth\n"
+                   "basicConstraints=critical,CA:FALSE\nkeyUsage=critical,digitalSignature,keyEncipherment\n", encoding="ascii")
     for args in (
         ("req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "8", "-subj", "/CN=Isolated SDWAN benchmark CA",
-         "-addext", "basicConstraints=critical,CA:TRUE", "-keyout", ca_key, "-out", ca),
+         "-addext", "basicConstraints=critical,CA:TRUE", "-addext", "keyUsage=critical,keyCertSign,cRLSign",
+         "-keyout", ca_key, "-out", ca),
         ("req", "-newkey", "rsa:2048", "-nodes", "-subj", f"/CN={hostnames[0]}", "-keyout", key, "-out", req),
         ("x509", "-req", "-in", req, "-CA", ca, "-CAkey", ca_key, "-CAcreateserial", "-extfile", ext,
          "-days", "8", "-out", leaf),
