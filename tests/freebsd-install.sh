@@ -108,7 +108,7 @@ for platform in 2.9.1-RELEASE 2.9.2-RELEASE; do
     run_pkg check -s "$package"
 done
 # Exercise the shipped service wrapper with FreeBSD rc.subr and daemon(8).
-# Substitute a temporary pidfile and a sleeping process for the pfSense worker.
+# Give each supervisor and fixture worker its own pidfile.
 cat > "$root/observer" <<'WORKER'
 #!/bin/sh
 printf '%s\n' "$$" > "$1"
@@ -116,15 +116,18 @@ exec /bin/sleep 120
 WORKER
 chmod +x "$root/observer"
 sed -e "s|/var/run/sdwand.pid|$root/sdwand.pid|" \
+    -e "s|/var/run/sdwan-expiry.pid|$root/sdwan-expiry.pid|" \
+    -e "s|/var/run/sdwan-expiry.heartbeat|$root/sdwan-expiry.heartbeat|" \
+    -e "s|/usr/local/bin/php /usr/local/sbin/sdwand.php --expiry-watchdog|$root/observer $root/watchdog-child.pid|" \
     -e "s|/usr/local/bin/php /usr/local/sbin/sdwand.php|$root/observer $root/child.pid|" \
     -e "s|/usr/local/bin/php -f /usr/local/pkg/sdwan_invalidate.inc|/usr/bin/touch $root/invalidated|" \
     "$dbroot/usr/local/etc/rc.d/sdwand.sh" > "$root/sdwand.sh"
 wait_for_child() {
     for _ in 1 2 3 4 5 6 7 8 9 10 11 12; do
-        if [ -s "$root/child.pid" ] && [ -s "$root/sdwand.pid" ]; then
-            current=$(cat "$root/child.pid")
-            parent=$(cat "$root/sdwand.pid")
-            if [ -n "$current" ] && [ "$current" != "$1" ] &&
+        if [ -s "$1" ] && [ -s "$2" ]; then
+            parent=$(cat "$1")
+            current=$(cat "$2")
+            if [ -n "$current" ] && [ "$current" != "$3" ] &&
                 /bin/pgrep -P "$parent" -u 0 -fx '/bin/sleep 120' | /usr/bin/grep -Fxq "$current"; then
                 printf '%s\n' "$current"
                 return 0
@@ -132,19 +135,30 @@ wait_for_child() {
         fi
         sleep 1
     done
-    echo 'FreeBSD daemon failed to run a distinct observer process.' >&2
+    printf 'FreeBSD daemon did not start or replace the fixture worker for %s.\n' "${1##*/}" >&2
     return 1
 }
 sh "$root/sdwand.sh" start
 sh "$root/sdwand.sh" status
 supervisor=$(cat "$root/sdwand.pid")
-first=$(wait_for_child '')
+first=$(wait_for_child "$root/sdwand.pid" "$root/child.pid" '')
+watchdog_child=
+if grep -Fq ' --expiry-watchdog' "$dbroot/usr/local/etc/rc.d/sdwand.sh"; then
+    watchdog_child=$(wait_for_child "$root/sdwan-expiry.pid" "$root/watchdog-child.pid" '')
+fi
 kill -KILL "$first"
-recovered=$(wait_for_child "$first")
+recovered=$(wait_for_child "$root/sdwand.pid" "$root/child.pid" "$first")
 test "$(cat "$root/sdwand.pid")" = "$supervisor"
 if /bin/pgrep -P "$supervisor" -u 0 -fx '/bin/sleep 120' | /usr/bin/grep -Fxq "$first"; then exit 1; fi
+if [ -n "$watchdog_child" ]; then
+    test "$(wait_for_child "$root/sdwan-expiry.pid" "$root/watchdog-child.pid" '')" = "$watchdog_child"
+fi
 sh "$root/sdwand.sh" restart
-restarted=$(wait_for_child "$recovered")
+restarted=$(wait_for_child "$root/sdwand.pid" "$root/child.pid" "$recovered")
+watchdog_restarted=
+if [ -n "$watchdog_child" ]; then
+    watchdog_restarted=$(wait_for_child "$root/sdwan-expiry.pid" "$root/watchdog-child.pid" "$watchdog_child")
+fi
 test -f "$root/invalidated"
 rm "$root/invalidated"
 sh "$root/sdwand.sh" status
@@ -154,5 +168,9 @@ if sh "$root/sdwand.sh" status; then exit 1; fi
 sleep 6
 test "$(cat "$root/child.pid")" = "$restarted"
 if kill -0 "$restarted" 2>/dev/null; then exit 1; fi
+if [ -n "$watchdog_restarted" ]; then
+    test "$(cat "$root/watchdog-child.pid")" = "$watchdog_restarted"
+    if kill -0 "$watchdog_restarted" 2>/dev/null; then exit 1; fi
+fi
 echo "Verified FreeBSD service crash recovery, start, restart and deliberate stop with a fixture worker."
 echo "Verified checksum rejection, download failure, direct upgrades through $previous_version to $version, removal, rollback to each tested version and reinstall (hooks disabled)."
