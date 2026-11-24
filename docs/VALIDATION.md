@@ -74,7 +74,7 @@ The [native settings matrix](CONFIGURATIONS.md) lists WebGUI controls, expected 
 | Scenario | Evidence |
 |---|---|
 | Native telemetry and policies | The VM runs dpinger on two VNET links. The daemon reads sockets and publishes decisions after selective loss and recovery. The lab controls topology and observer configuration. |
-| WebGUI, privileges, and logs | Chromium exercises forms and log filtering. Tests cover delegated roles, CSRF, and missing or restored data. Appliance checks include all seven tabs, the widget, Diagnostics, Updates, and System Logs. |
+| WebGUI, privileges, and logs | Chromium exercises all seven tabs and the widget with pfSense classes. The fixtures cover delegated roles, CSRF, missing or restored data, and log filtering. The appliance checks preserve the LAN HTTPS login page and its certificate and verify SD-WAN events in the native system log. |
 | IPv4 and IPv6 forwarding | The reference generator produces the rules that PF loads in the VM. The collector verifies TCP delivery, return, IPv4 NAT, IPv6 link-local next hop, a block without paths, and the control flow. |
 | Reload and release lifecycle | Test reload rejection, timeout and retry, installation, corrupted archives, upgrades, and rollback. Check installed integrity and compare PF, NAT, and default route. |
 | IPsec | Verify ESP, absence of protected cleartext after SA removal, and IKEv2 rekey with strongSwan. |

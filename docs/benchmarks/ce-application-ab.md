@@ -4,6 +4,23 @@ Run **CE two-WAN appliance** with the `benchmark` scenario to build the candidat
 
 The benchmark records the source port of each request. The ERP and backup clients each cycle through a separate set of 6,000 ports, leaving at least 25 minutes between uses of one port at the fastest sampling rate. Older runs left source-port selection to the operating system.
 
+### Candidate with verified overlay boot
+
+Two A/B pairs ran on each CE version using the same candidate package and a 30-second preferred-path recovery hold. The times below are the observed range across the two trials in each mode. The failure window for ERP was 40 seconds. The ERP-only outage left WAN1's gateway and DNS monitor reachable.
+
+| CE | Scenario | Native | SD-WAN |
+| --- | --- | --- | --- |
+| 2.9.1 | ERP-only outage on WAN1 | 0/158 replies | 125/160 replies via WAN2, first in 4.549–13.002 s, successful reply latency p95 2.122 ms |
+| 2.9.1 | Complete WAN1 outage | First WAN2 reply in 2.522–2.733 s, 150/160 replies | First WAN2 reply in 4.636–6.660 s, 138/160 replies |
+| 2.9.1 | WAN1 returns | First WAN1 reply in 13.234–13.460 s, 260/260 replies | First WAN1 reply in 35.315–36.841 s, 260/260 replies |
+| 2.9.2 | ERP-only outage on WAN1 | 0/158 replies | 109/160 replies via WAN2, first in 11.810–14.008 s, successful reply latency p95 1.490 ms |
+| 2.9.2 | Complete WAN1 outage | First WAN2 reply in 2.729–2.906 s, 150/160 replies | First WAN2 reply in 3.883–5.582 s, 142/160 replies |
+| 2.9.2 | WAN1 returns | First WAN1 reply in 12.645–13.462 s, 260/260 replies | First WAN1 reply in 36.291–44.585 s, 260/260 replies |
+
+Backup delivered 160/160 replies via WAN1 during ERP-only loss in every version and mode. Both versions reported zero unexpected sources in steady phases. The artifacts contain per-request timestamps, source ports, reported NAT sources, phase statistics, and the ERP packet captures for LAN and both WANs. [CE 2.9.1 benchmark](https://github.com/allanlopesprado/pfsense-sdwan/actions/runs/45295565939) · [CE 2.9.2 benchmark](https://github.com/allanlopesprado/pfsense-sdwan/actions/runs/45295549345)
+
+The first CE 2.9.2 run with automatic port selection recorded four connection timeouts after ERP recovery in native mode. All four LAN SYNs reused ports from previous incomplete attempts, and the captures showed no corresponding SYN on either WAN. The run remains recorded with its failing assertion. [Earlier run and packet captures](https://github.com/allanlopesprado/pfsense-sdwan/actions/runs/45291849463)
+
 Two processes on the LAN client continuously open TCP connections, send unique request markers, and check the returned markers. The peer includes the source address it saw after NAT in every reply. The test collects PF rules, probe results, and application observations through healthy routing, preferred WAN loss, WAN restoration, an ERP-only fault, and service recovery. During the ERP-only fault, the fixture blocks ERP transactions and its associated DNS probe on WAN1. The backup service and its certificate-verified HTTPS probe remain available. The domains, certificates, addresses, and applications belong to the disconnected lab.
 
 Each successful transaction includes the return path. The time origin for an interruption is the completion of the lab fault command. A measurement phase excludes attempts that cross its boundaries. A recovery beyond the observation window is right-censored. The report includes the count of censored runs and calculates recovery percentiles over observed events. Use more than one pair to compare repeatability. The timings measure application reply delays on fresh TCP flows within the isolated topology.
