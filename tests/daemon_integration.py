@@ -72,7 +72,8 @@ def stage(sandbox):
     clock = "hrtime(true) + 60_000_000_000"
     daemon = (ROOT / "files/usr/local/sbin/sdwand.php").read_text()
     assert daemon.count("$observed_at = hrtime(true);") == 1
-    daemon = daemon.replace("$observed_at = hrtime(true);", f"$observed_at = {clock};")
+    # Capture points must share the observation clock, including the test offset.
+    daemon = daemon.replace("= hrtime(true);", f"= {clock};")
     for name in ("sdwan.inc", "sdwan_engine.inc", "sdwan_log.inc", "sdwan_probe.inc"):
         installed = f"/usr/local/pkg/{name}"
         assert daemon.count(installed) == 1, f"Unknown daemon layout: {installed}"
