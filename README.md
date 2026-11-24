@@ -30,7 +30,7 @@ The command below installs the published lab package. The changelog also covers 
 
 <!-- install-command -->
 ```sh
-d=$(mktemp -d /tmp/sdwan.XXXXXXXX) && (trap 'rm -rf "$d"' EXIT; p="$d/pfSense-pkg-SDWAN-0.4.29.pkg"; fetch -o "$p" 'https://raw.githubusercontent.com/allanlopesprado/pfsense-sdwan/3eb32704a5f0377feccfca84872e5da4e3baf662/dist/pfSense-pkg-SDWAN-0.4.29.pkg' && sha256 -c af8d9315ed07598c0158f226d2ae29f42c77d1d2c2c90914d625b1e7596c3ead "$p" && pkg add "$p")
+d=$(mktemp -d /tmp/sdwan.XXXXXXXX) && (trap 'rm -rf "$d"' EXIT; p="$d/pfSense-pkg-SDWAN-0.4.30.pkg"; fetch -o "$p" 'https://raw.githubusercontent.com/allanlopesprado/pfsense-sdwan/2da9b3458d95d4618d9e770f8683bb5effafed72/dist/pfSense-pkg-SDWAN-0.4.30.pkg' && sha256 -c 6be1a9572b47f8219f57bf69535b2589eecf68b8b09c0c1f925a6f9597aed04d "$p" && pkg add "$p")
 ```
 
 3. Open **Services → SD-WAN** and check for a current observation. The `sdwan` service is listed in **Status → Services**. **SD-WAN → Updates** shows the installed version.
