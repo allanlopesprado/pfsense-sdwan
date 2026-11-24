@@ -9,6 +9,7 @@
 | Assess interactions with IDS, IPS, DNS filtering, or routing packages | [Package compatibility](PACKAGE-COMPATIBILITY.md) |
 | Configure lab forwarding or review IPsec, NAT, and HA | [Forwarding and routing integration](INTEGRATION.md) |
 | Test a FortiGate peer | [FortiGate interoperability](FORTIOS.md) |
+| Pilot versioned policies from a NOC host | [Branch policy pilot](FLEET-LAB.md) |
 
 ## Validate and troubleshoot
 

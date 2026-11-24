@@ -975,6 +975,70 @@ def path_checks(qemu, _cleanup, _provider):
     print("CE_PATH_CHECKS_OK", flush=True)
 
 
+def fleet_pilot(qemu, _cleanup, _provider):
+    install_bound_candidate(qemu)
+    primary = {"G": "GW_A", "B": "GW_A"}
+    wait_paths(qemu, "before fleet policy", primary)
+    certificate = management("before fleet policy")
+    reference = route_and_nat(qemu)
+    site = f"php {LAB}/fleet-site.php"
+    command(qemu, f"{site} enroll pilot")
+
+    def report():
+        return json.loads(command(qemu, f"{site} status"))
+
+    controller = SCRIPT.parents[2] / "tools/fleet-controller.py"
+    with tempfile.TemporaryDirectory(prefix="sdwan-fleet-") as folder:
+        store = Path(folder) / "controller"
+
+        def manage(*args):
+            return json.loads(run(sys.executable, controller, store, *args, capture_output=True).stdout)
+
+        manage("enroll", "pilot")
+        before = report()
+        bundle = manage("publish", "pilot", "1", before["config_sha256"], "ERP", "lab", "balance")
+        manifest = Path(bundle["path"]).read_text(encoding="utf-8")
+        command(qemu, f"printf %s {shlex.quote(manifest)} > {LAB}/fleet-policy.json")
+        command(qemu, f"{site} apply {LAB}/fleet-policy.json {bundle['sha256']}")
+        deadline = time.monotonic() + 135
+        while time.monotonic() < deadline:
+            applied = report()
+            paths = {item["policy"]: item for item in applied["paths"]}
+            if (applied["revision"] == 1 and paths["ERP"]["pf"] == "applied" and
+                    set(paths["ERP"]["gateways"]) == {"GW_A", "GW_B"} and
+                    paths["Backup"]["pf"] == "applied" and paths["Backup"]["gateways"] == ["GW_A"]):
+                break
+            time.sleep(1)
+        else:
+            raise AssertionError(f"Fleet revision did not reach PF: {applied}")
+        report_path = Path(folder) / "pilot.json"
+        report_path.write_text(json.dumps(applied), encoding="utf-8")
+        manage("report", "pilot", report_path)
+        assert manage("inventory") == [{"site": "pilot", "report": applied}]
+        print(f"FLEET_CONTROLLER_CONFIRMED_PF {json.dumps(applied)}", flush=True)
+
+    # The controller directory is gone and no appliance route depends on it.
+    assert not store.exists()
+    assert report()["revision"] == 1
+    for target, expected in [(ERP, {A, B}), (BACKUP, {A})]:
+        peers = set()
+        for attempt in range(8):
+            payload = f"fleet-offline-{attempt}"
+            response = run(*in_ns("sdwan-client", sys.executable, SCRIPT, "flow", target),
+                           input=payload + "\n", capture_output=True).stdout.strip().split()
+            assert len(response) == 2 and response[1] == payload, response
+            peers.add(response[0])
+        assert peers == expected, peers
+        print(f"FLEET_OFFLINE_PEER_SOURCES {target} {sorted(peers)}", flush=True)
+    command(qemu, f"{site} rollback")
+    wait_paths(qemu, "fleet rollback", primary)
+    assert report()["revision"] == 0
+    tcp_pair("fleet rollback", (A, A))
+    management("fleet rollback", certificate)
+    assert route_and_nat(qemu) == reference
+    print("FLEET_PILOT_OFFLINE_AND_ROLLBACK_OK", flush=True)
+
+
 def recovery(qemu, cleanup, _provider, *, restart, image):
     assert command(qemu, "cat /etc/version") == "2.9.1-RELEASE"
     version, stock_hash = install_bound_candidate(qemu)
@@ -1139,7 +1203,7 @@ if __name__ == "__main__":
         if ce_version not in ("2.9.1", "2.9.2"):
             raise SystemExit(f"Unsupported pfSense CE release: {ce_version}")
         scenario = sys.argv[3] if len(sys.argv) > 3 else "acceptance"
-        scenarios = {"acceptance": acceptance, "paths": path_checks, "recovery": recovery}
+        scenarios = {"acceptance": acceptance, "paths": path_checks, "recovery": recovery, "fleet-pilot": fleet_pilot}
         if scenario not in scenarios or (scenario == "recovery" and ce_version != "2.9.1"):
             raise SystemExit(f"Unsupported scenario for CE {ce_version}: {scenario}")
         appliance(Path(sys.argv[1]).resolve(), ce_version, scenarios[scenario])
