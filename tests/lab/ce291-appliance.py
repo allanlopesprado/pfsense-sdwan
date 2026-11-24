@@ -976,7 +976,10 @@ def path_checks(qemu, _cleanup, _provider):
 
 
 def fleet_pilot(qemu, _cleanup, _provider):
-    install_bound_candidate(qemu)
+    install_candidate(qemu)
+    command(qemu, f"php {LAB}/ce291-guest.php fleet_pilot_group")
+    reboot_with_overlay(qemu)
+    command(qemu, f"php {LAB}/ce291-guest.php bind")
     primary = {"G": "GW_A", "B": "GW_A"}
     wait_paths(qemu, "before fleet policy", primary)
     certificate = management("before fleet policy")

@@ -140,6 +140,19 @@ if ($action === 'floating_erp_block') {
     write_config('Toggle the disposable Floating ERP block');
     exit;
 }
+if ($action === 'fleet_pilot_group') {
+    $groups = config_get_path('gateways/gateway_group', []);
+    $index = array_search('G', array_column($groups, 'name'), true);
+    if ($index === false || !empty(config_get_path('gateways/sdwan_bindings/item', []))) {
+        throw new RuntimeException('The fleet pilot requires the unbound disposable ERP group');
+    }
+    $groups[$index]['item'] = ['GW_A|1|address', 'GW_B|1|address'];
+    if (!is_array(config_set_path('gateways/gateway_group', $groups)) ||
+        !is_array(write_config('Set equal native tiers for the disposable fleet balance policy'))) {
+        throw new RuntimeException('Could not prepare the disposable balanced gateway group');
+    }
+    exit;
+}
 if ($action === 'erp_host_alias') {
     $name = 'SDWAN_LAB_ERP';
     $aliases = config_get_path('aliases/alias', []);
