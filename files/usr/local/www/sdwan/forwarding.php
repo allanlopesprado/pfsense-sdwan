@@ -278,15 +278,20 @@ if ($preview !== null):
 	</div>
 </div>
 <?php endif;
-if ($supported && $native_edit && $binding === null && !$preview['errors'] && $preview['binding'] !== null): ?>
-	<p class="help-block"><?=gettext('Experimental forwarding. Verify the active firewall rules after binding.')?></p>
-	<form method="post" action="/sdwan/forwarding.php" class="action-buttons">
-		<input type="hidden" name="policy" value="<?=sdwan_ui_escape($policy_name)?>">
-		<input type="hidden" name="group" value="<?=sdwan_ui_escape($group_name)?>">
-		<input type="hidden" name="revision" value="<?=sdwan_ui_escape($preview['revision'])?>">
-		<button type="submit" class="btn btn-primary btn-sm" name="action" value="bind"><i class="fa-solid fa-link icon-embed-btn" aria-hidden="true"></i> <?=gettext('Bind policy to this group')?></button>
-	</form>
-<?php endif;
+if ($supported && $native_edit && $binding === null && !$preview['errors'] && $preview['binding'] !== null):
+	$approval_error = sdwan_steering_approval_error();
+	if ($approval_error !== null):
+		print_info_box(sdwan_ui_escape($approval_error), 'warning', false);
+	else: ?>
+		<p class="help-block"><?=gettext('Experimental forwarding. Verify the active firewall rules after binding.')?></p>
+		<form method="post" action="/sdwan/forwarding.php" class="action-buttons">
+			<input type="hidden" name="policy" value="<?=sdwan_ui_escape($policy_name)?>">
+			<input type="hidden" name="group" value="<?=sdwan_ui_escape($group_name)?>">
+			<input type="hidden" name="revision" value="<?=sdwan_ui_escape($preview['revision'])?>">
+			<button type="submit" class="btn btn-primary btn-sm" name="action" value="bind"><i class="fa-solid fa-link icon-embed-btn" aria-hidden="true"></i> <?=gettext('Bind policy to this group')?></button>
+		</form>
+	<?php endif;
+endif;
 endif;
 if ($bindings_by_group):
 	sdwan_ui_row_actions();

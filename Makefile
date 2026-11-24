@@ -1,5 +1,5 @@
 PORTNAME=	pfSense-pkg-SDWAN
-PORTVERSION=	0.4.29
+PORTVERSION=	0.4.30
 CATEGORIES=	net
 MASTER_SITES=	# empty
 DISTFILES=	# empty
@@ -23,7 +23,7 @@ do-install:
 	@ ${MKDIR} ${STAGEDIR}${PREFIX}/pkg/shortcuts ${STAGEDIR}${PREFIX}/www/sdwan \
 		${STAGEDIR}${PREFIX}/www/widgets/include ${STAGEDIR}${PREFIX}/www/widgets/widgets \
 		${STAGEDIR}${PREFIX}/sbin ${STAGEDIR}${PREFIX}/etc/rc.d \
-		${STAGEDIR}/etc/inc/priv ${STAGEDIR}${DATADIR}
+		${STAGEDIR}/etc/inc/priv ${STAGEDIR}${DATADIR} ${STAGEDIR}${PREFIX}/share/pfSense/menu
 	${INSTALL_DATA} ${FILESDIR}/usr/local/pkg/*.inc ${FILESDIR}/usr/local/pkg/*.xml ${STAGEDIR}${PREFIX}/pkg/
 	${INSTALL_DATA} ${FILESDIR}/usr/local/pkg/shortcuts/pkg_sdwan.inc ${STAGEDIR}${PREFIX}/pkg/shortcuts/
 	${INSTALL_DATA} ${FILESDIR}/usr/local/www/sdwan/* ${STAGEDIR}${PREFIX}/www/sdwan/
@@ -37,5 +37,6 @@ do-install:
 	${SED} 's|%%PKGVERSION%%|${PKGVERSION}|g' \
 		${FILESDIR}/usr/local/share/${PORTNAME}/info.xml > ${WRKDIR}/info.xml
 	${INSTALL_DATA} ${WRKDIR}/info.xml ${STAGEDIR}${DATADIR}/
+	${INSTALL_DATA} ${FILESDIR}/usr/local/share/pfSense/menu/sdwan.xml ${STAGEDIR}${PREFIX}/share/pfSense/menu/
 
 .include <bsd.port.mk>

@@ -13,6 +13,7 @@ pkg/sdwan_steering.inc
 pkg/shortcuts/pkg_sdwan.inc
 sbin/sdwand.php
 %%DATADIR%%/info.xml
+share/pfSense/menu/sdwan.xml
 www/sdwan/diagnostics.php
 www/sdwan/editor.inc.php
 www/sdwan/forwarding.php

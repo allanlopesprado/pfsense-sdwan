@@ -385,7 +385,7 @@ if (!$display_form && !$confirm_deletion):
 				?>
 				<i class="fa-solid fa-lock sdwan-row-action" title="<?=$in_use?>" aria-hidden="true"></i><span class="sr-only"><?=$in_use?></span>
 				<?php else: ?>
-				<button type="submit" name="action" value="review-delete" class="btn btn-link fa-solid fa-trash-can sdwan-row-action"
+				<button type="submit" name="action" value="review-delete" class="btn btn-link fa-solid fa-trash-can sdwan-row-action no-confirm"
 				    title="<?=gettext('Review deletion')?>" aria-label="<?=gettext('Review deletion')?>"></button>
 				<?php endif; ?>
 			</form></td>
@@ -410,7 +410,7 @@ if ($confirm_deletion): ?>
 			<input type="hidden" name="original" value="<?=sdwan_ui_escape($original)?>">
 			<input type="hidden" name="confirm_delete" value="<?=sdwan_ui_escape($original)?>">
 			<a class="btn btn-default" href="<?=$url?>"><?=gettext('Cancel')?></a>
-			<button type="submit" name="action" value="delete" class="btn btn-danger"><?=gettext('Delete')?></button>
+			<button type="submit" name="action" value="delete" class="btn btn-danger no-confirm"><?=gettext('Delete')?></button>
 		</form>
 	</div>
 </div>

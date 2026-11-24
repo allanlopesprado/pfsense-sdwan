@@ -17,12 +17,13 @@ mkdir($temp, 0700);
 mkdir($temp . '/Net');
 register_shutdown_function(static function () use ($temp): void {
 	foreach (['Net/IPv6.php', 'globals.inc', 'guiconfig.inc', 'config.inc', 'sdwan.widget.php', 'config.xml',
-	    'shortcuts.inc', 'webgui/status_logs.php', 'webgui/sdwan/members.php', 'webgui/sdwan/status.php'] as $path) {
+	    'menu/sdwan.xml', 'menus.inc', 'shortcuts.inc', 'webgui/status_logs.php', 'webgui/sdwan/members.php',
+	    'webgui/sdwan/status.php'] as $path) {
 		if (is_file($temp . '/' . $path)) {
 			unlink($temp . '/' . $path);
 		}
 	}
-	foreach (['native-shortcuts', 'webgui/sdwan', 'webgui', 'Net'] as $directory) {
+	foreach (['menu', 'native-shortcuts', 'webgui/sdwan', 'webgui', 'Net'] as $directory) {
 		if (is_dir($temp . '/' . $directory)) {
 			rmdir($temp . '/' . $directory);
 		}
@@ -36,7 +37,11 @@ foreach (['Net/IPv6.php', 'globals.inc', 'guiconfig.inc', 'config.inc'] as $path
 }
 set_include_path($temp);
 function g_get($key) {
-	return $key === 'www_path' ? $GLOBALS['www'] : false;
+	return match ($key) {
+		'www_path' => $GLOBALS['www'],
+		'ext_menu_path' => $GLOBALS['g']['ext_menu_path'] ?? false,
+		default => false,
+	};
 }
 function isAllowedPage($path) {
 	// Real WebGUI page names may include a query. Providing the delimiter
@@ -162,6 +167,34 @@ foreach (['members', 'slas', 'policies', 'forwarding', 'updates'] as $page) {
 echo "ok - upstream page matcher enforces the SD-WAN view and manage roles\n";
 
 $corewww = $argv[1] . '/src/usr/local/www';
+$native_head = file_get_contents($corewww . '/head.inc');
+$menu_functions = [];
+foreach (['read_ext_menu_path_data', 'return_ext_menu'] as $function) {
+	verify(preg_match('/^function ' . $function . '\(.*?^\}/ms', $native_head, $match) === 1, "Native {$function}");
+	$menu_functions[] = $match[0];
+}
+file_put_contents($temp . '/menus.inc', "<?php\n" . implode("\n", $menu_functions));
+require $temp . '/menus.inc';
+$g['ext_menu_path'] = $temp . '/menu';
+mkdir($g['ext_menu_path'], 0700);
+$menu_file = $g['ext_menu_path'] . '/sdwan.xml';
+verify(copy($local . '/share/pfSense/menu/sdwan.xml', $menu_file), 'Package owns the native menu XML');
+$ext_menu_path_data = read_ext_menu_path_data();
+$GLOBALS['test_config'] = ['installedpackages/package' => [$package], 'installedpackages/menu' => $gui['menu']];
+$role = $view;
+verify(return_ext_menu('Services') === [['SD-WAN', '/sdwan/status.php']], 'Legacy Services entry remains available');
+verify(return_ext_menu('Status') === [['SD-WAN', '/sdwan/status.php']], 'Native Status entry');
+verify(return_ext_menu('Diagnostics') === [['SD-WAN', '/sdwan/diagnostics.php']], 'Native Diagnostics entry');
+$role = ['status_gateways.php'];
+verify(return_ext_menu('Status') === [] && return_ext_menu('Diagnostics') === [], 'Native menus enforce page privileges');
+unlink($menu_file);
+$ext_menu_path_data = read_ext_menu_path_data();
+$role = $view;
+verify(return_ext_menu('Services') === [['SD-WAN', '/sdwan/status.php']] &&
+    return_ext_menu('Status') === [] && return_ext_menu('Diagnostics') === [], 'Removing the package XML clears the added menus');
+unset($GLOBALS['test_config'], $g['ext_menu_path']);
+echo "ok - native menu extensions enforce privileges and disappear when the package XML is removed\n";
+
 $packagewww = $www;
 $www = $temp . '/webgui';
 mkdir($www . '/sdwan', 0700, true);

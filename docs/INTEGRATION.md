@@ -2,6 +2,12 @@
 
 The package recommends one member per policy using dpinger, the pfSense gateway monitor. On stock CE, the recommendation is informational and native configuration governs forwarding. The forwarding engine recognizes existing bindings on steering ABI 1 or 2. New approvals and changes require the current adapter and a verified PF load at boot. Verify each flow in both directions to establish its actual path. Acceptance on pfSense CE 2.9.1 and 2.9.2 requires the traffic tests below, including when the peer runs FortiOS.
 
+## Finding SD-WAN in pfSense
+
+From 0.4.30, **Status → SD-WAN** shows monitored gateways and policy recommendations. **Diagnostics → SD-WAN** opens policy evaluation, service results, and relevant native tools. **Services → SD-WAN** remains the package entry for configuration, forwarding approval, and updates. The tab bar and bookmarked URLs work from either menu.
+
+Use **Status → Services** to manage the observer and **Status → System Logs** to see its log entries. The new Status and Diagnostics entries depend on the existing SD-WAN view privilege. Native tools remain subject to their own privileges.
+
 ## What the package accesses
 
 | Component | Package operation |

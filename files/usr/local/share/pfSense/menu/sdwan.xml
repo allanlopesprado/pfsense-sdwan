@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<packagegui>
+	<menu>
+		<name>SD-WAN</name>
+		<section>Status</section>
+		<url>/sdwan/status.php</url>
+	</menu>
+	<menu>
+		<name>SD-WAN</name>
+		<section>Diagnostics</section>
+		<url>/sdwan/diagnostics.php</url>
+	</menu>
+</packagegui>

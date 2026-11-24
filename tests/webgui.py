@@ -136,6 +136,7 @@ def screenshots(directory, www, pages):
                         const clickTarget = removeBox.width === 24 && removeBox.height === 24;
                         const protectedPost = remove.form.method === 'post' &&
                             Boolean(remove.form.elements.__csrf_magic?.value);
+                        const reviewedSeparately = remove.classList.contains('no-confirm') === (remove.value === 'review-delete');
                         const initialFocus = document.activeElement !== remove && getComputedStyle(remove).outlineStyle === 'none';
                         remove.focus({preventScroll: true});
                         const focus = getComputedStyle(remove);
@@ -143,7 +144,8 @@ def screenshots(directory, www, pages):
                             focus.outlineColor === focus.color;
                         remove.blur();
                         document.body.dataset.sdwanRowActions =
-                            matchesEdit && icon && clickTarget && protectedPost && initialFocus && keyboardFocus ? 'pass' : 'fail';
+                            matchesEdit && icon && clickTarget && protectedPost && reviewedSeparately &&
+                            initialFocus && keyboardFocus ? 'pass' : 'fail';
                     });
                     </script>
                 """
@@ -713,7 +715,11 @@ def run(php, classes, screenshot_dir=None):
         assert event_attrs.get("method") == "post" and event_attrs.get("id") == "sdwan-system-logs"
         assert 'form="sdwan-system-logs"' in fresh and "__csrf_magic" in event_post
         assert 'form="sdwan-system-logs" class="btn btn-default btn-sm"' in fresh
-        assert fresh.index('Gateway Status') < fresh.index('Policy Status')
+        assert fresh.index('Monitored Gateways') < fresh.index('Policy Status')
+        assert '<li>Status</li><li><a href="/sdwan/status.php">SD-WAN</a></li>' in fresh and 'Recommended Path' in fresh
+        balanced = {**config, "policies": [{**config["policies"][0], "strategy": "balance"}]}
+        balanced_status = request("status", config=balanced, snapshot=snapshot)
+        assert '<td>Eligible pool</td>' in balanced_status and '<td>2 of 2</td>' in balanced_status
         assert 'class="btn btn-default btn-sm" role="button" href="/status_gateways.php"' in fresh
         assert 'class="fa-solid fa-network-wired fa-fw"' in fresh
         assert "Last sample" not in fresh and "<time" not in fresh
@@ -721,6 +727,11 @@ def run(php, classes, screenshot_dir=None):
         delegated = request("status", privileges={"/firewall_rules.php": False}, snapshot=snapshot)
         assert "/sdwan/forwarding.php" not in Choices(delegated).links and 'form="sdwan-system-logs"' in delegated
         diagnostics = request("diagnostics", get={"policy": "VOICE"}, snapshot=snapshot)
+        assert '<li>Diagnostics</li><li><a href="/sdwan/diagnostics.php">SD-WAN</a></li>' in diagnostics
+        assert 'Policy Evaluation' in diagnostics
+        assert "/diag_routes.php" in Choices(diagnostics).links
+        restricted = request("diagnostics", privileges={"/diag_routes.php": False})
+        assert "/diag_routes.php" not in Choices(restricted).links
         decisions = re.findall(r'<tr>\s*<th scope="row">(.*?)</tr>', diagnostics, re.S)
         assert "Maximum RTT" in diagnostics and "Maximum loss" in diagnostics and "1.00 ms" in diagnostics
         assert "2 of 2" in diagnostics and "Lowest configured cost within SLA" in diagnostics
@@ -964,6 +975,8 @@ def run(php, classes, screenshot_dir=None):
 
         lab = request("forwarding", native=fixture, steering_abi=True, get=names)
         assert "Experimental" in lab and 'value="bind"' in lab and "Block · rule 50322" in lab, lab
+        pending_boot = request("forwarding", native=fixture, steering_abi=True, boot_ready=False, get=names)
+        assert "Reboot pfSense with the installed SD-WAN adapter" in pending_boot and 'value="bind"' not in pending_boot
         controls = Choices(lab)
         post = {**names, "action": "bind", "revision": controls.revisions[0], "__csrf_magic": controls.tokens[0]}
         for options, message in [({}, "previews only"), ({"steering_abi": True,

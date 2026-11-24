@@ -34,7 +34,7 @@
 		$sdwan_action = mwexec($sdwan_rc . ' status', true) === 0 ? 'restart' : 'start';
 		$sdwan_exit = mwexec($sdwan_rc . ' ' . $sdwan_action);
 		if ($sdwan_exit === 0) {
-			update_status("\nSD-WAN observer {$sdwan_action} requested. Check Services > SD-WAN > Status for a current observation.\n");
+			update_status("\nSD-WAN observer {$sdwan_action} requested. Check Status > SD-WAN for a current observation.\n");
 		} else {
 			update_status("\nSD-WAN observer {$sdwan_action} failed (exit {$sdwan_exit}). Package registration continues. Check Status > Services and System Logs.\n");
 		}

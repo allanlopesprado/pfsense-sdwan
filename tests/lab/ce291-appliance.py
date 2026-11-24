@@ -588,6 +588,20 @@ def verify_updater_readiness(qemu, version, installed_since, *, forwarding):
     raise RuntimeError(f"The updater did not confirm appliance readiness: {state}")
 
 
+def verify_native_menu_file(qemu, archive):
+    menu = "/usr/local/share/pfSense/menu/sdwan.xml"
+    files = command(qemu, f"tar -tf {archive}").splitlines()
+    if menu.lstrip("/") not in {name.strip().lstrip("./") for name in files}:
+        command(qemu, f"test ! -e {menu}")
+        print("NATIVE_MENU_FILE_ABSENT_FROM_OLDER_PACKAGE", flush=True)
+        return
+    script = ('require "config.inc"; $path = g_get("ext_menu_path") . "/sdwan.xml"; '
+              'echo json_encode(array_column(parse_xml_config_pkg($path, "packagegui")["menu"], "url", "section"));')
+    entries = json.loads(command(qemu, f"test -s {menu}\nphp -r {shlex.quote(script)}"))
+    assert entries == {"Status": "/sdwan/status.php", "Diagnostics": "/sdwan/diagnostics.php"}, entries
+    print("NATIVE_STATUS_AND_DIAGNOSTICS_MENU_FILE_OK", flush=True)
+
+
 def verify_unapplied_reload(qemu, primary, certificate):
     adapter = "/etc/inc/filter-sdwan.inc"
     backup = f"{LAB}/filter-sdwan.acceptance.inc"
@@ -770,10 +784,12 @@ def acceptance(qemu, cleanup, provider, *, cold_restart):
     assert "ABI=0" in command(qemu, f"php {LAB}/ce291-guest.php mode")
     print(command(qemu, f"php {LAB}/ce291-guest.php release_manifest {version}"), flush=True)
     verify_updater_readiness(qemu, version, installed_since, forwarding=False)
+    verify_native_menu_file(qemu, package)
     print("PACKAGE_INSTALLED_WITH_NATIVE_HOOKS; STOCK_MODE_OBSERVATION", flush=True)
 
     command(qemu, f"pkg add -f {rollback}", timeout=180)
     assert command(qemu, "pkg query '%v' pfSense-pkg-SDWAN") == previous_version
+    verify_native_menu_file(qemu, rollback)
     command(qemu, f"php {LAB}/ce291-guest.php settings")
     config_hash = "php -r 'require \"config.inc\";echo hash(\"sha256\", serialize(config_get_path(\"installedpackages/sdwan\")));'"
     saved = command(qemu, config_hash)
@@ -784,6 +800,7 @@ def acceptance(qemu, cleanup, provider, *, cold_restart):
     assert "ABI=0" in command(qemu, f"php {LAB}/ce291-guest.php mode")
     command(qemu, "pkg check -s pfSense-pkg-SDWAN; /usr/local/etc/rc.d/sdwand.sh status")
     verify_updater_readiness(qemu, version, installed_since, forwarding=False)
+    verify_native_menu_file(qemu, package)
     print("NATIVE_UPGRADE_PRESERVES_POLICY_CONFIGURATION", flush=True)
     certificate = management("baseline")
     native_rules = loaded(qemu)
@@ -940,6 +957,7 @@ def acceptance(qemu, cleanup, provider, *, cold_restart):
     command(qemu, f"cp -p {LAB}/filter.stock /etc/inc/filter.inc; rm /etc/inc/filter-sdwan.inc")
     command(qemu, f"pkg add -f {rollback}", timeout=180)
     assert command(qemu, "pkg query '%v' pfSense-pkg-SDWAN") == previous_version
+    verify_native_menu_file(qemu, rollback)
     command(qemu, "pkg check -s pfSense-pkg-SDWAN; /usr/local/etc/rc.d/sdwand.sh status")
     tcp_pair("package rollback", (A, A))
     for stream in rollback_sessions:

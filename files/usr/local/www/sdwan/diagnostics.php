@@ -26,7 +26,7 @@ if (sdwan_ui_scalar($_GET, 'traffic') === 'sample') {
 $snapshot = sdwan_ui_snapshot($sdwan, $inventory, $sample_state);
 $result = $snapshot['policies'][$selected_policy] ?? null;
 $slas = array_column($sdwan['slas'], null, 'name');
-$pgtitle = [gettext('Services'), gettext('SD-WAN'), gettext('Diagnostics')];
+$pgtitle = [gettext('Diagnostics'), gettext('SD-WAN')];
 include('head.inc');
 sdwan_ui_tabs('diagnostics');
 if ($requested !== '' && $policy === null) {
@@ -69,7 +69,7 @@ if ($policy !== null):
 	];
 ?>
 <div class="panel panel-default">
-	<div class="panel-heading"><h2 class="panel-title"><?=gettext('Results')?></h2></div>
+	<div class="panel-heading"><h2 class="panel-title"><?=gettext('Policy Evaluation')?></h2></div>
 	<div class="container-fluid">
 		<div class="row">
 			<div class="col-sm-5">
@@ -299,6 +299,7 @@ events.push(function () {
 <?php endif;
 sdwan_ui_actions([
 	'/status_logs.php?logfile=gateways' => [gettext('Gateway Logs'), 'fa-list'],
+	'/diag_routes.php' => [gettext('Routes'), 'fa-route'],
 	'/diag_packet_capture.php' => [gettext('Packet Capture'), 'fa-magnifying-glass'],
 ], true);
 include('foot.inc');

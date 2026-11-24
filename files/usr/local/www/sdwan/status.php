@@ -12,7 +12,7 @@ $path_states = [
 	'alternatives' => ['bg-success', gettext('Multiple eligible paths')],
 ];
 $can_inspect = isAllowedPage('/sdwan/diagnostics.php');
-$pgtitle = [gettext('Services'), gettext('SD-WAN'), gettext('Status')];
+$pgtitle = [gettext('Status'), gettext('SD-WAN')];
 include('head.inc');
 sdwan_ui_tabs('status');
 
@@ -23,7 +23,7 @@ if (!$sdwan['members']) {
 }
 ?>
 <div class="panel panel-default">
-	<div class="panel-heading"><h2 class="panel-title"><?=gettext('Gateway Status')?></h2></div>
+	<div class="panel-heading"><h2 class="panel-title"><?=gettext('Monitored Gateways')?></h2></div>
 	<div class="panel-body">
 	<div class="table-responsive"><table class="table table-striped table-hover table-condensed sortable-theme-bootstrap" data-sortable>
 		<thead><tr><th scope="col"><?=gettext('Member')?></th><th scope="col"><?=gettext('Gateway')?></th>
@@ -54,15 +54,19 @@ if (!$sdwan['members']) {
 	<div class="panel-heading"><h2 class="panel-title"><?=gettext('Policy Status')?></h2></div>
 	<div class="panel-body">
 	<div class="table-responsive"><table class="table table-striped table-hover table-condensed sortable-theme-bootstrap" data-sortable>
-		<thead><tr><th scope="col"><?=gettext('Policy')?></th><th scope="col"><?=gettext('Recommended Member')?></th>
+		<thead><tr><th scope="col"><?=gettext('Policy')?></th><th scope="col"><?=gettext('Recommended Path')?></th>
 			<th scope="col"><?=gettext('Eligible Paths')?></th><th scope="col"><?=gettext('Status')?></th></tr></thead>
 		<tbody>
 		<?php foreach ($sdwan['policies'] as $policy):
 			$result = $snapshot['policies'][$policy['name']] ?? [];
+			$recommendation = $result['selected'] ?? '—';
+			if ($policy['strategy'] === 'balance') {
+				$recommendation = ($result['eligible_count'] ?? 0) > 0 ? gettext('Eligible pool') : '—';
+			}
 			[$path_class, $path_text] = $path_states[$result['path_status'] ?? ''] ?? ['bg-info', gettext('Awaiting evaluation')];
 		?>
 			<tr><th scope="row"><?php if ($can_inspect): ?><a href="/sdwan/diagnostics.php?policy=<?=rawurlencode($policy['name'])?>" title="<?=gettext('View policy diagnostics')?>"><?=sdwan_ui_escape($policy['name'])?></a><?php else: ?><?=sdwan_ui_escape($policy['name'])?><?php endif; ?></th>
-				<td><?=sdwan_ui_escape($result['selected'] ?? '—')?></td>
+				<td><?=sdwan_ui_escape($recommendation)?></td>
 				<td><?=isset($result['eligible_count']) ? sdwan_ui_escape(sprintf(gettext('%1$d of %2$d'), $result['eligible_count'], count($policy['members']))) : '—'?></td>
 				<td class="<?=$path_class?>"><?=sdwan_ui_escape($path_text)?>
 					<?php if (!empty($result['shared_interface'])): ?>

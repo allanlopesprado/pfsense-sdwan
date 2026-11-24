@@ -80,7 +80,7 @@ $sdwanRender = static function (): void {
 		<caption class="sr-only"><?=gettext('SD-WAN policy forwarding')?></caption>
 		<thead><tr>
 			<th scope="col" class="sdwan-widget-policy"><?=gettext('Policy')?></th>
-			<th scope="col" class="sdwan-widget-egress"><?=gettext('Egress for new connections')?></th>
+			<th scope="col" class="sdwan-widget-egress" title="<?=gettext('Egress for new connections')?>"><?=gettext('Egress')?></th>
 			<th scope="col"><?=gettext('Status')?></th>
 		</tr></thead>
 		<tbody>
