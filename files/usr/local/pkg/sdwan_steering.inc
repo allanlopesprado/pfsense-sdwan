@@ -108,6 +108,7 @@ function sdwan_steering_native(?array $inventory = null): array {
 	$native['default4'] = config_get_path('gateways/defaultgw4', '');
 	$native['default6'] = config_get_path('gateways/defaultgw6', '');
 	$native['statepolicy'] = config_get_path('system/statepolicy', 'if-bound');
+	$native['skip_rules_gw_down'] = config_get_path('system/skip_rules_gw_down') !== null;
 	$native['filtermode'] = config_get_path('ipsec/filtermode', '');
 	$policy_children = array_filter($native['phase2'], static fn($child) =>
 	    in_array($child['mode'] ?? '', ['tunnel', 'tunnel6'], true));

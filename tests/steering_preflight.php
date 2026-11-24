@@ -347,6 +347,8 @@ foreach ([1 => ['ISP_A', '_vipcarp'], 2 => ['ISP_B', 'opt1']] as $id => [$name, 
 	$n['phase2'][] = ['ikeid' => $id, 'reqid' => "5{$id}", 'mode' => 'vti'];
 	$n['gateways'][$name]['interface'] = $if;
 }
+preflight_check($n, false, 'VTI fallback requires stock pfSense to skip rules with no usable gateway');
+$n['skip_rules_gw_down'] = true;
 $vti_binding = preflight_check($n, true, 'two VTIs and a CARP parent');
 $vti = $n;
 foreach ([['any' => ''], ['address' => '0.0.0.0/0']] as $unrestricted) {

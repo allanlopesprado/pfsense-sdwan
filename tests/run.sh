@@ -17,6 +17,7 @@ python3 -B tests/verify_appliance.py "$PHP_BIN"
 "$PHP_BIN" tests/policy_topology.php
 "$PHP_BIN" tests/system_logs.php
 "$PHP_BIN" tests/core_routes.php
+"$PHP_BIN" tests/core_appliance.php
 "$PHP_BIN" tests/steering_preflight.php
 "$PHP_BIN" tests/steering.php
 python3 -B tests/steering_daemon.py "$PHP_BIN"

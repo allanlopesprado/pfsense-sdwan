@@ -180,7 +180,11 @@ function sdwan_observe_once(): void {
 		$bound = config_get_path('gateways/sdwan_bindings/item', []);
 		if ($bound || is_file($receipt_path)) {
 			sdwan_load_steering();
-			if (sdwan_steering_supported()) {
+			$adapter_supported = sdwan_steering_supported();
+			if ($bound && !$adapter_supported) {
+				sdwan_log_event('adapter_unavailable');
+			}
+			if ($adapter_supported) {
 				try {
 					$bindings = sdwan_steering_bindings();
 					$rule_pairs = [];

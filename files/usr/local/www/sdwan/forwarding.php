@@ -17,6 +17,7 @@ if (!sdwan_can_view_forwarding()) {
 $native_edit = sdwan_can_edit_forwarding();
 $can_reconnect = $native_edit && isAllowedPage('/diag_dump_states.php');
 $supported = sdwan_steering_supported();
+$approval_error = $supported ? sdwan_steering_approval_error() : null;
 $is_post = $_SERVER['REQUEST_METHOD'] === 'POST';
 $form_source = $is_post ? $_POST : $_GET;
 $policy_name = sdwan_ui_choice_value(sdwan_ui_scalar($form_source, 'policy'));
@@ -106,11 +107,11 @@ $target = $binding_current && ($steering['revision'] ?? null) === sdwan_config_r
     in_array($steering['gateway'] ?? null, $binding['gateways'], true)
     ? implode(', ', $steering['pool'] ?? [$steering['gateway']]) : null;
 $pf_labels = [
-	'applied' => gettext('Matching route rule loaded in PF'),
+	'applied' => gettext('Forwarding by policy. Matching route rule loaded in PF.'),
 	'blocked' => gettext('Matching block rule loaded in PF'),
 	'binding_changed' => gettext('Native rules or policy no longer match the approved binding'),
 	'observing' => gettext('Waiting for an observation of this binding. New connections can be blocked until PF confirms a path.'),
-	'pending' => gettext('Active filter differs from the current decision'),
+	'pending' => gettext('PF divergence. Active filter differs from the current decision.'),
 	'requested' => gettext('Reload requested. Waiting for PF confirmation'),
 	'divergent' => gettext('Persistent divergence. Automatic retries exhausted'),
 	'observation_unavailable' => sdwan_ui_sample_notice($sample_state),
@@ -152,8 +153,14 @@ if ($errors) {
 } elseif ($notice !== '') {
 	print_info_box($notice, 'success', false);
 }
-if (!$supported) {
-	print_info_box(gettext('Preview mode. Binding requires the SD-WAN forwarding integration.'), 'info', false);
+if (!$supported && $bindings_by_group) {
+	print_info_box(gettext('Adapter unavailable. Saved bindings remain in the configuration and SD-WAN cannot confirm their active PF paths. If this follows a pfSense update, verify native rules and VPN blocks from the console before restoring an adapter for this exact CE build.'), 'danger', false);
+} elseif (!$supported) {
+	print_info_box(gettext('Monitoring only. Preview mode uses native pfSense forwarding. Binding a policy requires the matching SD-WAN adapter and a verified reboot.'), 'info', false);
+} elseif ($approval_error !== null) {
+	print_info_box(sprintf(gettext('Awaiting activation. %s'), sdwan_ui_escape($approval_error)), 'warning', false);
+} elseif (!$bindings_by_group) {
+	print_info_box(gettext('Adapter ready. Preview and bind a policy to begin forwarding.'), 'info', false);
 }
 if (isset($receipt['withdrawal'])) {
 	$exhausted = $receipt['attempts'] >= SDWAN_RELOAD_MAX_ATTEMPTS &&
@@ -278,8 +285,8 @@ if ($preview !== null):
 	</div>
 </div>
 <?php endif;
-if ($supported && $native_edit && $binding === null && !$preview['errors'] && $preview['binding'] !== null): ?>
-	<p class="help-block"><?=gettext('Experimental forwarding. Verify the active firewall rules after binding.')?></p>
+if ($supported && $approval_error === null && $native_edit && $binding === null && !$preview['errors'] && $preview['binding'] !== null): ?>
+	<p class="help-block"><?=gettext('Experimental forwarding. Verify the active PF rules and open a new connection from the LAN after binding.')?></p>
 	<form method="post" action="/sdwan/forwarding.php" class="action-buttons">
 		<input type="hidden" name="policy" value="<?=sdwan_ui_escape($policy_name)?>">
 		<input type="hidden" name="group" value="<?=sdwan_ui_escape($group_name)?>">
@@ -329,6 +336,7 @@ if (!$bindings_by_group && $native_edit): ?>
 	<div class="panel-body">
 		<ol>
 			<li><?=gettext('Configure members, a performance SLA and a policy.')?></li>
+			<li><a href="https://github.com/allanlopesprado/pfsense-sdwan/blob/main/core/README.md"><?=gettext('Adapter preparation and recovery')?></a> · <?=gettext('Verify the CE build and preserve access to the console and a stock recovery image before installing an adapter.')?></li>
 			<li><a href="/system_gateway_groups.php"><?=gettext('Gateway Groups')?></a> · <?=gettext('Create a dedicated group with the same gateways as the policy.')?></li>
 			<li><a href="/firewall_rules.php"><?=gettext('Firewall Rules')?></a> · <?=gettext('Keep local and VPN exceptions first. Assign the group to the ingress pass rule and place a block or reject with the same match directly below it.')?></li>
 			<li><?=gettext('Preview the policy and group above. Review the matching rules and bind the policy when the checks pass.')?></li>

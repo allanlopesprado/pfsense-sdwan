@@ -94,7 +94,8 @@ def test_config(work, family, links, vti):
     config["interfaces"]["lan"] = {"enable": "", "if": "lablan"}
     devices = ("ipsec10", "ipsec20", "ipsec30") if vti else ("labwana", "labwanb", "labwanc")
     if vti:
-        config.update({"ipsec/filtermode": "if_ipsec", "ipsec/phase1": [], "ipsec/phase2": []})
+        config.update({"ipsec/filtermode": "if_ipsec", "ipsec/phase1": [], "ipsec/phase2": [],
+                       "system/skip_rules_gw_down": ""})
     for index, (gw, (source, hop), device) in enumerate(zip(config["gateways/gateway_item"], uplinks, devices), 1):
         interface, name = gw["interface"], gw["name"]
         if vti:

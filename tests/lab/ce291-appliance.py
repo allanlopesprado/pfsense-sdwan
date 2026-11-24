@@ -558,6 +558,39 @@ def vti_no_sa(qemu):
     assert evidence_count("vti-clear") >= control + 2
 
 
+def stock_gateway_guard(qemu, certificate):
+    invocation = f"php {LAB}/ce291-guest.php stock_gateway_guard"
+    original = shlex.quote(command(qemu, f"{invocation} get"))
+    ping = in_ns("sdwan-client", "ping", "-n", "-c", 2, "-w", 4, "192.0.2.169")
+    try:
+        command(qemu, f"{invocation} unprotected; /etc/rc.filter_configure_sync")
+        visible = command(qemu, "pfctl -P -sr 2>/dev/null")
+        assert any(line.startswith("pass ") and "route-to" not in line and line.endswith("ridentifier 41008")
+                   for line in visible.splitlines()), "Unprotected stock pass missing"
+        before = evidence_count("vti-clear")
+        run(*ping, capture_output=True)
+        passed = evidence_count("vti-clear")
+        assert passed >= before + 2, (before, passed)
+
+        command(qemu, f"{invocation} protected; /etc/rc.filter_configure_sync")
+        visible = command(qemu, "pfctl -P -sr 2>/dev/null")
+        assert "ridentifier 41008" not in visible
+        assert any(line.startswith("block ") and line.endswith("ridentifier 41009")
+                   for line in visible.splitlines()), "Native fallback block missing"
+        result = subprocess.run(ping, check=False, capture_output=True, timeout=8)
+        assert result.returncode == 1 and evidence_count("vti-clear") == passed
+        management("stock gateway guard", certificate)
+        print("STOCK_SKIP_UNAVAILABLE_GATEWAY_PRESERVES_NATIVE_BLOCK", flush=True)
+    finally:
+        command(qemu, f"{invocation} restore {original}; /etc/rc.filter_configure_sync")
+
+
+def verify_core_bundle(qemu, state):
+    report = command(qemu, f"php {LAB}/check-core-appliance.php {LAB}/core-bundle")
+    assert report.startswith(state), report
+    print(report, flush=True)
+
+
 def wait_receipt(qemu, condition, timeout):
     deadline = time.monotonic() + timeout
     state = {}
@@ -790,12 +823,17 @@ def acceptance(qemu, cleanup, provider, *, cold_restart):
     primary = {"G": "GW_A", "B": "GW_A"}
     assert_rules(native_rules, primary)
     reference = route_and_nat(qemu)
+    verify_core_bundle(qemu, "Stock generator and rollback copy match")
+    stock_gateway_guard(qemu, certificate)
+    assert loaded(qemu) == native_rules and route_and_nat(qemu) == reference
     command(qemu, f"cp -p /etc/inc/filter.inc {LAB}/filter.stock; cp {LAB}/filter*.inc /etc/inc/")
+    verify_core_bundle(qemu, "Overlay pair matches on disk")
     reboot_with_overlay(qemu)
     assert "INITIAL_BIND_REJECTED_INVALID_PROBE_ROUTE" in command(qemu, f"php {LAB}/ce291-guest.php probe_route_guard")
     tcp_pair("native paths after rejected bind", (A, A))
     command(qemu, f"php {LAB}/ce291-guest.php bind")
     wait_paths(qemu, "baseline", primary)
+    command(qemu, f"sh {LAB}/verify-appliance.sh {version} --forwarding-active")
     verify_updater_readiness(qemu, version, installed_since, forwarding=True)
     history_script = ('require "/usr/local/pkg/sdwan_log.inc"; '
                       'echo json_encode(sdwan_log_recent_policy_events("/var/log/system.log", "ERP"));')
@@ -927,6 +965,7 @@ def acceptance(qemu, cleanup, provider, *, cold_restart):
     command(qemu, f"cp -p {LAB}/filter.stock /etc/inc/filter.inc; rm /etc/inc/filter-sdwan.inc")
     command(qemu, "/usr/local/etc/rc.d/sdwand.sh restart; /etc/rc.filter_configure_sync")
     assert "ABI=0" in command(qemu, f"php {LAB}/ce291-guest.php mode")
+    verify_core_bundle(qemu, "Stock generator and rollback copy match")
     assert loaded(qemu) == native_rules
     assert route_and_nat(qemu) == reference
     tcp_pair("native rollback", (A, A))

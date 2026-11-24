@@ -23,6 +23,25 @@ The [two-WAN appliance workflow](../.github/workflows/ce291-appliance.yml) extra
 
 The workflow has verified two-path traffic, filter reloads, reboot, and rollback on both versions. Verify those behaviors on a clone of the target image before deployment. A firmware upgrade can replace the patched generator. Generate the overlay from the signed package for the installed version, reboot after installing it, and verify the active PF rules and SD-WAN service. [Netgate CE 2.9.2 release notes](https://docs.netgate.com/pfsense/en/latest/releases/26-07-2_2-9-2.html)
 
+### Prepare and check a rollback bundle
+
+On the build host, obtain the signed Netgate system package for the exact CE release. The extractor verifies the audited archive and the preparation tool checks the original generator before applying the patch. Use `2.9.2` in both commands when preparing that version.
+
+```sh
+python3 tests/lab/ce291-source.py /path/to/pfSense-system-2.9.1.pkg ce-stock --ce-version 2.9.1
+python3 tools/prepare-core.py --source ce-stock --out ce-overlay --bundle-for 2.9.1
+```
+
+Keep the bundle and checker in a trusted directory under the administrator's control. The bundle contains both prepared PHP files, the audited original at `rollback/filter.inc`, and the SHA-256 manifest at `sdwan-overlay.json`. The manifest checks consistency of these files. Obtain the bundle through a trusted channel.
+
+On the clone's console, before installing or restoring the overlay, compare the bundle with the appliance:
+
+```sh
+php /root/check-core-appliance.php /root/ce-overlay
+```
+
+The checker reads the exact CE version, package ABI, current files, and the rollback copy. An unrecognized file requires review before any installation. An overlay verified on disk still requires successful boot-time PF verification. Keep console access, verify native VPN-only blocks, and save the configuration and a bootable clone snapshot before changing the generator. Withdraw any active bindings and confirm their removal in PF before replacing or restoring the overlay. Follow the installation and rollback procedure and prove a fresh LAN connection on the expected path. [Appliance procedure](../docs/LAB.md#removal-and-rollback)
+
 ## Forwarding scope
 
 The generator uses the next hops that pfSense calculated for the current reload. A binding identifies the approved rule trackers, address family, dedicated group, members, and revision of the match conditions. It uses the same gateway or weighted pool across all trackers in a full rule generation. Without a valid sample, recompiling the filter turns a bound rule into a block. Preflight also requires a permanent native block with the same scope immediately after the pass rule, for cases in which pfSense omits a rule.

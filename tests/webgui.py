@@ -964,6 +964,8 @@ def run(php, classes, screenshot_dir=None):
 
         lab = request("forwarding", native=fixture, steering_abi=True, get=names)
         assert "Experimental" in lab and 'value="bind"' in lab and "Block · rule 50322" in lab, lab
+        awaiting_boot = request("forwarding", native=fixture, steering_abi=True, boot_ready=False, get=names)
+        assert "Awaiting activation" in awaiting_boot and 'value="bind"' not in awaiting_boot
         controls = Choices(lab)
         post = {**names, "action": "bind", "revision": controls.revisions[0], "__csrf_magic": controls.tokens[0]}
         for options, message in [({}, "previews only"), ({"steering_abi": True,
@@ -975,6 +977,8 @@ def run(php, classes, screenshot_dir=None):
         assert json.loads(bound.split("SAVED=")[1])[0] == 1, bound
         data = json.loads(bound.split("BINDINGS=")[1].split("\nSAVED=")[0])
         active = {**fixture, "gateways/sdwan_bindings": data, "gateways/sdwan_bindings/item": data["item"]}
+        replaced = request("forwarding", native=active)
+        assert "Adapter unavailable" in replaced and "Saved bindings remain" in replaced and 'value="bind"' not in replaced
         active_page = request("forwarding", native=active, steering_abi=True)
         assert "Active filter" in active_page and "PBR" in active_page and 'value="unbind"' in active_page
         assert "No current observation" in active_page

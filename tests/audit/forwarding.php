@@ -432,6 +432,7 @@ foreach ($monitor_cases as $case => [$target, $allowed, $matches]) {
 // different native route or a failed IPsec association after an address edit.
 $vti = $ipv6_pair;
 $vti['filtermode'] = 'if_ipsec';
+$vti['skip_rules_gw_down'] = true;
 $vti['vips'][] = ['uniqid' => 'routed_a', 'mode' => 'carp', 'interface' => 'wan', 'subnet' => '203.0.113.6', 'vhid' => '3'];
 foreach (['GW0' => ['_viprouted_a', '13', '218', 'opt11'], 'GW1' => ['opt1', '14', '219', 'opt12']] as
     $key => [$transport, $ike, $req, $assigned]) {
@@ -446,6 +447,9 @@ foreach (['GW0' => ['_viprouted_a', '13', '218', 'opt11'], 'GW1' => ['opt1', '14
 }
 $vti_approved = $preflight($vti);
 $rows[] = audit_case('vti_preflight_baseline', true, $vti_approved['errors'] === []);
+$fixture = $vti;
+$fixture['skip_rules_gw_down'] = false;
+$rows[] = audit_case('vti_preflight_rejects_unprotected_stock_fallback', true, $preflight($fixture)['errors'] !== []);
 $vti_mutations = [
 	'phase2_local_endpoint' => ['phase2', 'localid', ['type' => 'address', 'address' => '2001:db8:13::3'], true],
 	'phase2_remote_endpoint' => ['phase2', 'remoteid', ['type' => 'address', 'address' => '2001:db8:13::4'], true],

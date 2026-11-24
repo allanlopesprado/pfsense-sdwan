@@ -159,6 +159,8 @@ REPO
 fi
 cp "$out/tests/lab/ce291-guest.php" "$root/root/sdwan-lab/"
 cp "$out/tools/verify-appliance.sh" "$root/root/sdwan-lab/"
+cp "$out/tools/check-core-appliance.php" "$root/root/sdwan-lab/"
+cp -R "$out/lab-overlay" "$root/root/sdwan-lab/core-bundle"
 cp "$out"/lab-overlay/src/etc/inc/filter*.inc "$root/root/sdwan-lab/"
 cp "$candidate" "$root/root/sdwan-lab/candidate.pkg"
 sha256 -q "$candidate" > "$root/root/sdwan-lab/candidate.sha256"

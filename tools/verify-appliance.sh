@@ -2,8 +2,8 @@
 # Read-only acceptance check for an installed SD-WAN package on pfSense CE.
 set -eu
 
-if [ "$#" -lt 1 ] || [ "$#" -gt 2 ] || { [ "$#" -eq 2 ] && [ "$2" != "--forwarding" ]; }; then
-    echo "Usage: sh verify-appliance.sh <expected-package-version> [--forwarding]" >&2
+if [ "$#" -lt 1 ] || [ "$#" -gt 2 ] || { [ "$#" -eq 2 ] && [ "$2" != "--forwarding" ] && [ "$2" != "--forwarding-active" ]; }; then
+    echo "Usage: sh verify-appliance.sh <expected-package-version> [--forwarding|--forwarding-active]" >&2
     exit 2
 fi
 
@@ -64,13 +64,18 @@ printf("Package, Services menu and service registered. Latest sample: %d seconds
 require_once("filter.inc");
 $abi = function_exists("filter_sdwan_binding_api") ? filter_sdwan_binding_api() : "unavailable";
 printf("Native forwarding ABI: %s.\n", $abi);
-if ($argv[2] === "--forwarding") {
+$require_active = $argv[2] === "--forwarding-active";
+if ($argv[2] === "--forwarding" || $require_active) {
     $steering = "/usr/local/pkg/sdwan_steering.inc";
     if (is_file($steering)) {
         require_once($steering);
     }
     if (!function_exists("sdwan_steering_supported") || !sdwan_steering_supported()) {
         fwrite(STDERR, "Native SD-WAN forwarding is unavailable on this appliance.\n");
+        exit(1);
+    }
+    if ($require_active && (!function_exists("filter_sdwan_boot_ready") || !filter_sdwan_boot_ready())) {
+        fwrite(STDERR, "No verified boot with the installed SD-WAN forwarding adapter.\n");
         exit(1);
     }
     if (!function_exists("sdwan_steering_pf_status") ||
@@ -103,8 +108,12 @@ if ($argv[2] === "--forwarding") {
                 $approval["rule_pairs"]);
         }
         printf("Group %s, policy %s, trackers %s: %s.\n", $group, $binding["policy"],
-            implode(", ", $binding["trackers"]), $status);
-        $verified = $verified && in_array($status, ["applied", "blocked"], true);
+            implode(", ", $binding["trackers"]), $require_active && $status === "blocked" ?
+            "blocked; an active path is required" : $status);
+        if ($status === "applied") {
+            printf("  Gateways confirmed in PF: %s.\n", implode(", ", $state["pool"] ?? [$state["gateway"]]));
+        }
+        $verified = $verified && ($status === "applied" || (!$require_active && $status === "blocked"));
     }
     if (!$verified) {
         fwrite(STDERR, "Active PF rules could not be confirmed for every SD-WAN binding.\n");
