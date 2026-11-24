@@ -313,8 +313,9 @@ def first_boot(qemu, ce_version):
     print(identity, flush=True)
 
 
-def observations(qemu):
-    raw = command(qemu, f"php {LAB}/ce291-guest.php observations")
+def observations(qemu, benchmark=False):
+    action = "benchmark_observations" if benchmark else "observations"
+    raw = command(qemu, f"php {LAB}/ce291-guest.php {action}")
     return json.loads(next(line for line in reversed(raw.splitlines()) if line.startswith("{")))
 
 
@@ -328,13 +329,14 @@ def withdrawal_proven(state, started, trackers=("41003",)):
             and state["active_ruleset"] is not None and proof.get("ruleset") == state["active_ruleset"])
 
 
-def wait_paths(qemu, label, expected, wait_ack=False, wan2_hop=None, native_choices=None, withdrawal_after=None):
+def wait_paths(qemu, label, expected, wait_ack=False, wan2_hop=None, native_choices=None, withdrawal_after=None,
+               observe=observations):
     started = time.monotonic()
     deadline = started + 135
     seen = set()
     valid_sample = False
     while time.monotonic() < deadline:
-        parsed = observations(qemu)
+        parsed = observe(qemu)
         snapshot, receipt = parsed["snapshot"] or {}, parsed["receipt"]
         valid_sample |= bool(snapshot)
         if not valid_sample and time.monotonic() - started >= 45:

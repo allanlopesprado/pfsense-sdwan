@@ -65,6 +65,11 @@ on:
         description: SD-WAN preferred path qualification hold for this benchmark
         type: number
         default: 30
+      benchmark_profile:
+        description: Benchmark timing, HTTPS-only ERP faults, and background traffic
+        type: choice
+        default: legacy
+        options: [legacy, timed, erp-https, erp-https-loaded]
       security_profile:
         description: Additional signed packages to include in the security inventory
         type: choice
@@ -73,7 +78,7 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: ce-native-${{ inputs.ce_version || '2.9.1' }}-${{ inputs.scenario || 'acceptance' }}-${{ inputs.soak_mode || 'sdwan' }}-${{ inputs.security_profile || 'base' }}-${{ github.ref }}
+  group: ce-native-${{ inputs.ce_version || '2.9.1' }}-${{ inputs.scenario || 'acceptance' }}-${{ inputs.soak_mode || 'sdwan' }}-${{ inputs.security_profile || 'base' }}-${{ inputs.benchmark_profile || 'legacy' }}-${{ github.ref }}
   cancel-in-progress: true
 jobs:
   package:
@@ -98,6 +103,7 @@ jobs:
       CE_SOAK_MODE: ${{ inputs.soak_mode || 'sdwan' }}
       CE_FAULT_INTERVAL: ${{ inputs.fault_interval_seconds }}
       CE_RECOVERY_HOLD: ${{ inputs.recovery_hold_seconds }}
+      CE_BENCHMARK_PROFILE: ${{ inputs.benchmark_profile || 'legacy' }}
       CE_SECURITY_PROFILE: ${{ inputs.security_profile || 'base' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -113,6 +119,7 @@ jobs:
           if [ "$CE_SCENARIO" = recovery ]; then
             test "$CE_VERSION" = 2.9.1
           elif [ "$CE_SCENARIO" = benchmark ]; then
+            case "$CE_BENCHMARK_PROFILE" in legacy|timed|erp-https|erp-https-loaded) ;; *) exit 1 ;; esac
             python3 -c 'import os; pairs = int(os.environ["CE_PAIRS"]); soak = float(os.environ["CE_SOAK_HOURS"]); assert 0 <= pairs <= 5 and 0 <= soak <= 3 and (pairs or soak >= 6/3600); assert 6 <= int(os.environ["CE_FAULT_INTERVAL"]) <= 86400; assert 0 <= int(os.environ["CE_RECOVERY_HOLD"]) <= 300'
           fi
       - name: Retrieve the candidate from this run
@@ -183,6 +190,7 @@ jobs:
               ce_python tests/lab/ce-ab-benchmark.py "$CE_LAB.raw" "$CE_VERSION" \
                 --pairs "$CE_PAIRS" --soak-hours "$CE_SOAK_HOURS" --fault-interval-seconds "$CE_FAULT_INTERVAL" \
                 --recovery-hold-seconds "$CE_RECOVERY_HOLD" --soak-mode "$CE_SOAK_MODE" --capture-erp \
+                --profile "$CE_BENCHMARK_PROFILE" \
                 --output ce-ab-results | tee -a "$CE_LAB-result.log"
               ;;
             shared-target)

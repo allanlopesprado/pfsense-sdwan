@@ -78,7 +78,10 @@ def run(binary, load_filter_extension):
             return json.loads(snapshot.read_text())
 
         config["abi"] = 0
-        assert "steering" not in observe() and not receipt.exists()
+        passive = observe()
+        assert "steering" not in passive and not receipt.exists()
+        assert passive["timing"] == {"policy_evaluation_ns": passive["timing"]["policy_evaluation_ns"]}
+        assert passive["observed_at_ns"] <= passive["timing"]["policy_evaluation_ns"]
         config["abi"] = 1
         config["booting"] = True
         assert observe()["steering"]["G"]["gateway"] is None and not receipt.exists()
@@ -138,9 +141,12 @@ def run(binary, load_filter_extension):
             # A native reload can repair the rules independently. The observer
             # confirms PF and renews the budget without requesting another reload.
             config["fixture_pf_rules"] = [block_rule, guard_rule]
-            observe()
+            proof = observe()
             confirmed = read_receipt()
             assert confirmed["confirmed"] and confirmed["attempts"] == 0
+            timing = proof["timing"]
+            assert (proof["observed_at_ns"] <= timing["policy_evaluation_ns"]
+                    <= timing["steering_decision_ns"] <= timing["pf_readback_ns"])
 
             # A later divergence starts a new bounded recovery cycle.
             config["fixture_pf_rules"] = [bad_rule]
