@@ -787,7 +787,7 @@ def acceptance(qemu, cleanup, provider, *, cold_restart):
     verify_native_menu_file(qemu, package)
     print("PACKAGE_INSTALLED_WITH_NATIVE_HOOKS; STOCK_MODE_OBSERVATION", flush=True)
 
-    command(qemu, f"pkg add -f {rollback}", timeout=180)
+    command(qemu, f"pkg -o DEVELOPER_MODE=yes install -f -l -U -y {rollback}", timeout=180)
     assert command(qemu, "pkg query '%v' pfSense-pkg-SDWAN") == previous_version
     verify_native_menu_file(qemu, rollback)
     command(qemu, f"php {LAB}/ce291-guest.php settings")
@@ -955,7 +955,7 @@ def acceptance(qemu, cleanup, provider, *, cold_restart):
     )
     print("NATIVE_SAME_OVERLAY_REINSTALL_REQUIRES_REBOOT", flush=True)
     command(qemu, f"cp -p {LAB}/filter.stock /etc/inc/filter.inc; rm /etc/inc/filter-sdwan.inc")
-    command(qemu, f"pkg add -f {rollback}", timeout=180)
+    command(qemu, f"pkg -o DEVELOPER_MODE=yes install -f -l -U -y {rollback}", timeout=180)
     assert command(qemu, "pkg query '%v' pfSense-pkg-SDWAN") == previous_version
     verify_native_menu_file(qemu, rollback)
     command(qemu, "pkg check -s pfSense-pkg-SDWAN; /usr/local/etc/rc.d/sdwand.sh status")
