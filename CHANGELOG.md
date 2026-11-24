@@ -4,7 +4,7 @@ Versions are listed newest first, in numeric order. The [dist directory](dist/) 
 
 | Version | Main changes | Notes |
 | --- | --- | --- |
-| 0.4.29 | Protect forwarding against configuration changes, harden policy service checks, and restore the previous package after a failed upgrade. | [Notes](docs/releases/v0.4.29.md) |
+| 0.4.29 | Protect forwarding against configuration changes, harden policy service checks, restore the previous package after a failed upgrade, and align action icons and focus with the pfSense WebGUI. | [Notes](docs/releases/v0.4.29.md) |
 | 0.4.28 | Enable CE 2.9.2 updates and verify PF reconciliation, supervised recovery, sticky pools, and VTI transports. | [Notes](docs/releases/v0.4.28.md) |
 | 0.4.27 | Verify native rule reloads, check dynamic next hops and validate DNS answers. | [Notes](docs/releases/v0.4.27.md) |
 | 0.4.26 | Show verified egress and backup availability per policy in the dashboard widget. | [Notes](docs/releases/v0.4.26.md) |
