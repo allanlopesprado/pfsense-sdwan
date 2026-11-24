@@ -183,8 +183,10 @@ if ($policy !== null):
 <div class="panel panel-default">
 	<div class="panel-heading"><h2 class="panel-title"><?=gettext('Recent policy events')?></h2></div>
 	<?php if (!$events_for_policy): ?>
-	<div class="panel-body"><?= $events_for_policy === null ?
-	    gettext('Recent policy events are unavailable.') : gettext('No matching events in the recent System Log.') ?></div>
+	<div class="container-fluid">
+		<p class="help-block"><?=$events_for_policy === null ?
+		    gettext('Recent policy events are unavailable.') : gettext('No matching events in the recent System Log.')?></p>
+	</div>
 	<?php else: ?>
 	<div class="table-responsive" tabindex="0" role="region" aria-label="<?=gettext('Recent policy events')?>">
 		<table class="table table-striped table-condensed">
@@ -215,8 +217,8 @@ if ($policy !== null):
 ?>
 <div class="panel panel-default">
 	<div class="panel-heading"><h2 class="panel-title"><?=gettext('Interface traffic')?></h2></div>
-	<div class="panel-body">
-		<p><?=gettext('Measure the total traffic on this policy’s interfaces. This is independent of SLA and path selection.')?></p>
+	<div class="container-fluid">
+		<p class="help-block"><?=gettext('Measure total traffic on the interfaces used by this policy.')?></p>
 		<button type="button" class="btn btn-default" id="sdwan-traffic-measure"
 		    data-url="<?=sdwan_ui_escape($traffic_url)?>"
 		    data-wait="<?=sdwan_ui_escape(gettext('Measuring interface traffic…'))?>"
