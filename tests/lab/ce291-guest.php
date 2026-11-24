@@ -100,6 +100,39 @@ if ($action === 'probe') {
 
 require_once('config.inc');
 require_once('/usr/local/pkg/sdwan_steering.inc');
+if ($action === 'stock_gateway_guard') {
+    $stage = $argv[2] ?? '';
+    if ($stage === 'get') {
+        echo json_encode(config_get_path('system/skip_rules_gw_down'), JSON_THROW_ON_ERROR), PHP_EOL;
+        exit;
+    }
+    if (!in_array($stage, ['unprotected', 'protected', 'restore'], true) || sdwan_steering_abi() !== 0) {
+        throw new RuntimeException('The disposable gateway guard check requires stock pfSense');
+    }
+    $rules = array_values(array_filter(config_get_path('filter/rule', []), static fn($rule) =>
+        !in_array((string)($rule['tracker'] ?? ''), ['41008', '41009'], true)));
+    if ($stage !== 'restore') {
+        $rule = ['type' => 'pass', 'ipprotocol' => 'inet', 'interface' => 'lan', 'protocol' => 'icmp',
+            'tracker' => '41008', 'descr' => 'Disposable protected test', 'source' => ['address' => '192.0.2.11'],
+            'destination' => ['address' => '192.0.2.169']];
+        $guard = array_replace($rule, ['type' => 'block', 'tracker' => '41009']);
+        $rule['gateway'] = 'SDWAN_TEST_UNAVAILABLE';
+        array_splice($rules, -1, 0, [$rule, $guard]);
+    }
+    $flag = match ($stage) {
+        'protected' => '',
+        'restore' => json_decode($argv[3], true, flags: JSON_THROW_ON_ERROR),
+        default => null,
+    };
+    if ($flag === null) {
+        config_del_path('system/skip_rules_gw_down');
+    } else {
+        config_set_path('system/skip_rules_gw_down', $flag);
+    }
+    config_set_path('filter/rule', $rules);
+    write_config('Exercise native gateway guard in the disposable lab');
+    exit;
+}
 if ($action === 'release_manifest' || $action === 'release_readiness') {
     require_once('pkg-utils.inc');
     require_once('/usr/local/pkg/sdwan_release.inc');

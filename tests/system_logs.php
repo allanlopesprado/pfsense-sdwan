@@ -54,6 +54,12 @@ verify(count($logs) === 1 && $logs[0][0] === LOG_ERR && str_contains($logs[0][1]
 [$ledger, $logs] = sdwan_log_plan($ledger, 'filter_retirement_unconfirmed', [], '', 176);
 verify($logs === [], 'repeated unconfirmed shutdown messages are rate-limited');
 
+[$ledger, $logs] = sdwan_log_plan($ledger, 'adapter_unavailable', [], '', 177);
+verify(count($logs) === 1 && $logs[0][0] === LOG_ERR && str_contains($logs[0][1], 'saved bindings'),
+	'a missing adapter with saved bindings is reported independently of filter failures');
+[$ledger, $logs] = sdwan_log_plan($ledger, 'adapter_unavailable', [], '', 178);
+verify($logs === [], 'repeated missing adapter alerts are rate-limited');
+
 $many = ['policies' => []];
 for ($i = 0; $i < 30; $i++) {
 	$many['policies']['p' . $i] = ['selected' => 'path', 'path_status' => 'single'];

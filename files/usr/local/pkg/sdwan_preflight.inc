@@ -723,6 +723,9 @@ function sdwan_steering_preflight(array $config, string $policy, string $group, 
 		return sdwan_preflight_error('VTI steering requires a topology already filtering on assigned IPsec interfaces. Check compatibility with other VPNs before changing any global setting.');
 	}
 	if ($kind) {
+		if (empty($native['skip_rules_gw_down'])) {
+			return sdwan_preflight_error('For VTI forwarding, review and enable Do not create rules when gateway is down under System > Advanced > Miscellaneous. The stock filter must skip the tunnel pass rule when no gateway is usable so the following block protects the private destination.');
+		}
 		$enabled_peers = [];
 		foreach ($native['phase1'] as $peer) {
 			if (!isset($peer['disabled']) && isset($peer['ikeid'])) {

@@ -76,6 +76,7 @@ function sdwan_log_plan(array $state, string $kind, array $snapshot, string $cau
 		'filter_expiry_applied' => [LOG_NOTICE, 'Active PF rules confirmed reconciliation of stale forwarding.'],
 		'filter_expiry_unconfirmed' => [LOG_ERR, 'The forwarding safeguard could not confirm the active PF rules. Check Status > Filter Reload.'],
 		'filter_expiry_divergent' => [LOG_ERR, 'Persistent PF divergence. The forwarding safeguard has stopped retrying this change. Check Status > Filter Reload.'],
+		'adapter_unavailable' => [LOG_ERR, 'Forwarding adapter unavailable with saved bindings. Verify native PF rules and VPN blocks from console and review SD-WAN > Forwarding.'],
 		'sample_expired' => [LOG_WARNING, 'Previous observation expired. Its result cannot be reused by the observer.'],
 		default => null,
 	};

@@ -2,6 +2,7 @@
 """Prepare an isolated pair of source files for a pfSense laboratory build."""
 import argparse
 import hashlib
+import json
 import os
 from pathlib import Path
 import shutil
@@ -24,6 +25,8 @@ def main():
                          help="Use the explicitly fingerprinted CE 2.9.1 laboratory input")
     release.add_argument("--ce-292-lab", dest="fingerprint", action="store_const", const=CE_292_LAB_HASH,
                          help="Use the explicitly fingerprinted CE 2.9.2 laboratory input")
+    release.add_argument("--bundle-for", choices=("2.9.1", "2.9.2"),
+                         help="Include a rollback copy and a manifest for this signed CE release")
     parser.set_defaults(fingerprint=BASE_HASH)
     args = parser.parse_args()
     source = args.source.resolve()
@@ -31,14 +34,16 @@ def main():
     if out.exists() or source == out or source in out.parents:
         parser.error("Use a new output directory outside the source checkout.")
     original = source / FILTER
-    if not original.is_file() or hashlib.sha256(original.read_bytes()).hexdigest() != args.fingerprint:
+    stock = original.read_bytes() if original.is_file() else b""
+    fingerprint = CE_292_LAB_HASH if args.bundle_for else args.fingerprint
+    if hashlib.sha256(stock).hexdigest() != fingerprint:
         parser.error("This filter.inc differs from the audited upstream input. Review this base before porting.")
     out.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(dir=out.parent) as work:
         overlay = Path(work) / "overlay"
         dest = overlay / FILTER
         dest.parent.mkdir(parents=True)
-        shutil.copyfile(original, dest)
+        dest.write_bytes(stock)
         diff = Path(work) / "filter-sdwan.patch"
         diff.write_bytes((HERE / diff.name).read_bytes().replace(b"\r\n", b"\n"))
         # Run outside a git worktree even when the requested output is inside one.
@@ -55,9 +60,20 @@ def main():
                 b"if (!filter_sdwan_native_fallback_allowed())" not in patched or
                 b"if (!filter_sdwan_precommit($PFConfig->sdwan_withdrawal_ruleset_hash()))" not in patched):
             raise RuntimeError("git did not produce the expected native approval and gateway hooks")
-        shutil.copyfile(HERE / "filter-sdwan.inc", dest.with_name("filter-sdwan.inc"))
+        adapter = dest.with_name("filter-sdwan.inc")
+        shutil.copyfile(HERE / adapter.name, adapter)
+        if args.bundle_for:
+            rollback = overlay / "rollback" / FILTER.name
+            rollback.parent.mkdir()
+            rollback.write_bytes(stock)
+            manifest = dict(schema=1, ce_version=args.bundle_for + "-RELEASE", abi="FreeBSD:16:amd64",
+                            stock_sha256=fingerprint, generator_sha256=hashlib.sha256(patched).hexdigest(),
+                            adapter_sha256=hashlib.sha256(adapter.read_bytes()).hexdigest())
+            (overlay / "sdwan-overlay.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
         overlay.rename(out)
     print(f"Prepared {out / FILTER} and its filter-sdwan.inc dependency.")
+    if args.bundle_for:
+        print(f"Included the CE {args.bundle_for} preflight manifest and audited stock rollback copy.")
 
 
 if __name__ == "__main__":

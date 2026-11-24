@@ -13,6 +13,7 @@ on:
       - 'pkg-descr'
       - 'pkg-plist'
       - 'tools/prepare-core.py'
+      - 'tools/check-core-appliance.php'
       - 'tools/build-lab-pkg.py'
       - 'tools/previous-dist-package.sh'
       - 'dist/pfSense-pkg-SDWAN-*.pkg*'
@@ -128,7 +129,7 @@ jobs:
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ env.CE_LAB }}.raw.gz
-          key: ${{ env.CE_LAB }}-candidate-disk-v7-${{ (env.CE_SCENARIO == 'recovery' || env.CE_SCENARIO == 'inspection') && env.CE_SCENARIO || 'base' }}-${{ hashFiles('ce-candidate-package/*.pkg', '.github/workflows/ce291-appliance.yml', '.github/workflows/build-package.yml', 'tests/lab/ce291-disk.sh', 'tests/lab/ce291-guest.php', 'tests/lab/ce291-source.py', 'core/**', 'tools/prepare-core.py', 'tools/build-lab-pkg.py', 'tools/previous-dist-package.sh', 'tools/verify-appliance.sh', 'files/**', 'Makefile', 'pkg-descr', 'pkg-plist', 'dist/pfSense-pkg-SDWAN-*.pkg*') }}
+          key: ${{ env.CE_LAB }}-candidate-disk-v7-${{ (env.CE_SCENARIO == 'recovery' || env.CE_SCENARIO == 'inspection') && env.CE_SCENARIO || 'base' }}-${{ hashFiles('ce-candidate-package/*.pkg', '.github/workflows/ce291-appliance.yml', '.github/workflows/build-package.yml', 'tests/lab/ce291-disk.sh', 'tests/lab/ce291-guest.php', 'tests/lab/ce291-source.py', 'core/**', 'tools/prepare-core.py', 'tools/check-core-appliance.php', 'tools/build-lab-pkg.py', 'tools/previous-dist-package.sh', 'tools/verify-appliance.sh', 'files/**', 'Makefile', 'pkg-descr', 'pkg-plist', 'dist/pfSense-pkg-SDWAN-*.pkg*') }}
       - name: Prepare the audited CE adapter
         if: env.CE_SCENARIO != 'security' && steps.disk.outputs.cache-hit != 'true'
         run: |
@@ -141,7 +142,7 @@ jobs:
           python3 tests/lab/ce291-source.py "$archive" lab-source --ce-version "$CE_VERSION"
           sha256sum "$archive" lab-source/src/etc/inc/filter.inc
           # Both verified system packages ship the same audited generator.
-          python3 tools/prepare-core.py --ce-292-lab --source lab-source --out lab-overlay
+          python3 tools/prepare-core.py --bundle-for "$CE_VERSION" --source lab-source --out lab-overlay
       - name: Prepare and verify signed Netgate packages
         if: steps.disk.outputs.cache-hit != 'true'
         uses: vmactions/freebsd-vm@811efaaac0668df8bfb8308c3ec997b5ab50037b # v1.6.0

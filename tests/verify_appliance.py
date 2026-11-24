@@ -93,8 +93,9 @@ if ($case === 'observe') {
 
 def run(php, fixture, code, case, abi, forwarding, expected_code, message):
     env = dict(os.environ, SDWAN_FIXTURE_CASE=case, SDWAN_FIXTURE_ABI=str(abi))
+    flag = forwarding if isinstance(forwarding, str) else "--forwarding" if forwarding else ""
     result = subprocess.run(
-        [php, "-d", f"include_path={fixture}", "-r", code, "--", "0.4.29", "--forwarding" if forwarding else ""],
+        [php, "-d", f"include_path={fixture}", "-r", code, "--", "0.4.29", flag],
         env=env, text=True, capture_output=True, check=False,
     )
     if result.returncode != expected_code or message not in result.stdout + result.stderr:
@@ -129,12 +130,16 @@ def main(php):
             (fixture / file.name).write_text(source, encoding="utf-8")
         (fixture / "config.inc").write_text(CONFIG, encoding="utf-8")
         (fixture / "filter.inc").write_text(
-            "<?php function filter_sdwan_binding_api(): int { return (int)getenv('SDWAN_FIXTURE_ABI'); }\n",
+            "<?php function filter_sdwan_binding_api(): int { return (int)getenv('SDWAN_FIXTURE_ABI'); }\n"
+            "function filter_sdwan_boot_ready(): bool { return getenv('SDWAN_FIXTURE_CASE') !== 'awaiting_boot'; }\n",
             encoding="utf-8",
         )
         run(php, fixture, code, "healthy", 1, True, 0, ": applied.")
         run(php, fixture, code, "healthy", 2, True, 0, ": applied.")
         run(php, fixture, code, "blocked", 2, True, 0, ": blocked.")
+        run(php, fixture, code, "healthy", 2, "--forwarding-active", 0, "Gateways confirmed in PF: A.")
+        run(php, fixture, code, "blocked", 2, "--forwarding-active", 1, "an active path is required")
+        run(php, fixture, code, "awaiting_boot", 2, "--forwarding-active", 1, "No verified boot")
         run(php, fixture, code, "missing_guard", 2, True, 1, ": pending.")
         run(php, fixture, code, "loaded_scope_changed", 2, True, 1, ": pending.")
         run(php, fixture, code, "native_rule_changed", 2, True, 1, ": binding_changed.")
