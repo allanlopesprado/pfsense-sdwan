@@ -9,6 +9,7 @@
 | Assess interactions with IDS, IPS, DNS filtering, or routing packages | [Package compatibility](PACKAGE-COMPATIBILITY.md) |
 | Configure lab forwarding or review IPsec, NAT, and HA | [Forwarding and routing integration](INTEGRATION.md) |
 | Test a FortiGate peer | [FortiGate interoperability](FORTIOS.md) |
+| Test two pfSense nodes, CARP and two IPsec VTIs with a FortiGate | [Two-node HA acceptance](HA-FORTIOS-LAB.md) |
 
 ## Validate and troubleshoot
 

@@ -1,6 +1,6 @@
 # FortiGate interoperability over two IPsec tunnels
 
-The target scenario is a pfSense branch with two WANs, two route-based IPsec tunnels, and a FortiGate at the far end. Each firewall manages its own side. End-to-end acceptance with a FortiOS peer remains pending on pfSense CE 2.9.1 and 2.9.2. Repository tests exercise package, rule generation, and FreeBSD components. In the paired test, record the exact versions and application traffic in both directions. [Integration](INTEGRATION.md) · [Lab](LAB.md)
+The target scenario is a pfSense branch with two WANs, two route-based IPsec tunnels, and a FortiGate at the far end. Each firewall manages its own side. End-to-end acceptance with a FortiOS peer remains pending on pfSense CE 2.9.1 and 2.9.2. Repository tests exercise package, rule generation, and FreeBSD components. [Two-node HA topology, settings and acceptance procedure](HA-FORTIOS-LAB.md) · [Integration](INTEGRATION.md)
 
 ## Capabilities and limits
 

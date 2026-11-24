@@ -429,7 +429,8 @@ retire_pair() (
     done
 )
 protected_transaction() (
-    reply=$(printf '%s\n' "$1" | jexec "${2:-$client}" nc -n -N -w 3 "${3:-$protected}" 7)
+    reply=$(printf '%s\n' "$1" | jexec "${2:-$client}" nc -n -N -w 3 "${3:-$protected}" 7) ||
+        test -n "$reply"
     test "$reply" = "${4:-192.0.2.4} $1"
 )
 
@@ -442,13 +443,16 @@ select_path() (
 transaction_on() (
     inbound=$(count_label "$remote" "esp-$1-in")
     outbound=$(count_label "$remote" "esp-$1-out")
-    protected_transaction "$2" "${3:-$client}" "${4:-$protected}" "${5:-192.0.2.4}"
+    if ! protected_transaction "$2" "${3:-$client}" "${4:-$protected}" "${5:-192.0.2.4}"; then
+        printf 'Missing application reply for %s on tunnel %s\n' "$2" "$1" >&2
+        exit 1
+    fi
     current_inbound=$(count_label "$remote" "esp-$1-in")
     current_outbound=$(count_label "$remote" "esp-$1-out")
-    test "$current_inbound" -gt "$inbound"
-    test "$current_outbound" -gt "$outbound"
     printf '%s transaction=%s tunnel=%s esp-in-delta=%s esp-out-delta=%s\n' \
         "$(date -u +%FT%TZ)" "$2" "$1" "$((current_inbound-inbound))" "$((current_outbound-outbound))"
+    test "$current_inbound" -gt "$inbound"
+    test "$current_outbound" -gt "$outbound"
 )
 
 start_capture() {
@@ -500,6 +504,7 @@ wait_roles MASTER BACKUP
 load_peer_rules "$peer_rules"
 select_path "$inner_peer" "$inner_cluster"
 probe "$first" "$remote_ip"
+probe "$first" "$inner_peer"
 transaction_on a wan-a-restored
 
 echo "$(date -u +%FT%TZ) fault=tunnel-a-no-sa"
