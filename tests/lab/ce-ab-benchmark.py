@@ -202,6 +202,7 @@ class TransitionTrace:
         if phase is not None and policy:
             self.record("policy_recommended", policy.get("selected") == expected_member, before, after,
                         diagnostics.get("policy_evaluation_ns"))
+        requested = False
         if self.window["mode"] == "sdwan":
             requested = all(steering.get(group, {}).get("gateway") == gateway
                             for group, gateway in self.expected.items())
@@ -212,7 +213,14 @@ class TransitionTrace:
                             state["signature"] == receipt.get("signature")), before, after)
             self.record("observer_pf_confirmed", confirmed and matches if rules is not None else None, before, after,
                         diagnostics.get("pf_readback_ns"))
-        if phase is not None or confirmed:
+        if phase is None and rules is not None:
+            blocked = any(line.startswith("block ") for group in self.expected for line in loaded[TRACKERS[group]])
+            self.record("activation_guard_block_observed", blocked, before, after, state["benchmark_pf_read_ns"])
+        # Native passes can already use the intended hop before the bind. An
+        # observed mismatch and a current steering decision distinguish the
+        # restored live pass from that initial stock rule.
+        if (phase is not None or not matches or confirmed
+                or (requested and "live_pf_match" in self.previous_false)):
             self.record("live_pf_match", matches if rules is not None else None, before, after,
                         state["benchmark_pf_read_ns"])
         self.stream.write(json.dumps({

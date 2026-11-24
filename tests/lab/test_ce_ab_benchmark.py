@@ -180,6 +180,34 @@ class ApplicationBenchmarkTest(unittest.TestCase):
         scoped.erp_https = False
         self.assertIn("udp dport 53", benchmark.Experiment.erp_fault(scoped)[1])
 
+    def test_activation_live_pf_recovery_can_precede_daemon_confirmation(self):
+        gateway = "GW_A"
+        ce = SimpleNamespace(GATEWAYS={gateway: ("first", "192.0.2.1")})
+        window = {"pair": 1, "mode": "sdwan", "start_ns": 100}
+        trace = benchmark.TransitionTrace(ce, window, {"G": gateway, "B": gateway}, StringIO(), "probe_primary")
+        passes = [f"pass in quick route-to (first 192.0.2.1) ridentifier {tracker}"
+                  for tracker in benchmark.TRACKERS.values()]
+        blocks = [f"block drop in quick ridentifier {tracker}" for tracker in benchmark.TRACKERS.values()]
+        initial = {"snapshot": None, "benchmark_pf_rules": passes, "benchmark_pf_read_ns": 21,
+                   "monotonic_ns": 25, "signature": None, "pf": {}, "receipt": {}}
+        steered = initial | {
+            "snapshot": {"steering": {"G": {"gateway": gateway}, "B": {"gateway": gateway}}},
+            "signature": "match", "pf": {"G": "applied", "B": "applied"},
+            "receipt": {"signature": "match", "accepted": True, "confirmed": False},
+        }
+        confirmed = steered | {"receipt": steered["receipt"] | {"confirmed": True}}
+        ce.observations = Mock(side_effect=[initial, initial | {"benchmark_pf_rules": blocks}, steered, confirmed])
+        with patch.object(benchmark.time, "monotonic_ns", side_effect=(110, 120, 210, 220, 310, 320, 410, 420)):
+            trace.observe(None)
+            self.assertNotIn("live_pf_match", trace.stages)
+            trace.observe(None)
+            trace.observe(None)
+            self.assertNotIn("observer_pf_confirmed", trace.stages)
+            trace.observe(None)
+        self.assertEqual(trace.stages["activation_guard_block_observed"]["host_upper_ns"], 220)
+        self.assertEqual(trace.stages["live_pf_match"]["host_upper_ns"], 320)
+        self.assertEqual(trace.stages["observer_pf_confirmed"]["host_upper_ns"], 420)
+
     def test_activation_gap_is_measured_between_successes(self):
         stats = benchmark.activation_stats([record(0, 5, "peer"), record(10, 20),
                                             record(800, 820, "peer"), record(1000, 1020, "peer")],
