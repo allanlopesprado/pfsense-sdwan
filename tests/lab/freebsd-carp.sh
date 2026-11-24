@@ -402,6 +402,8 @@ load_peer_rules() {
 }
 load_peer_rules "$peer_rules"
 jexec "$remote" pfctl -e
+# FreeBSD otherwise skips PF on packets tagged as already decrypted.
+jexec "$remote" sysctl net.inet.ipsec.filtertunnel=1
 
 count_label() {
     jexec "$1" pfctl -s labels | awk -v label="$2" '
