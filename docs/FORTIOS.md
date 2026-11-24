@@ -1,13 +1,13 @@
 # FortiGate interoperability over two IPsec tunnels
 
-The target scenario is a pfSense branch with two WANs, two route-based IPsec tunnels, and a FortiGate at the far end. Each firewall manages its own side. End-to-end acceptance with a FortiOS peer remains pending on pfSense CE 2.9.1 and 2.9.2. Repository tests exercise package, rule generation, and FreeBSD components. In the paired test, record the exact versions and application traffic in both directions. [Integration](INTEGRATION.md) · [Lab](LAB.md)
+The target scenario is a pfSense branch with two WANs, two route-based IPsec tunnels, and a FortiGate at the far end. Each firewall manages its own side. End-to-end acceptance with a FortiOS peer remains pending on pfSense CE 2.9.1 and 2.9.2. Repository tests exercise package, rule generation, and FreeBSD components. [Two-node HA topology, settings and acceptance procedure](HA-FORTIOS-LAB.md) · [Integration](INTEGRATION.md)
 
 ## Capabilities and limits
 
 | Area | Project implementation | FortiGate or Junos reference |
 |---|---|---|
 | Measurement | dpinger reports RTT, RTT standard deviation, and gateway loss. SLAs use RTT and loss. Among eligible members, a policy prefers the lowest configured cost or lowest RTT. A single member supports SLA monitoring. | FortiOS also measures jitter, supports passive measurements, and makes decisions using its own rules. Junos RPM measures response time, variation, and loss. The three methods can produce different values on the same path. |
-| Forwarding | Stock pfSense uses the recommendation for observation. With the experimental ABI 1 core, an explicit binding can select a gateway for new flows matching the identified rules. A binding requires a dedicated group, members of the same address family, and an adjacent block rule of equal scope. | The operator configures zones, routes, and SD-WAN rules on FortiGate. Each firewall selects its own member. |
+| Forwarding | Stock pfSense uses the recommendation for observation. With the current experimental ABI 2 adapter and verified boot, an explicit binding can select a gateway for new flows matching the identified rules. A binding requires a dedicated group, members of the same address family, and an adjacent block rule of equal scope. | The operator configures zones, routes, and SD-WAN rules on FortiGate. Each firewall selects its own member. |
 | Two tunnels | Enabling a binding requires two VTI gateways with distinct, identifiable transport interfaces. Two children of one Phase 1 share IKE negotiation and transport dependencies. Different VLANs or virtual NICs can still use the same physical circuit. | FortiGate can group IPsec interfaces in an overlay zone. On Junos, routing selects a secure `st0.x` interface and security policies authorize the traffic. |
 | Administration | The operator manages IKE, CARP, NAT, routes, and remote policies. | Centralized FortiManager management, dynamically formed ADVPN tunnels, and application selection are FortiOS capabilities separate from this package. |
 

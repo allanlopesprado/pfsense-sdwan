@@ -209,9 +209,21 @@ jobs:
             python3 -B tests/steering_daemon.py php --load-filter-extension
             sh tests/freebsd-install.sh
             sh tests/lab/freebsd-system-log.sh "$PWD/lab-syslog/syslog.inc" --source-only
-            sh tests/lab/freebsd-carp.sh
+            mkdir -p lab-carp-evidence
+            carp_status=0
+            SDWAN_CARP_EVIDENCE="$PWD/lab-carp-evidence" sh tests/lab/freebsd-carp.sh || carp_status=$?
+            printf '%s\n' "$carp_status" >lab-carp-evidence/status
             SDWAN_REAL_DPINGER=1 SDWAN_RENDERED_RULES="$PWD/lab-rendered" sh tests/lab/freebsd-dataplane.sh
             SDWAN_ERP_ONLY=1 SDWAN_NATIVE_CORE="$PWD/lab-core" sh tests/lab/freebsd-dataplane.sh
+      - name: Preserve the two-WAN CARP captures
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: freebsd-carp-vti-captures
+          path: lab-carp-evidence/
+          if-no-files-found: ignore
+      - name: Require the CARP and VTI test to pass
+        run: test "$(cat lab-carp-evidence/status)" = 0
   release-appliance:
     if: (github.event_name == 'push' && github.ref == 'refs/heads/main' && startsWith(github.event.head_commit.message, 'Release ')) || (github.event_name == 'workflow_dispatch' && inputs.appliance && !inputs.extended)
     permissions:
