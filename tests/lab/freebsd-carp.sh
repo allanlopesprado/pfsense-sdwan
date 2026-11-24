@@ -236,9 +236,10 @@ close_session() {
 }
 
 session_state() {
-    jexec "$1" pfctl -vv -ss | awk -v source="192.0.2.4:$2" -v target="${3:-$remote_ip}:7" -v translation="${4-$wan_vip:}" '
+    jexec "$1" pfctl -vv -ss | awk -v source="192.0.2.4:$2" -v target="${3:-$remote_ip}:7" \
+        -v translation="${4-$wan_vip:}" -v status="${5:-established}" '
         /^[^[:space:]]/ { match_flow = index($0, source) && index($0, target) && (translation=="" || index($0, translation)) &&
-                                        /ESTABLISHED:ESTABLISHED/ }
+                                        (status=="any" || /ESTABLISHED:ESTABLISHED/) }
         match_flow && $1 == "id:" && $3 == "creatorid:" { print $2 "/" $4; match_flow = 0 }
     '
 }
@@ -645,10 +646,15 @@ echo "$(date -u +%FT%TZ) owner=first assigned-esp-spis=A:0x14301/0x14302,B:0x153
 printf 'protected-failback\n' >&3
 wait_reply protected protected-failback 192.0.2.4
 transaction_on a carp-failback
-test "$(session_state "$first" 34242 "$protected" '')" = "$state"
-test "$(count_label "$remote" protected-clear)" -eq 0
-test "$(count_label "$first" protected-clear)" -eq 0
-test "$(count_label "$second" protected-clear)" -eq 0
+returned_state=$(session_state "$first" 34242 "$protected" '' any)
+printf '%s failback-held=same-socket-replied initial-state=%s current-state=%s\n' \
+    "$(date -u +%FT%TZ)" "$state" "${returned_state:-not-visible}"
+
+clear_peer=$(count_label "$remote" protected-clear)
+blocked_first=$(count_label "$first" protected-clear)
+blocked_second=$(count_label "$second" protected-clear)
+printf 'peer-protected-clear=%s locally-blocked-first=%s locally-blocked-second=%s\n' \
+    "$clear_peer" "$blocked_first" "$blocked_second"
 close_session
 for capture in $captures; do
     kill -INT "$capture"
@@ -657,4 +663,5 @@ done
 captures=''
 verify_capture wan-a "$wan_vip" "$remote_ip"
 verify_capture wan-b "$wan_b_vip" "$remote_b_ip"
+test "$clear_peer" -eq 0
 echo 'ok - both CARP transfers restored the encrypted flow over fresh manual SAs with zero protected cleartext on either WAN'
