@@ -1,6 +1,8 @@
 #!/bin/sh
 # Isolated IPv4 CARP with two WANs, NAT, pfsync and manual ESP SAs.
+set +x
 set -eu
+export LC_ALL=C
 
 if [ "$(uname -s)" != FreeBSD ] || [ "$(id -u)" != 0 ]; then
     echo 'Run this CARP lab as root in a disposable FreeBSD VM with VNET.' >&2
@@ -434,13 +436,42 @@ protected_transaction() (
     test "$reply" = "${4:-192.0.2.4} $1"
 )
 
+replace_host_route() (
+    jexec "$1" route -n delete -host "$2"
+    jexec "$1" route -n add -host "$2" "$3"
+    jexec "$1" route -n get "$2" | awk -v next_hop="$3" '
+        $1=="gateway:" && $2==next_hop {ok=1} END {exit !ok}'
+)
+
 select_path() (
-    jexec "$first" route -n change -host "$protected" "$1"
-    jexec "$second" route -n change -host "$protected" "$1"
-    jexec "$remote" route -n change -host 192.0.2.4 "$2"
+    replace_host_route "$first" "$protected" "$1"
+    replace_host_route "$second" "$protected" "$1"
+    replace_host_route "$remote" 192.0.2.4 "$2"
+)
+
+wire_packets() (
+    file="$work/wan-$1.pcap"
+    if [ ! -s "$file" ]; then
+        echo 0
+        exit 0
+    fi
+    case "$1" in
+        a) cluster=$wan_vip peer=$remote_ip ;;
+        b) cluster=$wan_b_vip peer=$remote_b_ip ;;
+        *) exit 1 ;;
+    esac
+    case "$2" in
+        in) source=$cluster destination=$peer ;;
+        out) source=$peer destination=$cluster ;;
+        *) exit 1 ;;
+    esac
+    packets=$(tcpdump -nr "$file" "ip proto 50 and src $source and dst $destination" 2>/dev/null)
+    printf '%s\n' "$packets" | awk 'NF {count++} END {print count+0}'
 )
 
 transaction_on() (
+    wire_in=$(wire_packets "$1" in)
+    wire_out=$(wire_packets "$1" out)
     inbound=$(count_label "$remote" "esp-$1-in")
     outbound=$(count_label "$remote" "esp-$1-out")
     if ! protected_transaction "$2" "${3:-$client}" "${4:-$protected}" "${5:-192.0.2.4}"; then
@@ -449,14 +480,32 @@ transaction_on() (
     fi
     current_inbound=$(count_label "$remote" "esp-$1-in")
     current_outbound=$(count_label "$remote" "esp-$1-out")
-    printf '%s transaction=%s tunnel=%s esp-in-delta=%s esp-out-delta=%s\n' \
-        "$(date -u +%FT%TZ)" "$2" "$1" "$((current_inbound-inbound))" "$((current_outbound-outbound))"
-    test "$current_inbound" -gt "$inbound"
-    test "$current_outbound" -gt "$outbound"
+    for attempt in 1 2 3; do
+        current_wire_in=$(wire_packets "$1" in)
+        current_wire_out=$(wire_packets "$1" out)
+        if [ "$current_wire_in" -gt "$wire_in" ] && [ "$current_wire_out" -gt "$wire_out" ]; then break; fi
+        sleep 1
+    done
+    printf '%s transaction=%s tunnel=%s esp-in-delta=%s esp-out-delta=%s pf-in-delta=%s pf-out-delta=%s\n' \
+        "$(date -u +%FT%TZ)" "$2" "$1" "$((current_wire_in-wire_in))" "$((current_wire_out-wire_out))" \
+        "$((current_inbound-inbound))" "$((current_outbound-outbound))"
+    test "$current_wire_in" -gt "$wire_in"
+    test "$current_wire_out" -gt "$wire_out"
 )
 
+observe_held() {
+    printf '%s-switch\n' "$1" >&3
+    if wait_reply "$1" "$1-switch" 192.0.2.4; then
+        outcome=same-socket-replied
+    else
+        outcome=same-socket-no-reply
+    fi
+    printf '%s scenario=%s held=%s\n' "$(date -u +%FT%TZ)" "$1" "$outcome"
+    close_session
+}
+
 start_capture() {
-    jexec "$remote" tcpdump -pUn -s 128 -i "$1" -w "$work/$2.pcap" \
+    jexec "$remote" tcpdump --immediate-mode -pUn -s 128 -i "$1" -w "$work/$2.pcap" \
         "ip proto 50 or host $protected or host $backup" >"$work/$2.capture.log" 2>&1 &
     call=$!
     captures="$captures $call"
@@ -487,6 +536,7 @@ install_pair "$first" 0x14101 0x14102
 install_pair "$first" 0x15101 0x15102 "$wan_b_vip" "$remote_b_ip" "$reqid_b"
 echo "$(date -u +%FT%TZ) owner=first assigned-esp-spis=A:0x14101/0x14102,B:0x15101/0x15102"
 transaction_on a baseline
+open_session wan-held 34243 "$protected" 192.0.2.4
 
 # Reproduce upstream reachability loss on A without demoting the CARP node.
 {
@@ -500,6 +550,7 @@ if protected_transaction wan-a-prefers-failed; then echo 'WAN A outage did not i
 probe "$first" "$remote_b_ip"
 select_path "$inner_peer_b" "$inner_cluster_b"
 transaction_on b wan-a-failed
+observe_held wan-held
 wait_roles MASTER BACKUP
 load_peer_rules "$peer_rules"
 select_path "$inner_peer" "$inner_cluster"
@@ -507,16 +558,19 @@ probe "$first" "$remote_ip"
 probe "$first" "$inner_peer"
 transaction_on a wan-a-restored
 
+open_session tunnel-held 34244 "$protected" 192.0.2.4
 echo "$(date -u +%FT%TZ) fault=tunnel-a-no-sa"
 retire_pair "$first" 0x14101 0x14102
 probe "$first" "$remote_ip"
 if protected_transaction tunnel-a-prefers-failed; then echo 'ERP replied with A SA removed' >&2; exit 1; fi
 select_path "$inner_peer_b" "$inner_cluster_b"
 transaction_on b tunnel-a-failed
+observe_held tunnel-held
 install_pair "$first" 0x14103 0x14104
 select_path "$inner_peer" "$inner_cluster"
 transaction_on a tunnel-a-restored
 
+open_session erp-held 34245 "$protected" 192.0.2.4
 {
     printf 'block drop in quick on %s inet proto tcp to %s port 7 label "erp-fault"\n' "$remote_vti" "$protected"
     cat "$peer_rules"
@@ -530,6 +584,7 @@ test "$(count_label "$remote" erp-fault)" -gt 0
 select_path "$inner_peer_b" "$inner_cluster_b"
 transaction_on b erp-failed
 transaction_on a backup-control "$fresh" "$backup" 192.0.2.5
+observe_held erp-held
 wait_roles MASTER BACKUP
 load_peer_rules "$peer_rules"
 select_path "$inner_peer" "$inner_cluster"
@@ -554,16 +609,16 @@ select_path "$inner_peer_b" "$inner_cluster_b"
 if protected_transaction blackout-b; then echo 'ERP replied without either SA' >&2; exit 1; fi
 select_path "$inner_peer" "$inner_cluster"
 printf 'protected-during-blackout\n' >&3
-if grep -Fqx '192.0.2.4 protected-during-blackout' "$work/protected.out"; then
-    echo 'The already open connection replied with both ESP paths withdrawn' >&2
-    exit 1
-fi
 
 echo "$(date -u +%FT%TZ) fault=carp-first-to-second synced-state=$state"
 jexec "$first" ifconfig "$first_sync" down
 disable_preferred_data
 if protected_transaction ipsec-no-sa; then
     echo 'A protected request succeeded before the new tunnel was ready.' >&2
+    exit 1
+fi
+if grep -Fqx '192.0.2.4 protected-during-blackout' "$work/protected.out"; then
+    echo 'The already open connection replied with both ESP paths withdrawn' >&2
     exit 1
 fi
 echo 'ok - the standby held the PF state and new protected requests failed before tunnel restoration'
