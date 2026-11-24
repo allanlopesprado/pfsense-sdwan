@@ -50,7 +50,7 @@ function update_status($message) {
     for status, action, services, writes in [(0, "restart", [legacy, current[0], old_status, current[2], legacy], 2),
                                            (1, "start", current, 0)]:
         messages = {
-            0: f"SD-WAN observer {action} requested. Check Services > SD-WAN > Status for a current observation.",
+            0: f"SD-WAN observer {action} requested. Check Status > SD-WAN for a current observation.",
             1: f"SD-WAN observer {action} failed (exit 1). Package registration continues. "
                "Check Status > Services and System Logs.",
             127: f"SD-WAN observer {action} failed (exit 127). Package registration continues. "
