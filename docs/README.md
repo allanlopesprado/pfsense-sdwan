@@ -9,6 +9,7 @@
 | Assess interactions with IDS, IPS, DNS filtering, or routing packages | [Package compatibility](PACKAGE-COMPATIBILITY.md) |
 | Configure lab forwarding or review IPsec, NAT, and HA | [Forwarding and routing integration](INTEGRATION.md) |
 | Test a FortiGate peer | [FortiGate interoperability](FORTIOS.md) |
+| Prepare a hub and branch VTI in a lab | [Paired VTI staging and rollback](PAIRED-VTI-LAB.md) |
 
 ## Validate and troubleshoot
 
