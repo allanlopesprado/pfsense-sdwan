@@ -101,7 +101,7 @@ if ($policy !== null):
 		} ?>
 	</div>
 	<?php if ($result !== null): ?>
-	<div class="table-responsive" tabindex="0" role="region" aria-label="<?=gettext('Member evaluation')?>">
+	<div class="table-responsive" style="position: relative;" tabindex="0" role="region" aria-label="<?=gettext('Member evaluation')?>">
 		<table class="table table-striped table-hover table-condensed sortable-theme-bootstrap" data-sortable>
 			<thead><tr>
 				<th scope="col"><?=gettext('Member / Gateway')?></th>

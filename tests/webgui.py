@@ -186,6 +186,18 @@ def screenshots(directory, www, pages):
                     elif name in ("members", "forwarding-bindings"):
                         html = html.replace("</body>", row_actions_probe + native_footer + "</body>")
                         proof = b'data-sdwan-row-actions="pass"'
+                    elif name == "diagnostics":
+                        responsive_probe = """
+                            <script>
+                            const root = document.documentElement;
+                            const table = document.querySelector('[aria-label="Member evaluation"]');
+                            const pageFits = root.scrollWidth <= root.clientWidth;
+                            const localScroll = window.innerWidth >= 768 || table.scrollWidth > table.clientWidth;
+                            document.body.dataset.sdwanResponsive = pageFits && localScroll ? 'pass' : 'fail';
+                            </script>
+                        """
+                        html = html.replace("</body>", responsive_probe + "</body>")
+                        proof = b'data-sdwan-responsive="pass"'
                     elif name in ("updates", "updates-initial"):
                         html = html.replace("</body>", focus_probe + native_footer + "</body>")
                         proof = b'data-sdwan-focus="pass"'
