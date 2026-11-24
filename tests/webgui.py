@@ -105,7 +105,7 @@ def screenshots(directory, www, pages):
                             editBox.width === removeBox.width && editBox.height === removeBox.height;
                         const nativeSize = editStyle.fontSize === '18px' && removeStyle.fontSize === '18px';
                         const icon = removeStyle.content.includes(String.fromCodePoint(0xf2ed)) &&
-                            removeStyle.fontWeight === editStyle.fontWeight;
+                            removeStyle.fontWeight === editStyle.fontWeight && removeStyle.color === editStyle.color;
                         const initialFocus = document.activeElement !== remove && getComputedStyle(remove).outlineStyle === 'none';
                         remove.focus({preventScroll: true});
                         const focus = getComputedStyle(remove);

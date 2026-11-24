@@ -173,6 +173,9 @@ function sdwan_ui_row_actions(): void {
 	}
 	.sdwan-row-action.fa-solid { font-weight: 900; }
 	.sdwan-row-action.btn:hover, .sdwan-row-action.btn:focus { text-decoration: none; }
+	/* The native dark theme sets its link color on anchors only. */
+	html:has(link[href^="/css/pfSense-dark"]) .sdwan-row-action.btn { color: #009688; }
+	html:has(link[href^="/css/pfSense-dark"]) .sdwan-row-action.btn:hover { color: #00796b; }
 	.sdwan-row-action:focus:not(:focus-visible) { outline: none; }
 	.sdwan-row-action:focus-visible { outline: 2px solid currentColor; outline-offset: 0; }
 	</style>
